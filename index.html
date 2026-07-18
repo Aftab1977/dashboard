@@ -1,0 +1,1434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control Room — Project Timeline Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#0D1316;
+    --panel:#141B1F;
+    --panel-raised:#1B2328;
+    --panel-hi:#212A2F;
+    --line:#2A353B;
+    --line-soft:#1E2830;
+    --paper:#EDE8DC;
+    --paper-dim:#8F988F;
+    --paper-faint:#5B6560;
+    --green:#33A85C;
+    --green-soft:#132A1C;
+    --green-glow:rgba(51,168,92,.38);
+    --red:#DD5147;
+    --red-soft:#331A17;
+    --red-glow:rgba(221,81,71,.4);
+    --amber:#E0AC3F;
+    --amber-soft:#2E2410;
+    --f-display:'Barlow Condensed',sans-serif;
+    --f-body:'Space Grotesk',sans-serif;
+    --f-mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:var(--f-body);
+    min-height:100vh;
+    background-image:
+      radial-gradient(circle at 15% 0%, rgba(51,168,92,.05), transparent 40%),
+      radial-gradient(circle at 90% 10%, rgba(221,81,71,.05), transparent 35%);
+  }
+  ::selection{background:var(--amber);color:var(--ink);}
+  a{color:inherit;}
+  button{font-family:var(--f-body);cursor:pointer;}
+  input,select,textarea{font-family:var(--f-body);}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:.001ms !important;transition-duration:.001ms !important;}
+  }
+
+  /* ---------- layout shell ---------- */
+  #app{display:flex;min-height:100vh;}
+  .navrail{
+    width:76px;flex:0 0 76px;background:var(--panel);
+    border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;
+    padding:18px 0;gap:6px;position:sticky;top:0;height:100vh;
+  }
+  .navrail .brand{
+    width:38px;height:38px;border-radius:8px;
+    background:conic-gradient(from 220deg, var(--green), var(--amber), var(--red), var(--green));
+    margin-bottom:22px;position:relative;
+  }
+  .brand::after{content:"";position:absolute;inset:5px;background:var(--panel);border-radius:5px;}
+  .navbtn{
+    width:52px;height:52px;border-radius:10px;border:1px solid transparent;
+    background:transparent;color:var(--paper-dim);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:4px;font-size:9px;letter-spacing:.06em;
+    text-transform:uppercase;font-family:var(--f-body);font-weight:600;transition:all .15s ease;
+  }
+  .navbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;}
+  .navbtn:hover{color:var(--paper);background:var(--panel-raised);}
+  .navbtn.active{color:var(--ink);background:var(--paper);}
+  .navrail .spacer{flex:1;}
+  .navbtn.logout{color:var(--red);}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .topbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 28px;border-bottom:1px solid var(--line);
+    background:rgba(20,27,31,.6);backdrop-filter:blur(6px);
+    position:sticky;top:0;z-index:5;
+  }
+  .crumb{font-family:var(--f-mono);font-size:12px;color:var(--paper-dim);letter-spacing:.03em;}
+  .crumb b{color:var(--paper);font-weight:600;}
+  .who{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--paper-dim);}
+  .who .avatar{
+    width:28px;height:28px;border-radius:50%;background:var(--panel-hi);
+    display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);
+    font-size:11px;color:var(--paper);border:1px solid var(--line);
+  }
+  .content{padding:28px;max-width:1240px;width:100%;margin:0 auto;flex:1;}
+
+  /* ---------- typography ---------- */
+  h1,h2,h3{font-family:var(--f-display);font-weight:600;margin:0;letter-spacing:.01em;}
+  .eyebrow{
+    font-family:var(--f-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--paper-faint);margin:0 0 6px;
+  }
+  .page-title{font-size:38px;line-height:1.05;}
+  .section-title{font-size:22px;margin-bottom:14px;}
+  .muted{color:var(--paper-dim);}
+  .mono{font-family:var(--f-mono);}
+
+  /* ---------- buttons ---------- */
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel-raised);color:var(--paper);
+    font-size:13px;font-weight:600;transition:all .15s ease;
+  }
+  .btn:hover{background:var(--panel-hi);border-color:var(--paper-faint);}
+  .btn-primary{background:var(--paper);color:var(--ink);border-color:var(--paper);}
+  .btn-primary:hover{background:#fff;}
+  .btn-danger{background:var(--red-soft);color:var(--red);border-color:rgba(221,81,71,.35);}
+  .btn-danger:hover{background:rgba(221,81,71,.22);}
+  .btn-ghost{background:transparent;border-color:transparent;color:var(--paper-dim);}
+  .btn-ghost:hover{color:var(--paper);background:var(--panel-raised);}
+  .btn-sm{padding:6px 11px;font-size:12px;border-radius:6px;}
+  .btn:disabled{opacity:.4;cursor:not-allowed;}
+
+  /* ---------- cards & grids ---------- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;}
+  .grid{display:grid;gap:16px;}
+  .g2{grid-template-columns:1fr 1fr;}
+  .g3{grid-template-columns:repeat(3,1fr);}
+  .g4{grid-template-columns:repeat(4,1fr);}
+  @media (max-width:860px){.g2,.g3,.g4{grid-template-columns:1fr;}}
+
+  /* ---------- status pills / badges ---------- */
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;
+    font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  }
+  .pill-green{background:var(--green-soft);color:var(--green);}
+  .pill-red{background:var(--red-soft);color:var(--red);}
+  .pill-amber{background:var(--amber-soft);color:var(--amber);}
+  .dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+  .dot.pulse{animation:pulse 1.8s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+  /* ---------- portfolio cards ---------- */
+  .proj-card{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;
+    cursor:pointer;transition:all .15s ease;position:relative;overflow:hidden;
+  }
+  .proj-card:hover{border-color:var(--paper-faint);transform:translateY(-2px);}
+  .proj-card::before{
+    content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+  }
+  .proj-card.status-green::before{background:var(--green);box-shadow:0 0 14px var(--green-glow);}
+  .proj-card.status-red::before{background:var(--red);box-shadow:0 0 14px var(--red-glow);}
+  .proj-card .pname{font-family:var(--f-display);font-size:24px;margin:2px 0 12px;}
+  .proj-meta{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:12px;color:var(--paper-dim);margin-top:14px;}
+  .bar-track{height:6px;background:var(--line-soft);border-radius:99px;overflow:hidden;margin-top:12px;}
+  .bar-fill{height:100%;background:var(--green);border-radius:99px;}
+  .bar-fill.red{background:var(--red);}
+
+  /* ---------- hero ---------- */
+  .hero{
+    border-radius:16px;border:1px solid var(--line);background:var(--panel);
+    padding:26px 28px;display:flex;justify-content:space-between;align-items:flex-start;gap:24px;
+    position:relative;overflow:hidden;flex-wrap:wrap;
+  }
+  .hero.status-red{border-color:rgba(221,81,71,.4);box-shadow:0 0 0 1px rgba(221,81,71,.12) inset, 0 18px 50px -24px var(--red-glow);}
+  .hero.status-green{border-color:rgba(51,168,92,.35);box-shadow:0 0 0 1px rgba(51,168,92,.1) inset, 0 18px 50px -24px var(--green-glow);}
+  .hero-metrics{display:flex;gap:36px;flex-wrap:wrap;}
+  .metric .eyebrow{margin-bottom:8px;}
+  .metric .val{font-family:var(--f-mono);font-size:34px;font-weight:600;line-height:1;}
+  .metric .val.red{color:var(--red);}
+  .metric .val.green{color:var(--green);}
+  .metric .sub{font-size:11px;color:var(--paper-faint);margin-top:6px;font-family:var(--f-mono);}
+
+  /* ---------- handoff rail (signature element) ---------- */
+  .rail-wrap{overflow-x:auto;padding-bottom:6px;}
+  .chain-row{display:flex;align-items:center;gap:0;margin:22px 0;min-width:max-content;}
+  .chain-label{
+    width:150px;flex:0 0 150px;font-family:var(--f-mono);font-size:11px;color:var(--paper-dim);
+    padding-right:14px;text-align:right;line-height:1.4;
+  }
+  .chain-label .tag{display:block;color:var(--paper-faint);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-top:2px;}
+  .chain-track{display:flex;align-items:center;}
+  .rail-node{
+    position:relative;border-radius:9px;border:1.5px solid var(--line);
+    background:var(--panel-raised);padding:10px 14px;min-width:96px;
+    display:flex;flex-direction:column;gap:3px;
+  }
+  .rail-node .nt{font-size:12px;font-weight:600;color:var(--paper);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;}
+  .rail-node .nd{font-family:var(--f-mono);font-size:10px;color:var(--paper-dim);}
+  .rail-node.green{border-color:var(--green);box-shadow:0 0 0 1px rgba(51,168,92,.15) inset;}
+  .rail-node.green .nd{color:var(--green);}
+  .rail-node.red{border-color:var(--red);box-shadow:0 0 12px -2px var(--red-glow);}
+  .rail-node.red .nd{color:var(--red);}
+  .rail-node.amber{border-color:var(--amber);}
+  .rail-node.amber .nd{color:var(--amber);}
+  .rail-connector{width:26px;height:2px;background:var(--line);position:relative;flex:0 0 26px;}
+  .rail-connector::after{
+    content:"";position:absolute;right:-1px;top:50%;transform:translateY(-50%);
+    border:4px solid transparent;border-left-color:var(--line);
+  }
+  .chain-total{
+    flex:0 0 auto;margin-left:14px;font-family:var(--f-mono);font-size:11px;color:var(--paper-faint);
+    padding-left:14px;border-left:1px solid var(--line-soft);white-space:nowrap;
+  }
+  .chain-total b{color:var(--paper);font-size:13px;}
+  .chain-row.critical .chain-label{color:var(--paper);}
+  .chain-row.critical .chain-label .tag{color:var(--amber);}
+  .chain-row.critical .chain-total b{color:var(--amber);}
+
+  /* ---------- donut / gauges ---------- */
+  .donut-big{
+    width:168px;height:168px;border-radius:50%;position:relative;flex:0 0 168px;
+  }
+  .donut-big .hole{
+    position:absolute;inset:16px;background:var(--panel);border-radius:50%;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+  }
+  .donut-big .hole .pct{font-family:var(--f-mono);font-size:28px;font-weight:700;}
+  .donut-big .hole .lbl{font-size:10px;color:var(--paper-faint);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;}
+  .gauge-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:14px;flex:1;}
+  .gauge{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border-radius:10px;background:var(--panel-raised);border:1px solid var(--line-soft);}
+  .gauge-ring{width:64px;height:64px;border-radius:50%;position:relative;}
+  .gauge-ring .hole{position:absolute;inset:8px;background:var(--panel-raised);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:13px;font-weight:600;}
+  .gauge .gname{font-size:12px;font-weight:600;text-align:center;}
+  .gauge .gfrac{font-family:var(--f-mono);font-size:10px;color:var(--paper-dim);}
+
+  /* ---------- table ---------- */
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{
+    text-align:left;font-family:var(--f-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--paper-faint);padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;
+  }
+  tbody td{padding:12px;border-bottom:1px solid var(--line-soft);vertical-align:middle;}
+  tbody tr:hover{background:var(--panel-raised);}
+  .task-title{font-weight:600;}
+  .task-desc{color:var(--paper-faint);font-size:11px;margin-top:2px;max-width:280px;}
+  .date-pair{font-family:var(--f-mono);font-size:11px;}
+  .date-pair .orig{color:var(--paper-dim);}
+  .date-pair .ext{color:var(--red);text-decoration:none;}
+  .date-pair .strike{text-decoration:line-through;color:var(--paper-faint);}
+
+  /* ---------- forms & modal ---------- */
+  .modal-backdrop{
+    position:fixed;inset:0;background:rgba(6,9,10,.72);backdrop-filter:blur(3px);
+    display:flex;align-items:center;justify-content:center;z-index:50;padding:20px;
+  }
+  .modal{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    width:100%;max-width:480px;max-height:88vh;overflow-y:auto;padding:24px;
+  }
+  .modal h3{font-size:22px;margin-bottom:4px;}
+  .modal .modal-sub{color:var(--paper-dim);font-size:12px;margin-bottom:18px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-family:var(--f-mono);font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--paper-faint);margin-bottom:6px;}
+  .field input,.field select,.field textarea{
+    width:100%;background:var(--ink);border:1px solid var(--line);border-radius:7px;
+    padding:9px 11px;color:var(--paper);font-size:13px;
+  }
+  .field textarea{resize:vertical;min-height:64px;font-family:var(--f-body);}
+  .field input:disabled{opacity:.5;}
+  .field-row{display:flex;gap:10px;}
+  .field-row .field{flex:1;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;}
+  .hint{font-size:11px;color:var(--paper-faint);margin-top:4px;}
+  .credential-box{
+    background:var(--ink);border:1px dashed var(--paper-faint);border-radius:8px;padding:14px;
+    font-family:var(--f-mono);font-size:13px;margin-top:6px;display:flex;justify-content:space-between;align-items:center;
+  }
+
+  /* ---------- login ---------- */
+  .login-shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;width:100%;}
+  .login-card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:34px 30px;}
+  .login-mark{
+    width:44px;height:44px;border-radius:10px;
+    background:conic-gradient(from 220deg, var(--green), var(--amber), var(--red), var(--green));
+    margin-bottom:18px;position:relative;
+  }
+  .login-mark::after{content:"";position:absolute;inset:6px;background:var(--panel);border-radius:6px;}
+  .login-title{font-family:var(--f-display);font-size:30px;margin-bottom:2px;}
+  .login-error{color:var(--red);font-size:12px;margin-top:8px;font-family:var(--f-mono);min-height:14px;}
+  .demo-creds{margin-top:20px;padding-top:16px;border-top:1px solid var(--line-soft);font-size:11px;color:var(--paper-faint);font-family:var(--f-mono);line-height:1.7;}
+  .demo-creds b{color:var(--paper-dim);}
+
+  /* ---------- admin tabs ---------- */
+  .tabs{display:flex;gap:6px;margin-bottom:20px;border-bottom:1px solid var(--line);}
+  .tab{padding:9px 4px;margin-right:18px;background:none;border:none;color:var(--paper-dim);font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;}
+  .tab.active{color:var(--paper);border-bottom-color:var(--amber);}
+  .empty-state{padding:40px 20px;text-align:center;color:var(--paper-faint);}
+  .empty-state .et{font-family:var(--f-display);font-size:20px;color:var(--paper-dim);margin-bottom:6px;}
+
+  .filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
+  .filters select{background:var(--panel-raised);border:1px solid var(--line);color:var(--paper);border-radius:7px;padding:8px 10px;font-size:12px;font-family:var(--f-body);}
+
+  .stat-strip{display:flex;gap:14px;margin-bottom:22px;flex-wrap:wrap;}
+  .stat-chip{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;flex:1;min-width:130px;}
+  .stat-chip .n{font-family:var(--f-mono);font-size:24px;font-weight:700;}
+  .stat-chip .l{font-size:10px;color:var(--paper-faint);text-transform:uppercase;letter-spacing:.07em;margin-top:2px;}
+
+  .lb-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft);}
+  .lb-row:last-child{border-bottom:none;}
+  .lb-name{flex:1;font-size:13px;font-weight:600;}
+  .lb-bar{flex:2;height:5px;background:var(--line-soft);border-radius:99px;overflow:hidden;}
+  .lb-bar span{display:block;height:100%;background:var(--red);}
+  .lb-count{font-family:var(--f-mono);font-size:11px;color:var(--paper-dim);width:60px;text-align:right;}
+
+  .icon-btn{background:none;border:none;color:var(--paper-faint);padding:4px;border-radius:5px;}
+  .icon-btn:hover{color:var(--paper);background:var(--panel-hi);}
+  .row-actions{display:flex;gap:6px;justify-content:flex-end;}
+  .userchip{display:flex;align-items:center;gap:8px;}
+  .userchip .initials{width:26px;height:26px;border-radius:50%;background:var(--panel-hi);display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:10px;flex:0 0 26px;}
+  .banner{
+    display:flex;align-items:center;gap:10px;background:var(--amber-soft);border:1px solid rgba(224,172,63,.3);
+    color:var(--amber);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:18px;
+  }
+  .footnote{margin-top:36px;padding-top:16px;border-top:1px solid var(--line-soft);color:var(--paper-faint);font-size:11px;font-family:var(--f-mono);}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modalRoot"></div>
+
+<script>
+/* ============================== STATE ============================== */
+/* ============================== BACKEND CONFIG ============================== *
+ * To make this app share real data between everyone who visits it once it's
+ * hosted online, create a free Supabase project and paste your project URL and
+ * anon public key below. Full steps are in the setup guide. Leave both blank
+ * to keep running in local demo mode (data stays private to each browser).
+ * ============================================================================ */
+const SUPABASE_URL = 'https://gjnxgdzpfdkbptzimbgf.supabase.co/rest/v1/';       // e.g. 'https://abcdefghijk.supabase.co'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqbnhnZHpwZmRrYnB0emltYmdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzOTI2MDQsImV4cCI6MjA5OTk2ODYwNH0.IYOuQARn6MiY9sc6e9w2-VGwuajWTerf6Ps48gwMBqM';  // your project's anon public key
+/* ============================================================================ */
+
+const STORAGE_KEY = 'controlroom_state_v1';
+const SESSION_KEY = 'controlroom_session_v1';
+
+const supaClient = (SUPABASE_URL && SUPABASE_ANON_KEY && typeof window.supabase !== 'undefined')
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+const HAS_CLAUDE_STORAGE = typeof window.storage !== 'undefined';
+
+// storageAdapter: the SHARED app data (teams/users/projects/tasks) — everyone who
+// visits the hosted site should see the same thing here, so Supabase takes priority.
+const storageAdapter = supaClient ? {
+  get: async (key) => {
+    const { data, error } = await supaClient.from('app_storage').select('value').eq('key', key).maybeSingle();
+    if(error) throw error;
+    return data ? { key, value: data.value } : null;
+  },
+  set: async (key, value) => {
+    const { error } = await supaClient.from('app_storage').upsert({ key, value, updated_at: new Date().toISOString() });
+    if(error) throw error;
+    return { key, value };
+  }
+} : (HAS_CLAUDE_STORAGE ? {
+  get: (key) => window.storage.get(key, false),
+  set: (key, value) => window.storage.set(key, value, false),
+} : null);
+
+// sessionAdapter: which user THIS browser is currently signed in as — this should
+// stay local to the device, so it prefers localStorage once actually hosted online.
+function safeLocalGet(key){ try{ return localStorage.getItem(key); }catch(e){ return null; } }
+function safeLocalSet(key,val){ try{ localStorage.setItem(key,val); return true; }catch(e){ return false; } }
+const sessionAdapter = supaClient ? {
+  get: async (key) => { const v = safeLocalGet(key); return v ? { key, value: v } : null; },
+  set: async (key, value) => { safeLocalSet(key, value); return { key, value }; },
+} : (HAS_CLAUDE_STORAGE ? {
+  get: (key) => window.storage.get(key, false),
+  set: (key, value) => window.storage.set(key, value, false),
+} : null);
+
+const HAS_STORAGE = !!storageAdapter;
+const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'Claude preview storage' : 'none — demo mode only';
+
+let state = null;
+let session = { userId: null };
+let ui = { view:'login', projectId:null, adminTab:'users', reportFilters:{project:'',team:'',user:'',status:''}, loginError:'' };
+
+function runOnClickAndEnter(formId, btnId, handler){
+  const form = document.getElementById(formId);
+  const btn = document.getElementById(btnId);
+  const run = ()=>{ try{ handler(); }catch(err){ console.error(err); } };
+  if(btn) btn.addEventListener('click', run);
+  if(form){
+    form.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' && e.target.tagName!=='TEXTAREA'){ e.preventDefault(); run(); }
+    });
+    form.addEventListener('submit', (e)=>{ e.preventDefault(); });
+  }
+}
+
+function uid(prefix){ return prefix + '_' + Math.random().toString(36).slice(2,9); }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function addDays(iso, n){ const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00')) / 86400000); }
+function fmtDate(iso){ if(!iso) return '—'; const d = new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'2-digit',year:'numeric'}); }
+function initials(name){ return name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
+
+function seedState(){
+  const t0 = addDays(todayISO(), -12);
+  const teams = [
+    {id:'team_design', name:'Design'},
+    {id:'team_backend', name:'Backend'},
+    {id:'team_qa', name:'QA'},
+  ];
+  const users = [
+    {id:'admin', name:'Admin', username:'admin', password:'admin123', role:'admin', teamId:null},
+    {id:'u_priya', name:'Priya Nair', username:'priya', password:'priya123', role:'member', teamId:'team_design'},
+    {id:'u_arjun', name:'Arjun Rao', username:'arjun', password:'arjun123', role:'member', teamId:'team_backend'},
+    {id:'u_meera', name:'Meera Iyer', username:'meera', password:'meera123', role:'member', teamId:'team_qa'},
+  ];
+  const p1 = 'proj_portal';
+  const p2 = 'proj_vendor';
+  const projects = [
+    {id:p1, name:'Client Portal Revamp', startDate:t0, createdAt:t0},
+    {id:p2, name:'Vendor Onboarding Flow', startDate:addDays(todayISO(),-5), createdAt:addDays(todayISO(),-5)},
+  ];
+
+  const t1s = t0, t1e = addDays(t0,2);
+  const t2s = t0, t2e = addDays(t0,3);
+  const t3s = addDays(t0,1), t3eOrig = addDays(t0,6), t3eNow = addDays(t0,8);
+  const t4s = t0, t4e = addDays(t0,3);
+  const t5s = addDays(t0,3), t5e = addDays(t0,5);
+
+  const tasks = [
+    {id:'t1', projectId:p1, title:'Wireframes', description:'Low-fi wireframes for the four core portal screens.', reason:'Two working days covers discovery plus one revision pass.', assignedType:'team', assignedId:'team_design', predecessorId:null, startDate:t1s, endDate:t1e, originalEndDate:t1e, extended:false, status:'closed', closedDate:addDays(t1e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t2', projectId:p1, title:'Content Audit', description:'Audit existing marketing copy and flag gaps for the new portal.', reason:'Three days to review all existing pages and interview stakeholders.', assignedType:'team', assignedId:'team_qa', predecessorId:null, startDate:t2s, endDate:t2e, originalEndDate:t2e, extended:false, status:'closed', closedDate:addDays(t2e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t3', projectId:p1, title:'Design System Build', description:'Component library covering buttons, forms, cards and navigation.', reason:'Five days needed to cover every shared component before build starts.', assignedType:'team', assignedId:'team_design', predecessorId:null, startDate:t3s, endDate:t3eNow, originalEndDate:t3eOrig, extended:true, status:'open', closedDate:null, datesLocked:true, extensionHistory:[{date:addDays(t3eOrig,-1), newEndDate:t3eNow, reason:'Token review with brand ran long; needed two extra days.'}]},
+    {id:'t4', projectId:p1, title:'API Development', description:'Build the account, billing and document endpoints.', reason:'Three days for the three endpoint groups.', assignedType:'team', assignedId:'team_backend', predecessorId:null, startDate:t4s, endDate:t4e, originalEndDate:t4e, extended:false, status:'closed', closedDate:addDays(t4e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t5', projectId:p1, title:'Integration Testing', description:'End-to-end tests against the new API endpoints.', reason:'Two days once the API handoff lands.', assignedType:'team', assignedId:'team_qa', predecessorId:'t4', startDate:t5s, endDate:t5e, originalEndDate:t5e, extended:false, status:'closed', closedDate:addDays(t5e,-1), datesLocked:true, extensionHistory:[]},
+
+    {id:'t6', projectId:p2, title:'Vendor Docs Checklist', description:'Collect W-9s, insurance certs and banking details.', reason:'Two days to chase paperwork from three vendors.', assignedType:'user', assignedId:'u_meera', predecessorId:null, startDate:addDays(todayISO(),-5), endDate:addDays(todayISO(),-3), originalEndDate:addDays(todayISO(),-3), extended:false, status:'closed', closedDate:addDays(todayISO(),-4), datesLocked:true, extensionHistory:[]},
+    {id:'t7', projectId:p2, title:'Portal Access Setup', description:'Provision vendor logins to the procurement portal.', reason:'', assignedType:'user', assignedId:'u_arjun', predecessorId:'t6', startDate:addDays(todayISO(),-3), endDate:addDays(todayISO(),2), originalEndDate:addDays(todayISO(),2), extended:false, status:'open', closedDate:null, datesLocked:true, extensionHistory:[]},
+  ];
+
+  return { teams, users, projects, tasks };
+}
+
+function withTimeout(promise, ms){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=> setTimeout(()=>reject(new Error('storage timeout')), ms))
+  ]);
+}
+
+function isValidState(s){
+  return s && Array.isArray(s.users) && Array.isArray(s.teams) && Array.isArray(s.projects) && Array.isArray(s.tasks) && s.users.length > 0;
+}
+
+// Synchronous, instant setup so the UI never has to wait on storage to show something usable.
+function loadAllInstant(){
+  state = seedState();
+  session = { userId:null };
+  ui.view = 'login';
+}
+
+// Best-effort background reconciliation with any previously saved data. Runs after the first
+// render, with a short budget, and only touches the UI if the person hasn't started using it yet.
+async function reconcileWithStorage(){
+  if(!HAS_STORAGE) return;
+  const stillOnFreshLogin = ()=> ui.view==='login' && !session.userId;
+
+  try{
+    const [stateRes, sessionRes] = await withTimeout(Promise.all([
+      storageAdapter.get(STORAGE_KEY).catch(()=>null),
+      (sessionAdapter ? sessionAdapter.get(SESSION_KEY) : Promise.resolve(null)).catch(()=>null),
+    ]), 4000);
+
+    const parsedState = stateRes && stateRes.value ? JSON.parse(stateRes.value) : null;
+    const parsedSession = sessionRes && sessionRes.value ? JSON.parse(sessionRes.value) : null;
+
+    if(isValidState(parsedState) && stillOnFreshLogin()){
+      state = parsedState;
+      if(parsedSession && typeof parsedSession==='object' && parsedSession.userId && state.users.find(u=>u.id===parsedSession.userId)){
+        session = parsedSession;
+        ui.view = 'portfolio';
+      }
+      render();
+    } else if(!isValidState(parsedState)){
+      // nothing usable saved yet — persist our fresh seed so future loads (and other people) have something to find
+      persist();
+    }
+  }catch(e){
+    // storage never responded in time or errored — the seed data already on screen keeps working
+  }
+}
+
+async function persist(){
+  if(!HAS_STORAGE) return;
+  try{ await storageAdapter.set(STORAGE_KEY, JSON.stringify(state)); }
+  catch(e){ console.error('save failed', e); }
+}
+async function persistSession(){
+  if(!sessionAdapter) return;
+  try{ await sessionAdapter.set(SESSION_KEY, JSON.stringify(session)); }
+  catch(e){ /* ignore */ }
+}
+
+/* ============================== DERIVED LOGIC ============================== */
+
+function currentUser(){ return state.users.find(u=>u.id===session.userId) || null; }
+function isAdmin(){ const u = currentUser(); return u && u.role==='admin'; }
+
+function projectTasks(projectId){ return state.tasks.filter(t=>t.projectId===projectId); }
+
+function taskDuration(t, useCurrent){
+  const end = useCurrent ? t.endDate : t.originalEndDate;
+  if(!t.startDate || !end) return 0;
+  return Math.max(daysBetween(t.startDate, end), 0);
+}
+
+function buildChains(tasks){
+  const roots = tasks.filter(t=>!t.predecessorId);
+  return roots.map(root=>{
+    const chain = [root];
+    let cur = root;
+    while(true){
+      const next = tasks.find(t=>t.predecessorId===cur.id);
+      if(!next) break;
+      chain.push(next); cur = next;
+    }
+    return chain;
+  });
+}
+
+function chainSum(chain, useCurrent){
+  return chain.reduce((sum,t)=> sum + taskDuration(t, useCurrent), 0);
+}
+
+function projectTimeline(projectId){
+  const tasks = projectTasks(projectId);
+  if(tasks.length === 0){
+    return { chains:[], originalTotal:0, currentTotal:0, delay:0, isRed:false, criticalIndex:-1 };
+  }
+  const chains = buildChains(tasks);
+  const origSums = chains.map(c=>chainSum(c,false));
+  const curSums = chains.map(c=>chainSum(c,true));
+  const originalTotal = Math.max(...origSums, 0);
+  const currentTotal = Math.max(...curSums, 0);
+  const delay = currentTotal - originalTotal;
+  const isRed = tasks.some(t=>t.extended);
+  const criticalIndex = curSums.indexOf(Math.max(...curSums));
+  return { chains, origSums, curSums, originalTotal, currentTotal, delay, isRed, criticalIndex };
+}
+
+function taskStatusColor(t){
+  if(t.extended) return 'red';
+  if(t.status==='closed') return 'green';
+  return 'amber';
+}
+
+function entityName(assignedType, assignedId){
+  if(assignedType==='team'){ const tm = state.teams.find(x=>x.id===assignedId); return tm ? tm.name : 'Unassigned'; }
+  const u = state.users.find(x=>x.id===assignedId); return u ? u.name : 'Unassigned';
+}
+
+function progressByEntity(projectId){
+  const tasks = projectTasks(projectId);
+  const map = {};
+  tasks.forEach(t=>{
+    const key = t.assignedType+':'+t.assignedId;
+    if(!map[key]) map[key] = { key, type:t.assignedType, id:t.assignedId, name:entityName(t.assignedType,t.assignedId), total:0, closed:0, red:false };
+    map[key].total++;
+    if(t.status==='closed') map[key].closed++;
+    if(t.extended) map[key].red = true;
+  });
+  return Object.values(map);
+}
+
+function taskDerivedStatus(t){
+  if(t.status==='closed') return t.extended ? 'closed-late' : 'closed-on-time';
+  return t.extended ? 'open-delayed' : 'open-on-track';
+}
+
+/* ============================== RENDER HELPERS ============================== */
+
+function donutGradient(pct, colorVar){
+  const deg = Math.max(0, Math.min(100,pct)) * 3.6;
+  return `conic-gradient(var(${colorVar}) ${deg}deg, var(--line-soft) ${deg}deg)`;
+}
+
+function pill(status, label){
+  const cls = status==='red' ? 'pill-red' : status==='amber' ? 'pill-amber' : 'pill-green';
+  const pulse = status==='red' ? ' pulse' : '';
+  return `<span class="pill ${cls}"><span class="dot${pulse}"></span>${label}</span>`;
+}
+
+function svgIcon(name){
+  const icons = {
+    portfolio: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+    project: '<svg viewBox="0 0 24 24"><path d="M4 19V5a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M14 3v6h6"/></svg>',
+    reports: '<svg viewBox="0 0 24 24"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>',
+    admin: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
+    logout: '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
+  };
+  return icons[name] || '';
+}
+
+/* ============================== ROOT RENDER ============================== */
+
+function render(){
+  const app = document.getElementById('app');
+  if(ui.view === 'login'){
+    app.innerHTML = renderLogin();
+    bindLogin();
+    return;
+  }
+  app.innerHTML = `
+    <div class="navrail">
+      <div class="brand"></div>
+      ${navBtn('portfolio','portfolio','Board')}
+      ${ui.projectId ? navBtn('project','project','Project') : ''}
+      ${navBtn('reports','reports','Reports')}
+      ${isAdmin() ? navBtn('admin','admin','Admin') : ''}
+      <div class="spacer"></div>
+      <button class="navbtn logout" data-nav="logout">${svgIcon('logout')}Exit</button>
+    </div>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">${breadcrumb()}</div>
+        <div class="who"><span>${currentUser() ? currentUser().name : ''}</span><div class="avatar">${currentUser() ? initials(currentUser().name) : ''}</div></div>
+      </div>
+      <div class="content">${renderView()}</div>
+    </div>
+  `;
+  bindGlobalNav();
+  bindView();
+}
+
+function navBtn(view, icon, label){
+  return `<button class="navbtn ${ui.view===view?'active':''}" data-nav="${view}">${svgIcon(icon)}${label}</button>`;
+}
+
+function breadcrumb(){
+  if(ui.view==='portfolio') return 'CONTROL ROOM / <b>PORTFOLIO</b>';
+  if(ui.view==='project'){
+    const p = state.projects.find(p=>p.id===ui.projectId);
+    return `CONTROL ROOM / <b>${p ? p.name.toUpperCase() : 'PROJECT'}</b>`;
+  }
+  if(ui.view==='reports') return 'CONTROL ROOM / <b>REPORTS</b>';
+  if(ui.view==='admin') return 'CONTROL ROOM / <b>ADMIN</b>';
+  return 'CONTROL ROOM';
+}
+
+function renderView(){
+  if(ui.view==='portfolio') return renderPortfolio();
+  if(ui.view==='project') return renderProject();
+  if(ui.view==='reports') return renderReports();
+  if(ui.view==='admin') return renderAdmin();
+  return '';
+}
+
+function bindGlobalNav(){
+  document.querySelectorAll('[data-nav]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const v = btn.dataset.nav;
+      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; render(); return; }
+      ui.view = v; render();
+    });
+  });
+}
+
+function bindView(){
+  if(ui.view==='portfolio') bindPortfolio();
+  if(ui.view==='project') bindProject();
+  if(ui.view==='reports') bindReports();
+  if(ui.view==='admin') bindAdmin();
+}
+
+/* ============================== LOGIN ============================== */
+
+function renderLogin(){
+  const userCount = (state && Array.isArray(state.users)) ? state.users.length : 0;
+  const storageNote = 'Storage: ' + BACKEND_LABEL;
+  return `
+  <div class="login-shell">
+    <div class="login-card">
+      <div class="login-mark"></div>
+      <div class="login-title">Control Room</div>
+      <div class="muted" style="font-size:13px;">Sign in to track project timelines and handoffs.</div>
+      <form id="loginForm" style="margin-top:22px;">
+        <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
+        <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" required></div>
+        <button class="btn btn-primary" type="button" id="loginSubmitBtn" style="width:100%;justify-content:center;">Sign in</button>
+        <div class="login-error">${ui.loginError}</div>
+      </form>
+      <div class="demo-creds">
+        <div><b>Admin</b> — admin / admin123</div>
+        <div><b>Member</b> — priya / priya123 (Design)</div>
+        <div><b>Member</b> — arjun / arjun123 (Backend)</div>
+        <div><b>Member</b> — meera / meera123 (QA)</div>
+        <div style="margin-top:10px;opacity:.75;">${userCount} account${userCount===1?'':'s'} loaded · ${storageNote}</div>
+        ${userCount === 0 ? `<div style="margin-top:8px;"><button class="btn btn-sm btn-danger" type="button" id="resetDataBtn">Reset &amp; reload demo data</button></div>` : `<button class="btn btn-ghost btn-sm" type="button" id="resetDataBtn" style="margin-top:10px;padding:0;color:var(--paper-faint);text-decoration:underline;">Having trouble? Reset app data</button>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindLogin(){
+  // belt-and-suspenders: if state is missing/corrupt by the time the login page shows, repair it now
+  if(!state || !Array.isArray(state.users) || state.users.length === 0){
+    state = seedState();
+    persist();
+  }
+  const resetBtn = document.getElementById('resetDataBtn');
+  if(resetBtn){
+    resetBtn.addEventListener('click', async ()=>{
+      state = seedState();
+      session = { userId:null };
+      try{ await persist(); }catch(e){}
+      try{ await persistSession(); }catch(e){}
+      ui.loginError = 'App data reset to the demo defaults.';
+      render();
+    });
+  }
+  runOnClickAndEnter('loginForm', 'loginSubmitBtn', ()=>{
+    try{
+      const uEl = document.getElementById('loginUser');
+      const pEl = document.getElementById('loginPass');
+      const u = uEl.value.trim().toLowerCase();
+      const p = pEl.value.trim();
+      if(!u || !p){ ui.loginError = 'Enter both a username and a password.'; render(); return; }
+      if(!state || !Array.isArray(state.users) || state.users.length===0){ state = seedState(); persist(); }
+      const match = state.users.find(x=> x.username.toLowerCase()===u && x.password===p);
+      if(!match){ ui.loginError = 'Username or password not recognized. Check for extra spaces or try one of the demo logins below.'; render(); return; }
+      session.userId = match.id; persistSession();
+      ui.loginError='';
+      ui.view='portfolio';
+      render();
+    }catch(err){
+      ui.loginError = 'Sign-in hit an unexpected error: ' + (err && err.message ? err.message : err);
+      render();
+    }
+  });
+}
+
+/* ============================== PORTFOLIO ============================== */
+
+function renderPortfolio(){
+  const projects = state.projects;
+  const summaries = projects.map(p=>{
+    const tl = projectTimeline(p.id);
+    const tasks = projectTasks(p.id);
+    const closed = tasks.filter(t=>t.status==='closed').length;
+    const pct = tasks.length ? Math.round(closed/tasks.length*100) : 0;
+    return { p, tl, tasks, closed, pct };
+  });
+  const onTrack = summaries.filter(s=>!s.tl.isRed).length;
+  const delayed = summaries.filter(s=>s.tl.isRed).length;
+
+  const cards = summaries.map(s=>{
+    const status = s.tl.isRed ? 'red':'green';
+    const deadline = addDays(s.p.startDate, s.tl.originalTotal);
+    return `
+    <div class="proj-card status-${status}" data-open-project="${s.p.id}">
+      <div class="eyebrow">${s.tasks.length} task${s.tasks.length===1?'':'s'} · started ${fmtDate(s.p.startDate)}</div>
+      <div class="pname">${s.p.name}</div>
+      ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d` : 'On agreed timeline')}
+      <div class="proj-meta">
+        <span>DEADLINE <b style="color:var(--paper);">${fmtDate(deadline)}</b></span>
+        <span>${s.pct}% CLOSED</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill ${status==='red'?'red':''}" style="width:${s.pct}%"></div></div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="eyebrow">Portfolio</div>
+    <h1 class="page-title" style="margin-bottom:22px;">All projects, one board</h1>
+
+    <div class="stat-strip">
+      <div class="stat-chip"><div class="n">${projects.length}</div><div class="l">Projects</div></div>
+      <div class="stat-chip"><div class="n" style="color:var(--green);">${onTrack}</div><div class="l">On agreed timeline</div></div>
+      <div class="stat-chip"><div class="n" style="color:var(--red);">${delayed}</div><div class="l">Delayed</div></div>
+      <div class="stat-chip"><div class="n">${state.tasks.length}</div><div class="l">Tasks tracked</div></div>
+    </div>
+
+    <div class="grid g3">
+      ${cards || `<div class="empty-state"><div class="et">No projects yet</div>Create one from Admin.</div>`}
+    </div>
+    ${isAdmin() ? `<div style="margin-top:22px;"><button class="btn btn-primary" data-nav="admin">+ New project</button></div>` : ''}
+  `;
+}
+
+function bindPortfolio(){
+  document.querySelectorAll('[data-open-project]').forEach(c=>{
+    c.addEventListener('click', ()=>{ ui.projectId = c.dataset.openProject; ui.view='project'; render(); });
+  });
+  document.querySelectorAll('[data-nav="admin"]').forEach(b=>b.addEventListener('click', ()=>{ ui.view='admin'; render(); }));
+}
+
+/* ============================== PROJECT DASHBOARD ============================== */
+
+function renderProject(){
+  const p = state.projects.find(x=>x.id===ui.projectId);
+  if(!p) return `<div class="empty-state"><div class="et">Project not found</div></div>`;
+  const tl = projectTimeline(p.id);
+  const tasks = projectTasks(p.id);
+  const closed = tasks.filter(t=>t.status==='closed').length;
+  const overallPct = tasks.length ? Math.round(closed/tasks.length*100) : 0;
+  const status = tl.isRed ? 'red' : 'green';
+  const deadline = addDays(p.startDate, tl.originalTotal);
+  const daysRemaining = daysBetween(todayISO(), deadline);
+
+  const railRows = tl.chains.map((chain, idx)=>{
+    const isCritical = idx === tl.criticalIndex && tl.chains.length>1;
+    const nodes = chain.map((t,i)=>{
+      const color = taskStatusColor(t);
+      const dur = taskDuration(t, true);
+      return `
+        ${i>0 ? '<div class="rail-connector"></div>' : ''}
+        <div class="rail-node ${color}" data-task-node="${t.id}" style="cursor:pointer;">
+          <span class="nt">${t.title || 'Untitled task'}</span>
+          <span class="nd">${entityName(t.assignedType,t.assignedId)} · ${dur}d</span>
+        </div>`;
+    }).join('');
+    return `
+      <div class="chain-row ${isCritical?'critical':''}">
+        <div class="chain-label">Chain ${idx+1}${isCritical?'<span class="tag">Critical path</span>':''}</div>
+        <div class="chain-track">${nodes}</div>
+        <div class="chain-total">total <b>${tl.curSums[idx]}d</b>${tl.curSums[idx]!==tl.origSums[idx] ? ` <span style="color:var(--red)">(was ${tl.origSums[idx]}d)</span>`:''}</div>
+      </div>`;
+  }).join('');
+
+  const entities = progressByEntity(p.id);
+  const gauges = entities.map(e=>{
+    const pct = e.total ? Math.round(e.closed/e.total*100) : 0;
+    const colorVar = e.red ? '--red' : '--green';
+    return `
+      <div class="gauge">
+        <div class="gauge-ring" style="background:${donutGradient(pct, colorVar)}">
+          <div class="hole">${pct}%</div>
+        </div>
+        <div class="gname">${e.name}</div>
+        <div class="gfrac">${e.closed}/${e.total} closed</div>
+      </div>`;
+  }).join('');
+
+  const taskRows = tasks.map(t=>{
+    const color = taskStatusColor(t);
+    const canEdit = isAdmin() || (currentUser() && ((t.assignedType==='user' && t.assignedId===currentUser().id) || (t.assignedType==='team' && t.assignedId===currentUser().teamId)));
+    return `
+    <tr>
+      <td>
+        <div class="task-title">${t.title || '<span class="muted">Untitled task</span>'}</div>
+        ${t.description ? `<div class="task-desc">${t.description}</div>` : '<div class="task-desc">No description yet</div>'}
+      </td>
+      <td>${entityName(t.assignedType,t.assignedId)}</td>
+      <td class="date-pair">
+        ${fmtDate(t.startDate)} →
+        ${t.extended ? `<span class="strike">${fmtDate(t.originalEndDate)}</span> <span class="ext">${fmtDate(t.endDate)}</span>` : fmtDate(t.endDate)}
+      </td>
+      <td>${pill(color, color==='green' ? (t.status==='closed'?'Closed on time':'On track') : color==='red' ? 'Extended' : 'Open')}</td>
+      <td>
+        <div class="row-actions">
+          ${canEdit ? `<button class="btn btn-sm" data-edit-task="${t.id}">Edit</button>` : ''}
+          ${canEdit && t.status!=='closed' ? `<button class="btn btn-sm btn-danger" data-extend-task="${t.id}">Extend date</button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="hero status-${status}">
+      <div>
+        <div class="eyebrow">Project</div>
+        <h1 class="page-title">${p.name}</h1>
+        <div style="margin-top:10px;">${pill(status, status==='red' ? 'Delayed — timeline breached' : 'On agreed timeline')}</div>
+      </div>
+      <div class="hero-metrics">
+        <div class="metric"><div class="eyebrow">Total days agreed</div><div class="val">${tl.originalTotal}</div><div class="sub">${tasks.length} tasks combined</div></div>
+        <div class="metric"><div class="eyebrow">Deadline</div><div class="val" style="font-size:20px;">${fmtDate(deadline)}</div><div class="sub">${daysRemaining>=0 ? daysRemaining+'d remaining' : Math.abs(daysRemaining)+'d past due'}</div></div>
+        <div class="metric"><div class="eyebrow">Delay</div><div class="val ${tl.delay>0?'red':'green'}">${tl.delay>0 ? '-'+tl.delay : '0'}</div><div class="sub">days vs. original agreement</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;display:flex;gap:20px;align-items:center;">
+      <div class="donut-big" style="background:${donutGradient(overallPct,'--green')}">
+        <div class="hole"><div class="pct">${overallPct}%</div><div class="lbl">Complete</div></div>
+      </div>
+      <div>
+        <div class="section-title" style="margin-bottom:4px;">Overall progress</div>
+        <div class="muted" style="font-size:12px;">${closed} of ${tasks.length} tasks closed across the project.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div class="section-title">By team &amp; individual</div>
+      <div class="gauge-grid">${gauges || '<div class="empty-state">Nothing assigned yet.</div>'}</div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div class="section-title">Handoff rail</div>
+      <div class="muted" style="font-size:12px;margin-bottom:4px;">Every chain of dependent tasks, combined into one timeline. Parallel chains run at once — the longest one sets the project length.</div>
+      <div class="rail-wrap">${railRows || '<div class="empty-state">No tasks yet.</div>'}</div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Tasks</div>
+        <div style="display:flex;gap:8px;">
+          ${isAdmin() ? `<button class="btn btn-sm" data-add-task>+ Add blank task</button>` : ''}
+          <button class="btn btn-sm btn-ghost" data-view-report>Open in reports</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Task</th><th>Assigned</th><th>Timeline</th><th>Status</th><th></th></tr></thead>
+        <tbody>${taskRows || `<tr><td colspan="5" class="empty-state">No tasks in this project.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function bindProject(){
+  document.querySelectorAll('[data-task-node],[data-edit-task]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const id = el.dataset.taskNode || el.dataset.editTask;
+      openTaskModal(id);
+    });
+  });
+  document.querySelectorAll('[data-extend-task]').forEach(el=>{
+    el.addEventListener('click', (e)=>{ e.stopPropagation(); openExtendModal(el.dataset.extendTask); });
+  });
+  const addBtn = document.querySelector('[data-add-task]');
+  if(addBtn) addBtn.addEventListener('click', ()=> openBlankTaskModal(ui.projectId));
+  const rep = document.querySelector('[data-view-report]');
+  if(rep) rep.addEventListener('click', ()=>{ ui.reportFilters = {project:ui.projectId, team:'', user:'', status:''}; ui.view='reports'; render(); });
+}
+
+/* ============================== TASK MODALS ============================== */
+
+function assigneeOptions(selectedType, selectedId){
+  const teamOpts = state.teams.map(t=>`<option value="team:${t.id}" ${selectedType==='team'&&selectedId===t.id?'selected':''}>Team — ${t.name}</option>`).join('');
+  const userOpts = state.users.filter(u=>u.role!=='admin').map(u=>`<option value="user:${u.id}" ${selectedType==='user'&&selectedId===u.id?'selected':''}>${u.name}</option>`).join('');
+  return teamOpts + userOpts;
+}
+
+function predecessorOptions(projectId, excludeId, selected){
+  const tasks = projectTasks(projectId).filter(t=>t.id!==excludeId);
+  const opts = tasks.map(t=>`<option value="${t.id}" ${selected===t.id?'selected':''}>${t.title||'Untitled task'}</option>`).join('');
+  return `<option value="">None — runs in parallel from project start</option>` + opts;
+}
+
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+function openBlankTaskModal(projectId){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>New task</h3>
+        <div class="modal-sub">Create a blank slot and assign it — the team fills in the rest.</div>
+        <form id="blankTaskForm">
+          <div class="field"><label>Title</label><input id="btTitle" required placeholder="e.g. Payment gateway integration"></div>
+          <div class="field"><label>Assign to</label><select id="btAssignee">${assigneeOptions()}</select></div>
+          <div class="field"><label>Depends on</label><select id="btPredecessor">${predecessorOptions(projectId,null,null)}</select><div class="hint">If this task can't start until another finishes, pick it here — durations chain together.</div></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="btSubmitBtn" class="btn btn-primary">Create task</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('blankTaskForm', 'btSubmitBtn', ()=>{
+    const titleEl = document.getElementById('btTitle');
+    if(!titleEl.value.trim()){ titleEl.focus(); return; }
+    const [type,id] = document.getElementById('btAssignee').value.split(':');
+    const t = {
+      id: uid('t'), projectId, title: titleEl.value.trim(),
+      description:'', reason:'', assignedType:type, assignedId:id,
+      predecessorId: document.getElementById('btPredecessor').value || null,
+      startDate:'', endDate:'', originalEndDate:'', extended:false, status:'open', closedDate:null,
+      datesLocked:false, extensionHistory:[]
+    };
+    state.tasks.push(t); persist(); closeModal(); render();
+  });
+}
+
+function openTaskModal(taskId){
+  const t = state.tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  const admin = isAdmin();
+  const datesEditable = admin || !t.datesLocked;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Task details</h3>
+        <div class="modal-sub">${entityName(t.assignedType,t.assignedId)} · ${state.projects.find(p=>p.id===t.projectId)?.name || ''}</div>
+        <form id="taskForm">
+          <div class="field"><label>Title</label><input id="tfTitle" value="${t.title.replace(/"/g,'&quot;')}" required></div>
+          <div class="field"><label>Description</label><textarea id="tfDesc">${t.description||''}</textarea></div>
+          <div class="field-row">
+            <div class="field"><label>Start date</label><input type="date" id="tfStart" value="${t.startDate}" ${datesEditable?'':'disabled'} required></div>
+            <div class="field"><label>End date (agreed)</label><input type="date" id="tfEnd" value="${t.endDate}" ${datesEditable?'':'disabled'} required></div>
+          </div>
+          ${!datesEditable ? '<div class="hint">Dates are locked once saved. Use "Extend date" from the project view, or ask an admin.</div>' : ''}
+          <div class="field"><label>Reason — why this much time?</label><textarea id="tfReason" placeholder="Explain the estimate...">${t.reason||''}</textarea></div>
+          <div class="field"><label>Assign to</label><select id="tfAssignee" ${admin?'':'disabled'}>${assigneeOptions(t.assignedType,t.assignedId)}</select></div>
+          ${admin ? `<div class="field"><label>Depends on</label><select id="tfPredecessor">${predecessorOptions(t.projectId,t.id,t.predecessorId)}</select></div>` : ''}
+          <div class="field">
+            <label>Status</label>
+            <select id="tfStatus">
+              <option value="open" ${t.status==='open'?'selected':''}>Open</option>
+              <option value="closed" ${t.status==='closed'?'selected':''}>Closed</option>
+            </select>
+          </div>
+          ${t.extensionHistory && t.extensionHistory.length ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            ${admin ? `<button type="button" class="btn btn-danger" data-delete-task="${t.id}">Delete</button>` : ''}
+            <button type="button" id="tfSubmitBtn" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('taskForm', 'tfSubmitBtn', ()=>{
+    const titleEl = document.getElementById('tfTitle');
+    if(!titleEl.value.trim()){ titleEl.focus(); return; }
+    if(datesEditable){
+      const sVal = document.getElementById('tfStart').value;
+      const eVal = document.getElementById('tfEnd').value;
+      if(!sVal || !eVal){ return; }
+    }
+    t.title = titleEl.value.trim();
+    t.description = document.getElementById('tfDesc').value.trim();
+    t.reason = document.getElementById('tfReason').value.trim();
+    t.status = document.getElementById('tfStatus').value;
+    if(t.status==='closed' && !t.closedDate) t.closedDate = todayISO();
+    if(t.status==='open') t.closedDate = null;
+    if(datesEditable){
+      t.startDate = document.getElementById('tfStart').value;
+      t.endDate = document.getElementById('tfEnd').value;
+      t.originalEndDate = t.endDate;
+      t.datesLocked = true;
+    }
+    if(admin){
+      const [type,id] = document.getElementById('tfAssignee').value.split(':');
+      t.assignedType = type; t.assignedId = id;
+      t.predecessorId = document.getElementById('tfPredecessor').value || null;
+    }
+    persist(); closeModal(); render();
+  });
+  const delBtn = document.querySelector('[data-delete-task]');
+  if(delBtn) delBtn.addEventListener('click', ()=>{
+    state.tasks = state.tasks.filter(x=>x.id!==t.id);
+    state.tasks.forEach(x=>{ if(x.predecessorId===t.id) x.predecessorId=null; });
+    persist(); closeModal(); render();
+  });
+}
+
+function openExtendModal(taskId){
+  const t = state.tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Extend date</h3>
+        <div class="modal-sub">${t.title} — currently agreed for ${fmtDate(t.endDate)}</div>
+        <form id="extendForm">
+          <div class="field"><label>New end date</label><input type="date" id="exDate" min="${addDays(t.endDate,1)}" value="${addDays(t.endDate,1)}" required></div>
+          <div class="field"><label>Reason for the extension</label><textarea id="exReason" placeholder="What pushed this back?" required></textarea></div>
+          <div class="hint">The original date (${fmtDate(t.originalEndDate)}) stays on record. This task, its chain and the project dashboard will switch to red.</div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="exSubmitBtn" class="btn btn-danger">Confirm extension</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('extendForm', 'exSubmitBtn', ()=>{
+    const newDate = document.getElementById('exDate').value;
+    const reason = document.getElementById('exReason').value.trim();
+    if(!newDate || !reason) return;
+    t.extensionHistory = t.extensionHistory || [];
+    t.extensionHistory.push({date: todayISO(), newEndDate:newDate, reason});
+    t.endDate = newDate;
+    t.extended = true;
+    persist(); closeModal(); render();
+  });
+}
+
+function bindModalClose(){
+  document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', closeModal));
+  document.querySelector('[data-backdrop]').addEventListener('click', (e)=>{ if(e.target.dataset.backdrop!==undefined && e.target===e.currentTarget) closeModal(); });
+}
+
+/* ============================== REPORTS ============================== */
+
+function renderReports(){
+  const f = ui.reportFilters;
+  let rows = state.tasks.slice();
+  if(f.project) rows = rows.filter(t=>t.projectId===f.project);
+  if(f.team) rows = rows.filter(t=>t.assignedType==='team' && t.assignedId===f.team);
+  if(f.user) rows = rows.filter(t=>t.assignedType==='user' && t.assignedId===f.user);
+  if(f.status) rows = rows.filter(t=>taskDerivedStatus(t)===f.status);
+
+  const total = state.tasks.length;
+  const onTime = state.tasks.filter(t=>!t.extended).length;
+  const late = state.tasks.filter(t=>t.extended).length;
+
+  // leaderboard of delays by team/user
+  const lb = {};
+  state.tasks.filter(t=>t.extended).forEach(t=>{
+    const name = entityName(t.assignedType,t.assignedId);
+    lb[name] = (lb[name]||0)+1;
+  });
+  const lbMax = Math.max(1, ...Object.values(lb));
+  const lbRows = Object.entries(lb).sort((a,b)=>b[1]-a[1]).map(([name,count])=>`
+    <div class="lb-row"><div class="lb-name">${name}</div><div class="lb-bar"><span style="width:${count/lbMax*100}%"></span></div><div class="lb-count">${count} delay${count===1?'':'s'}</div></div>
+  `).join('') || `<div class="muted" style="font-size:12px;">No delays recorded — nice.</div>`;
+
+  const tableRows = rows.map(t=>{
+    const ds = taskDerivedStatus(t);
+    const labelMap = {'closed-on-time':['green','Closed on time'],'closed-late':['red','Closed late'],'open-on-track':['amber','Open · on track'],'open-delayed':['red','Open · delayed']};
+    const [color,label] = labelMap[ds];
+    const proj = state.projects.find(p=>p.id===t.projectId);
+    const delayDays = t.extended ? daysBetween(t.originalEndDate, t.endDate) : 0;
+    return `<tr>
+      <td>${proj ? proj.name : '—'}</td>
+      <td><div class="task-title">${t.title||'Untitled'}</div></td>
+      <td>${entityName(t.assignedType,t.assignedId)}</td>
+      <td class="mono" style="font-size:11px;">${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}</td>
+      <td class="mono" style="font-size:11px;${t.extended?'color:var(--red)':''}">${t.extended ? fmtDate(t.endDate) : '—'}</td>
+      <td>${pill(color,label)}</td>
+      <td class="mono" style="font-size:11px;${delayDays>0?'color:var(--red)':''}">${delayDays>0 ? '-'+delayDays+'d' : '0d'}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="eyebrow">Reports</div>
+    <h1 class="page-title" style="margin-bottom:22px;">Who delivered, who slipped</h1>
+
+    <div class="stat-strip">
+      <div class="stat-chip"><div class="n">${total}</div><div class="l">Total tasks</div></div>
+      <div class="stat-chip"><div class="n" style="color:var(--green);">${onTime}</div><div class="l">Never extended</div></div>
+      <div class="stat-chip"><div class="n" style="color:var(--red);">${late}</div><div class="l">Extended at least once</div></div>
+    </div>
+
+    <div class="grid g2" style="align-items:start;margin-bottom:22px;">
+      <div class="card">
+        <div class="section-title">Most delays, by team &amp; individual</div>
+        ${lbRows}
+      </div>
+      <div class="card">
+        <div class="section-title">Filter</div>
+        <div class="filters">
+          <select id="fProject"><option value="">All projects</option>${state.projects.map(p=>`<option value="${p.id}" ${f.project===p.id?'selected':''}>${p.name}</option>`).join('')}</select>
+          <select id="fTeam"><option value="">All teams</option>${state.teams.map(t=>`<option value="${t.id}" ${f.team===t.id?'selected':''}>${t.name}</option>`).join('')}</select>
+          <select id="fUser"><option value="">All individuals</option>${state.users.filter(u=>u.role!=='admin').map(u=>`<option value="${u.id}" ${f.user===u.id?'selected':''}>${u.name}</option>`).join('')}</select>
+          <select id="fStatus">
+            <option value="">All statuses</option>
+            <option value="closed-on-time" ${f.status==='closed-on-time'?'selected':''}>Closed on time</option>
+            <option value="closed-late" ${f.status==='closed-late'?'selected':''}>Closed late</option>
+            <option value="open-on-track" ${f.status==='open-on-track'?'selected':''}>Open · on track</option>
+            <option value="open-delayed" ${f.status==='open-delayed'?'selected':''}>Open · delayed</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>Project</th><th>Task</th><th>Assigned</th><th>Agreed window</th><th>Extended to</th><th>Status</th><th>Delay</th></tr></thead>
+        <tbody>${tableRows || `<tr><td colspan="7" class="empty-state">No tasks match these filters.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function bindReports(){
+  ['fProject','fTeam','fUser','fStatus'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.addEventListener('change', ()=>{
+      ui.reportFilters = {
+        project: document.getElementById('fProject').value,
+        team: document.getElementById('fTeam').value,
+        user: document.getElementById('fUser').value,
+        status: document.getElementById('fStatus').value,
+      };
+      render();
+    });
+  });
+}
+
+/* ============================== ADMIN ============================== */
+
+function renderAdmin(){
+  return `
+    <div class="eyebrow">Admin</div>
+    <h1 class="page-title" style="margin-bottom:20px;">Users, teams &amp; projects</h1>
+    <div class="tabs">
+      <button class="tab ${ui.adminTab==='users'?'active':''}" data-tab="users">Users</button>
+      <button class="tab ${ui.adminTab==='teams'?'active':''}" data-tab="teams">Teams</button>
+      <button class="tab ${ui.adminTab==='projects'?'active':''}" data-tab="projects">Projects</button>
+    </div>
+    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='teams' ? renderAdminTeams() : renderAdminProjects()}
+  `;
+}
+
+function renderAdminUsers(){
+  const rows = state.users.filter(u=>u.role!=='admin').map(u=>{
+    const team = state.teams.find(t=>t.id===u.teamId);
+    return `<tr>
+      <td><div class="userchip"><div class="initials">${initials(u.name)}</div>${u.name}</div></td>
+      <td class="mono" style="font-size:12px;">${u.username}</td>
+      <td>
+        <select data-user-team="${u.id}">
+          <option value="">Unassigned</option>
+          ${state.teams.map(t=>`<option value="${t.id}" ${u.teamId===t.id?'selected':''}>${t.name}</option>`).join('')}
+        </select>
+      </td>
+      <td><div class="row-actions"><button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button><button class="btn btn-sm btn-danger" data-del-user="${u.id}">Remove</button></div></td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Users</div>
+        <button class="btn btn-primary btn-sm" data-add-user>+ Create user</button>
+      </div>
+      <table>
+        <thead><tr><th>Name</th><th>Username</th><th>Team</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty-state">No users yet.</td></tr>`}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderAdminTeams(){
+  const rows = state.teams.map(t=>{
+    const count = state.users.filter(u=>u.teamId===t.id).length;
+    return `<tr><td>${t.name}</td><td class="mono" style="font-size:12px;">${count} member${count===1?'':'s'}</td><td><div class="row-actions"><button class="btn btn-sm btn-danger" data-del-team="${t.id}">Remove</button></div></td></tr>`;
+  }).join('');
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Teams</div>
+        <button class="btn btn-primary btn-sm" data-add-team>+ Create team</button>
+      </div>
+      <table><thead><tr><th>Team</th><th>Members</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="empty-state">No teams yet.</td></tr>`}</tbody></table>
+    </div>`;
+}
+
+function renderAdminProjects(){
+  const rows = state.projects.map(p=>{
+    const tl = projectTimeline(p.id);
+    return `<tr>
+      <td>${p.name}</td>
+      <td class="mono" style="font-size:12px;">${fmtDate(p.startDate)}</td>
+      <td class="mono" style="font-size:12px;">${projectTasks(p.id).length} tasks</td>
+      <td>${pill(tl.isRed?'red':'green', tl.isRed?'Delayed':'On track')}</td>
+      <td><div class="row-actions"><button class="btn btn-sm" data-open-project="${p.id}">Open</button><button class="btn btn-sm btn-danger" data-del-project="${p.id}" data-project-name="${p.name.replace(/"/g,'&quot;')}" data-task-count="${projectTasks(p.id).length}">Delete</button></div></td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Projects</div>
+        <button class="btn btn-primary btn-sm" data-add-project>+ Create project</button>
+      </div>
+      <table><thead><tr><th>Project</th><th>Started</th><th>Tasks</th><th>Status</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="empty-state">No projects yet.</td></tr>`}</tbody></table>
+    </div>`;
+}
+
+function bindAdmin(){
+  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click', ()=>{ ui.adminTab=b.dataset.tab; render(); }));
+  document.querySelectorAll('[data-open-project]').forEach(b=>b.addEventListener('click', ()=>{ ui.projectId=b.dataset.openProject; ui.view='project'; render(); }));
+
+  const addUser = document.querySelector('[data-add-user]');
+  if(addUser) addUser.addEventListener('click', openAddUserModal);
+  document.querySelectorAll('[data-user-team]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const u = state.users.find(x=>x.id===sel.dataset.userTeam);
+      u.teamId = sel.value || null; persist(); render();
+    });
+  });
+  document.querySelectorAll('[data-del-user]').forEach(b=>b.addEventListener('click', ()=>{
+    state.users = state.users.filter(u=>u.id!==b.dataset.delUser); persist(); render();
+  }));
+  document.querySelectorAll('[data-view-creds]').forEach(b=>b.addEventListener('click', ()=>{
+    const u = state.users.find(x=>x.id===b.dataset.viewCreds);
+    showCredentialsModal(u);
+  }));
+
+  const addTeam = document.querySelector('[data-add-team]');
+  if(addTeam) addTeam.addEventListener('click', openAddTeamModal);
+  document.querySelectorAll('[data-del-team]').forEach(b=>b.addEventListener('click', ()=>{
+    state.teams = state.teams.filter(t=>t.id!==b.dataset.delTeam);
+    state.users.forEach(u=>{ if(u.teamId===b.dataset.delTeam) u.teamId=null; });
+    persist(); render();
+  }));
+
+  const addProject = document.querySelector('[data-add-project]');
+  if(addProject) addProject.addEventListener('click', openAddProjectModal);
+  document.querySelectorAll('[data-del-project]').forEach(b=>b.addEventListener('click', ()=>{
+    openDeleteProjectModal(b.dataset.delProject, b.dataset.projectName, b.dataset.taskCount);
+  }));
+}
+
+function openDeleteProjectModal(projectId, projectName, taskCount){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Delete project?</h3>
+        <div class="modal-sub">This can't be undone.</div>
+        <p style="font-size:13px;color:var(--paper-dim);line-height:1.6;">
+          This will permanently delete <b style="color:var(--paper);">${projectName}</b>
+          and all ${taskCount} task${taskCount==1?'':'s'} in it — including timeline history and extension records.
+        </p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" class="btn btn-danger" id="confirmDeleteProjectBtn">Delete project</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.getElementById('confirmDeleteProjectBtn').addEventListener('click', ()=>{
+    state.projects = state.projects.filter(p=>p.id!==projectId);
+    state.tasks = state.tasks.filter(t=>t.projectId!==projectId);
+    if(ui.projectId===projectId) ui.projectId = null;
+    persist(); closeModal(); render();
+  });
+}
+
+function randomPassword(){
+  const words = ['orbit','delta','ridge','maple','coral','ember','quartz','vapor','tundra','pixel'];
+  return words[Math.floor(Math.random()*words.length)] + Math.floor(100+Math.random()*900);
+}
+
+function openAddUserModal(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Create user</h3>
+        <div class="modal-sub">Generates a login the person can use right away.</div>
+        <form id="userForm">
+          <div class="field"><label>Full name</label><input id="uName" required></div>
+          <div class="field"><label>Username</label><input id="uUsername" required></div>
+          <div class="field"><label>Team</label><select id="uTeam"><option value="">Unassigned</option>${state.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="userSubmitBtn" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('userForm', 'userSubmitBtn', ()=>{
+    const nameEl = document.getElementById('uName');
+    const userEl = document.getElementById('uUsername');
+    if(!nameEl.value.trim() || !userEl.value.trim()){ (nameEl.value.trim()?userEl:nameEl).focus(); return; }
+    const u = { id: uid('u'), name: nameEl.value.trim(), username: userEl.value.trim(), password: randomPassword(), role:'member', teamId: document.getElementById('uTeam').value || null };
+    state.users.push(u); persist();
+    showCredentialsModal(u);
+  });
+}
+
+function showCredentialsModal(u){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Login for ${u.name}</h3>
+        <div class="modal-sub">Share this with them directly. Passwords aren't shown again after this.</div>
+        <div class="credential-box"><span>URL / username</span><span class="mono">${u.username}</span></div>
+        <div class="credential-box" style="margin-top:8px;"><span>Password</span><span class="mono">${u.password}</span></div>
+        <div class="modal-actions"><button class="btn btn-primary" data-close>Done</button></div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.querySelector('[data-close]').addEventListener('click', ()=>{ closeModal(); render(); });
+}
+
+function openAddTeamModal(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Create team</h3>
+        <form id="teamForm">
+          <div class="field"><label>Team name</label><input id="tName" required></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="teamSubmitBtn" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('teamForm', 'teamSubmitBtn', ()=>{
+    const nameEl = document.getElementById('tName');
+    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    state.teams.push({ id: uid('team'), name: nameEl.value.trim() });
+    persist(); closeModal(); render();
+  });
+}
+
+function openAddProjectModal(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Create project</h3>
+        <form id="projForm">
+          <div class="field"><label>Project name</label><input id="pName" required></div>
+          <div class="field"><label>Start date</label><input type="date" id="pStart" value="${todayISO()}" required></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="projSubmitBtn" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('projForm', 'projSubmitBtn', ()=>{
+    const nameEl = document.getElementById('pName');
+    const startEl = document.getElementById('pStart');
+    if(!nameEl.value.trim() || !startEl.value){ (nameEl.value.trim()?startEl:nameEl).focus(); return; }
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO() };
+    state.projects.push(p); persist(); closeModal();
+    ui.projectId = p.id; ui.view='project'; render();
+  });
+}
+
+/* ============================== INIT ============================== */
+
+(async function init(){
+  loadAllInstant();
+  render();
+  reconcileWithStorage();
+})();
+</script>
+</body>
+</html>

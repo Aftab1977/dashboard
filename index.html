@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Control Room — Project Timeline Tracker</title>
+<title>ImproveID Dashboard — Workstream Timeline Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -139,6 +139,8 @@
   .dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
   .dot.pulse{animation:pulse 1.8s ease-in-out infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+  .pill-blink{animation:pillBlink 1.6s ease-in-out infinite;}
+  @keyframes pillBlink{0%,100%{opacity:1;}50%{opacity:.4;}}
 
   /* ---------- portfolio cards ---------- */
   .proj-card{
@@ -375,7 +377,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, adminTab:'users', reportFilters:{project:'',team:'',user:'',status:''}, loginError:'' };
+let ui = { view:'login', projectId:null, adminTab:'users', portfolioFilter:'all', reportFilters:{project:'',team:'',user:'',status:''}, loginError:'' };
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -391,11 +393,46 @@ function runOnClickAndEnter(formId, btnId, handler){
 }
 
 function uid(prefix){ return prefix + '_' + Math.random().toString(36).slice(2,9); }
-function todayISO(){ return new Date().toISOString().slice(0,10); }
+// Always compute "today" in India Standard Time (UTC+5:30), regardless of the
+// browser's own timezone — delay tracking should be consistent for everyone.
+function todayISO(){
+  const IST_OFFSET_MS = (5*60+30)*60*1000;
+  return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0,10);
+}
 function addDays(iso, n){ const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
 function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00')) / 86400000); }
 function fmtDate(iso){ if(!iso) return '—'; const d = new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'2-digit',year:'numeric'}); }
 function initials(name){ return name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
+
+// A task is delayed the moment either condition happens, and it stays delayed
+// permanently after that — even once the task or the whole project is closed:
+//  1) it was ever pushed back with the Extend Date option, or
+//  2) today (IST) passed its original agreed deadline while it was still open
+//     (and if it later closed, it closed after that original deadline).
+function isTaskDelayed(t){
+  if(t.extended) return true;
+  if(t.status==='closed'){
+    return !!(t.closedDate && t.originalEndDate && t.closedDate > t.originalEndDate);
+  }
+  return !!(t.originalEndDate && todayISO() > t.originalEndDate);
+}
+// The date a task's current duration should be measured against: its agreed/extended
+// end date, but if it's still open and that date has already passed, the gap keeps
+// growing with each day (today) until it's closed or extended — then it freezes.
+function effectiveEndDate(t){
+  if(!t.endDate) return t.endDate;
+  if(t.status==='closed'){
+    return (t.closedDate && t.closedDate > t.endDate) ? t.closedDate : t.endDate;
+  }
+  const today = todayISO();
+  return (today > t.endDate) ? today : t.endDate;
+}
+
+function blockedTeamsForProject(projectId){
+  const ids = new Set();
+  projectTasks(projectId).forEach(t=>{ if(t.blockedByTeamId) ids.add(t.blockedByTeamId); });
+  return Array.from(ids).map(id => (state.teams.find(tm=>tm.id===id) || {}).name || 'Unknown team');
+}
 
 function seedState(){
   const t0 = addDays(todayISO(), -12);
@@ -424,14 +461,14 @@ function seedState(){
   const t5s = addDays(t0,3), t5e = addDays(t0,5);
 
   const tasks = [
-    {id:'t1', projectId:p1, title:'Wireframes', description:'Low-fi wireframes for the four core portal screens.', reason:'Two working days covers discovery plus one revision pass.', assignedType:'team', assignedId:'team_design', predecessorId:null, startDate:t1s, endDate:t1e, originalEndDate:t1e, extended:false, status:'closed', closedDate:addDays(t1e,-1), datesLocked:true, extensionHistory:[]},
-    {id:'t2', projectId:p1, title:'Content Audit', description:'Audit existing marketing copy and flag gaps for the new portal.', reason:'Three days to review all existing pages and interview stakeholders.', assignedType:'team', assignedId:'team_qa', predecessorId:null, startDate:t2s, endDate:t2e, originalEndDate:t2e, extended:false, status:'closed', closedDate:addDays(t2e,-1), datesLocked:true, extensionHistory:[]},
-    {id:'t3', projectId:p1, title:'Design System Build', description:'Component library covering buttons, forms, cards and navigation.', reason:'Five days needed to cover every shared component before build starts.', assignedType:'team', assignedId:'team_design', predecessorId:null, startDate:t3s, endDate:t3eNow, originalEndDate:t3eOrig, extended:true, status:'open', closedDate:null, datesLocked:true, extensionHistory:[{date:addDays(t3eOrig,-1), newEndDate:t3eNow, reason:'Token review with brand ran long; needed two extra days.'}]},
-    {id:'t4', projectId:p1, title:'API Development', description:'Build the account, billing and document endpoints.', reason:'Three days for the three endpoint groups.', assignedType:'team', assignedId:'team_backend', predecessorId:null, startDate:t4s, endDate:t4e, originalEndDate:t4e, extended:false, status:'closed', closedDate:addDays(t4e,-1), datesLocked:true, extensionHistory:[]},
-    {id:'t5', projectId:p1, title:'Integration Testing', description:'End-to-end tests against the new API endpoints.', reason:'Two days once the API handoff lands.', assignedType:'team', assignedId:'team_qa', predecessorId:'t4', startDate:t5s, endDate:t5e, originalEndDate:t5e, extended:false, status:'closed', closedDate:addDays(t5e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t1', projectId:p1, title:'Wireframes', description:'Low-fi wireframes for the four core portal screens.', reason:'Two working days covers discovery plus one revision pass.', assignedType:'team', assignedId:'team_design', predecessorId:null, startDate:t1s, endDate:t1e, originalEndDate:t1e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t1e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t2', projectId:p1, title:'Content Audit', description:'Audit existing marketing copy and flag gaps for the new portal.', reason:'Three days to review all existing pages and interview stakeholders.', assignedType:'team', assignedId:'team_qa', predecessorId:null, startDate:t2s, endDate:t2e, originalEndDate:t2e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t2e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t3', projectId:p1, title:'Design System Build', description:'Component library covering buttons, forms, cards and navigation.', reason:'Five days needed to cover every shared component before build starts.', assignedType:'team', assignedId:'team_design', predecessorId:null, startDate:t3s, endDate:t3eNow, originalEndDate:t3eOrig, extended:true, blockedByTeamId:null, status:'open', closedDate:null, datesLocked:true, extensionHistory:[{date:addDays(t3eOrig,-1), newEndDate:t3eNow, reason:'Token review with brand ran long; needed two extra days.'}]},
+    {id:'t4', projectId:p1, title:'API Development', description:'Build the account, billing and document endpoints.', reason:'Three days for the three endpoint groups.', assignedType:'team', assignedId:'team_backend', predecessorId:null, startDate:t4s, endDate:t4e, originalEndDate:t4e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t4e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t5', projectId:p1, title:'Integration Testing', description:'End-to-end tests against the new API endpoints.', reason:'Two days once the API handoff lands.', assignedType:'team', assignedId:'team_qa', predecessorId:'t4', startDate:t5s, endDate:t5e, originalEndDate:t5e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t5e,-1), datesLocked:true, extensionHistory:[]},
 
-    {id:'t6', projectId:p2, title:'Vendor Docs Checklist', description:'Collect W-9s, insurance certs and banking details.', reason:'Two days to chase paperwork from three vendors.', assignedType:'user', assignedId:'u_meera', predecessorId:null, startDate:addDays(todayISO(),-5), endDate:addDays(todayISO(),-3), originalEndDate:addDays(todayISO(),-3), extended:false, status:'closed', closedDate:addDays(todayISO(),-4), datesLocked:true, extensionHistory:[]},
-    {id:'t7', projectId:p2, title:'Portal Access Setup', description:'Provision vendor logins to the procurement portal.', reason:'', assignedType:'user', assignedId:'u_arjun', predecessorId:'t6', startDate:addDays(todayISO(),-3), endDate:addDays(todayISO(),2), originalEndDate:addDays(todayISO(),2), extended:false, status:'open', closedDate:null, datesLocked:true, extensionHistory:[]},
+    {id:'t6', projectId:p2, title:'Vendor Docs Checklist', description:'Collect W-9s, insurance certs and banking details.', reason:'Two days to chase paperwork from three vendors.', assignedType:'user', assignedId:'u_meera', predecessorId:null, startDate:addDays(todayISO(),-5), endDate:addDays(todayISO(),-3), originalEndDate:addDays(todayISO(),-3), extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(todayISO(),-4), datesLocked:true, extensionHistory:[]},
+    {id:'t7', projectId:p2, title:'Portal Access Setup', description:'Provision vendor logins to the procurement portal.', reason:'', assignedType:'user', assignedId:'u_arjun', predecessorId:'t6', startDate:addDays(todayISO(),-3), endDate:addDays(todayISO(),2), originalEndDate:addDays(todayISO(),2), extended:false, blockedByTeamId:null, status:'open', closedDate:null, datesLocked:true, extensionHistory:[]},
   ];
 
   return { teams, users, projects, tasks };
@@ -502,10 +539,39 @@ async function persistSession(){
 function currentUser(){ return state.users.find(u=>u.id===session.userId) || null; }
 function isAdmin(){ const u = currentUser(); return u && u.role==='admin'; }
 
+// null = unrestricted (sees everything). Otherwise an array of project ids the
+// current user is allowed to see: admins see everything, viewers see whatever
+// the admin assigned them ('all' or a specific list), and regular members only
+// see projects where they (or their team) actually have a task assigned.
+function accessibleProjectIds(){
+  const u = currentUser();
+  if(!u) return [];
+  if(u.role==='admin') return null;
+  if(u.role==='viewer'){
+    if(u.viewerProjectIds==='all') return null;
+    return Array.isArray(u.viewerProjectIds) ? u.viewerProjectIds : [];
+  }
+  const ids = new Set();
+  state.tasks.forEach(t=>{
+    if((t.assignedType==='user' && t.assignedId===u.id) || (t.assignedType==='team' && t.assignedId===u.teamId)){
+      ids.add(t.projectId);
+    }
+  });
+  return Array.from(ids);
+}
+function visibleProjects(){
+  const ids = accessibleProjectIds();
+  return ids===null ? state.projects : state.projects.filter(p=>ids.includes(p.id));
+}
+function canAccessProject(projectId){
+  const ids = accessibleProjectIds();
+  return ids===null || ids.includes(projectId);
+}
+
 function projectTasks(projectId){ return state.tasks.filter(t=>t.projectId===projectId); }
 
 function taskDuration(t, useCurrent){
-  const end = useCurrent ? t.endDate : t.originalEndDate;
+  const end = useCurrent ? effectiveEndDate(t) : t.originalEndDate;
   if(!t.startDate || !end) return 0;
   return Math.max(daysBetween(t.startDate, end), 0);
 }
@@ -539,13 +605,13 @@ function projectTimeline(projectId){
   const originalTotal = Math.max(...origSums, 0);
   const currentTotal = Math.max(...curSums, 0);
   const delay = currentTotal - originalTotal;
-  const isRed = tasks.some(t=>t.extended);
+  const isRed = tasks.some(t=>isTaskDelayed(t));
   const criticalIndex = curSums.indexOf(Math.max(...curSums));
   return { chains, origSums, curSums, originalTotal, currentTotal, delay, isRed, criticalIndex };
 }
 
 function taskStatusColor(t){
-  if(t.extended) return 'red';
+  if(isTaskDelayed(t)) return 'red';
   if(t.status==='closed') return 'green';
   return 'amber';
 }
@@ -563,14 +629,15 @@ function progressByEntity(projectId){
     if(!map[key]) map[key] = { key, type:t.assignedType, id:t.assignedId, name:entityName(t.assignedType,t.assignedId), total:0, closed:0, red:false };
     map[key].total++;
     if(t.status==='closed') map[key].closed++;
-    if(t.extended) map[key].red = true;
+    if(isTaskDelayed(t)) map[key].red = true;
   });
   return Object.values(map);
 }
 
 function taskDerivedStatus(t){
-  if(t.status==='closed') return t.extended ? 'closed-late' : 'closed-on-time';
-  return t.extended ? 'open-delayed' : 'open-on-track';
+  const delayed = isTaskDelayed(t);
+  if(t.status==='closed') return delayed ? 'closed-late' : 'closed-on-time';
+  return delayed ? 'open-delayed' : 'open-on-track';
 }
 
 /* ============================== RENDER HELPERS ============================== */
@@ -609,8 +676,8 @@ function render(){
   app.innerHTML = `
     <div class="navrail">
       <div class="brand"></div>
-      ${navBtn('portfolio','portfolio','Board')}
-      ${ui.projectId ? navBtn('project','project','Project') : ''}
+      ${navBtn('portfolio','portfolio','Focus Area')}
+      ${ui.projectId ? navBtn('project','project','Workstream') : ''}
       ${navBtn('reports','reports','Reports')}
       ${isAdmin() ? navBtn('admin','admin','Admin') : ''}
       <div class="spacer"></div>
@@ -633,14 +700,14 @@ function navBtn(view, icon, label){
 }
 
 function breadcrumb(){
-  if(ui.view==='portfolio') return 'CONTROL ROOM / <b>PORTFOLIO</b>';
+  if(ui.view==='portfolio') return 'IMPROVEID DASHBOARD / <b>FOCUS AREA</b>';
   if(ui.view==='project'){
     const p = state.projects.find(p=>p.id===ui.projectId);
-    return `CONTROL ROOM / <b>${p ? p.name.toUpperCase() : 'PROJECT'}</b>`;
+    return `IMPROVEID DASHBOARD / <b>${p ? p.name.toUpperCase() : 'WORKSTREAM'}</b>`;
   }
-  if(ui.view==='reports') return 'CONTROL ROOM / <b>REPORTS</b>';
-  if(ui.view==='admin') return 'CONTROL ROOM / <b>ADMIN</b>';
-  return 'CONTROL ROOM';
+  if(ui.view==='reports') return 'IMPROVEID DASHBOARD / <b>REPORTS</b>';
+  if(ui.view==='admin') return 'IMPROVEID DASHBOARD / <b>ADMIN</b>';
+  return 'IMPROVEID DASHBOARD';
 }
 
 function renderView(){
@@ -677,7 +744,7 @@ function renderLogin(){
   <div class="login-shell">
     <div class="login-card">
       <div class="login-mark"></div>
-      <div class="login-title">Control Room</div>
+      <div class="login-title">ImproveID Dashboard</div>
       <div class="muted" style="font-size:13px;">Sign in to track project timelines and handoffs.</div>
       <form id="loginForm" style="margin-top:22px;">
         <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
@@ -738,25 +805,33 @@ function bindLogin(){
 /* ============================== PORTFOLIO ============================== */
 
 function renderPortfolio(){
-  const projects = state.projects;
-  const summaries = projects.map(p=>{
+  const allProjects = visibleProjects();
+  let summaries = allProjects.map(p=>{
     const tl = projectTimeline(p.id);
     const tasks = projectTasks(p.id);
     const closed = tasks.filter(t=>t.status==='closed').length;
     const pct = tasks.length ? Math.round(closed/tasks.length*100) : 0;
-    return { p, tl, tasks, closed, pct };
+    const isClosedProject = tasks.length>0 && closed===tasks.length;
+    return { p, tl, tasks, closed, pct, isClosedProject };
   });
   const onTrack = summaries.filter(s=>!s.tl.isRed).length;
   const delayed = summaries.filter(s=>s.tl.isRed).length;
 
-  const cards = summaries.map(s=>{
+  const filter = ui.portfolioFilter || 'all';
+  const filtered = summaries.filter(s=> filter==='all' ? true : filter==='open' ? !s.isClosedProject : s.isClosedProject);
+
+  const cards = filtered.map(s=>{
     const status = s.tl.isRed ? 'red':'green';
     const deadline = addDays(s.p.startDate, s.tl.originalTotal);
+    const blockingTeams = blockedTeamsForProject(s.p.id);
     return `
     <div class="proj-card status-${status}" data-open-project="${s.p.id}">
-      <div class="eyebrow">${s.tasks.length} task${s.tasks.length===1?'':'s'} · started ${fmtDate(s.p.startDate)}</div>
+      <div class="eyebrow">${s.tasks.length} task${s.tasks.length===1?'':'s'} · started ${fmtDate(s.p.startDate)}${s.isClosedProject ? ' · closed' : ''}</div>
       <div class="pname">${s.p.name}</div>
-      ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d` : 'On agreed timeline')}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d` : 'On agreed timeline')}
+        ${blockingTeams.length ? `<span class="pill pill-amber pill-blink"><span class="dot"></span>Blocked</span>` : ''}
+      </div>
       <div class="proj-meta">
         <span>DEADLINE <b style="color:var(--paper);">${fmtDate(deadline)}</b></span>
         <span>${s.pct}% CLOSED</span>
@@ -766,20 +841,28 @@ function renderPortfolio(){
   }).join('');
 
   return `
-    <div class="eyebrow">Portfolio</div>
-    <h1 class="page-title" style="margin-bottom:22px;">All projects, one board</h1>
+    <div class="eyebrow">Focus Area</div>
+    <h1 class="page-title" style="margin-bottom:22px;">All workstreams, one board</h1>
 
     <div class="stat-strip">
-      <div class="stat-chip"><div class="n">${projects.length}</div><div class="l">Projects</div></div>
+      <div class="stat-chip"><div class="n">${allProjects.length}</div><div class="l">Workstreams</div></div>
       <div class="stat-chip"><div class="n" style="color:var(--green);">${onTrack}</div><div class="l">On agreed timeline</div></div>
       <div class="stat-chip"><div class="n" style="color:var(--red);">${delayed}</div><div class="l">Delayed</div></div>
-      <div class="stat-chip"><div class="n">${state.tasks.length}</div><div class="l">Tasks tracked</div></div>
+      <div class="stat-chip"><div class="n">${allProjects.reduce((s,p)=>s+projectTasks(p.id).length,0)}</div><div class="l">Tasks tracked</div></div>
+    </div>
+
+    <div class="filters">
+      <select id="portfolioFilter">
+        <option value="all" ${filter==='all'?'selected':''}>All workstreams</option>
+        <option value="open" ${filter==='open'?'selected':''}>Open workstreams</option>
+        <option value="closed" ${filter==='closed'?'selected':''}>Closed workstreams</option>
+      </select>
     </div>
 
     <div class="grid g3">
-      ${cards || `<div class="empty-state"><div class="et">No projects yet</div>Create one from Admin.</div>`}
+      ${cards || `<div class="empty-state"><div class="et">No workstreams to show</div>${allProjects.length ? 'Try a different filter.' : 'Create one from Admin.'}</div>`}
     </div>
-    ${isAdmin() ? `<div style="margin-top:22px;"><button class="btn btn-primary" data-nav="admin">+ New project</button></div>` : ''}
+    ${isAdmin() ? `<div style="margin-top:22px;"><button class="btn btn-primary" data-nav="admin">+ New workstream</button></div>` : ''}
   `;
 }
 
@@ -788,13 +871,16 @@ function bindPortfolio(){
     c.addEventListener('click', ()=>{ ui.projectId = c.dataset.openProject; ui.view='project'; render(); });
   });
   document.querySelectorAll('[data-nav="admin"]').forEach(b=>b.addEventListener('click', ()=>{ ui.view='admin'; render(); }));
+  const filterSel = document.getElementById('portfolioFilter');
+  if(filterSel) filterSel.addEventListener('change', ()=>{ ui.portfolioFilter = filterSel.value; render(); });
 }
 
 /* ============================== PROJECT DASHBOARD ============================== */
 
 function renderProject(){
   const p = state.projects.find(x=>x.id===ui.projectId);
-  if(!p) return `<div class="empty-state"><div class="et">Project not found</div></div>`;
+  if(!p) return `<div class="empty-state"><div class="et">Workstream not found</div></div>`;
+  if(!canAccessProject(p.id)) return `<div class="empty-state"><div class="et">You don't have access to this workstream</div>Ask an admin to add you to it.</div>`;
   const tl = projectTimeline(p.id);
   const tasks = projectTasks(p.id);
   const closed = tasks.filter(t=>t.status==='closed').length;
@@ -839,34 +925,47 @@ function renderProject(){
 
   const taskRows = tasks.map(t=>{
     const color = taskStatusColor(t);
-    const canEdit = isAdmin() || (currentUser() && ((t.assignedType==='user' && t.assignedId===currentUser().id) || (t.assignedType==='team' && t.assignedId===currentUser().teamId)));
+    const cu = currentUser();
+    const canEdit = isAdmin() || (cu && cu.role!=='viewer' && ((t.assignedType==='user' && t.assignedId===cu.id) || (t.assignedType==='team' && t.assignedId===cu.teamId)));
+    const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
     return `
     <tr>
       <td>
         <div class="task-title">${t.title || '<span class="muted">Untitled task</span>'}</div>
         ${t.description ? `<div class="task-desc">${t.description}</div>` : '<div class="task-desc">No description yet</div>'}
+        ${blockedTeamName ? `<div style="margin-top:6px;">${pill('amber', 'Blocked by '+blockedTeamName)}</div>` : ''}
       </td>
       <td>${entityName(t.assignedType,t.assignedId)}</td>
       <td class="date-pair">
         ${fmtDate(t.startDate)} →
-        ${t.extended ? `<span class="strike">${fmtDate(t.originalEndDate)}</span> <span class="ext">${fmtDate(t.endDate)}</span>` : fmtDate(t.endDate)}
+        ${t.extended
+          ? `<span class="strike">${fmtDate(t.originalEndDate)}</span> <span class="ext">${fmtDate(t.endDate)}</span>`
+          : (isTaskDelayed(t) ? `<span class="ext">${fmtDate(t.endDate)}</span>` : fmtDate(t.endDate))}
       </td>
-      <td>${pill(color, color==='green' ? (t.status==='closed'?'Closed on time':'On track') : color==='red' ? 'Extended' : 'Open')}</td>
+      <td>${pill(color, color==='green' ? (t.status==='closed'?'Closed on time':'On track') : color==='red' ? (t.extended?'Extended':'Overdue') : 'Open')}</td>
       <td>
         <div class="row-actions">
           ${canEdit ? `<button class="btn btn-sm" data-edit-task="${t.id}">Edit</button>` : ''}
           ${canEdit && t.status!=='closed' ? `<button class="btn btn-sm btn-danger" data-extend-task="${t.id}">Extend date</button>` : ''}
+          ${canEdit && t.status!=='closed' ? (blockedTeamName
+              ? `<button class="btn btn-sm" data-clear-blocker="${t.id}" style="background:var(--amber-soft);color:var(--amber);border-color:rgba(224,172,63,.35);">Clear blocker</button>`
+              : `<button class="btn btn-sm" data-set-blocker="${t.id}">Blocker</button>`) : ''}
         </div>
       </td>
     </tr>`;
   }).join('');
 
+  const blockingTeams = blockedTeamsForProject(p.id);
+
   return `
     <div class="hero status-${status}">
       <div>
-        <div class="eyebrow">Project</div>
+        <div class="eyebrow">Workstream</div>
         <h1 class="page-title">${p.name}</h1>
-        <div style="margin-top:10px;">${pill(status, status==='red' ? 'Delayed — timeline breached' : 'On agreed timeline')}</div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+          ${pill(status, status==='red' ? 'Delayed — timeline breached' : 'On agreed timeline')}
+          ${blockingTeams.length ? `<span class="pill pill-amber pill-blink"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+        </div>
       </div>
       <div class="hero-metrics">
         <div class="metric"><div class="eyebrow">Total days agreed</div><div class="val">${tl.originalTotal}</div><div class="sub">${tasks.length} tasks combined</div></div>
@@ -922,17 +1021,56 @@ function bindProject(){
   document.querySelectorAll('[data-extend-task]').forEach(el=>{
     el.addEventListener('click', (e)=>{ e.stopPropagation(); openExtendModal(el.dataset.extendTask); });
   });
+  document.querySelectorAll('[data-set-blocker]').forEach(el=>{
+    el.addEventListener('click', (e)=>{ e.stopPropagation(); openBlockerModal(el.dataset.setBlocker); });
+  });
+  document.querySelectorAll('[data-clear-blocker]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const t = state.tasks.find(x=>x.id===el.dataset.clearBlocker);
+      if(t){ t.blockedByTeamId = null; persist(); render(); }
+    });
+  });
   const addBtn = document.querySelector('[data-add-task]');
   if(addBtn) addBtn.addEventListener('click', ()=> openBlankTaskModal(ui.projectId));
   const rep = document.querySelector('[data-view-report]');
   if(rep) rep.addEventListener('click', ()=>{ ui.reportFilters = {project:ui.projectId, team:'', user:'', status:''}; ui.view='reports'; render(); });
 }
 
+function openBlockerModal(taskId){
+  const t = state.tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Flag a blocker</h3>
+        <div class="modal-sub">${t.title} — mark which team this task is waiting on.</div>
+        <form id="blockerForm">
+          <div class="field"><label>Blocked by team</label>
+            <select id="bkTeam">${state.teams.map(tm=>`<option value="${tm.id}">${tm.name}</option>`).join('')}</select>
+          </div>
+          <div class="hint">Everyone viewing this project will see a flashing "Blocked" indicator until this is cleared.</div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="bkSubmitBtn" class="btn btn-danger">Mark as blocked</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('blockerForm', 'bkSubmitBtn', ()=>{
+    const teamId = document.getElementById('bkTeam').value;
+    if(!teamId) return;
+    t.blockedByTeamId = teamId;
+    persist(); closeModal(); render();
+  });
+}
+
 /* ============================== TASK MODALS ============================== */
 
 function assigneeOptions(selectedType, selectedId){
   const teamOpts = state.teams.map(t=>`<option value="team:${t.id}" ${selectedType==='team'&&selectedId===t.id?'selected':''}>Team — ${t.name}</option>`).join('');
-  const userOpts = state.users.filter(u=>u.role!=='admin').map(u=>`<option value="user:${u.id}" ${selectedType==='user'&&selectedId===u.id?'selected':''}>${u.name}</option>`).join('');
+  const userOpts = state.users.filter(u=>u.role==='member').map(u=>`<option value="user:${u.id}" ${selectedType==='user'&&selectedId===u.id?'selected':''}>${u.name}</option>`).join('');
   return teamOpts + userOpts;
 }
 
@@ -970,7 +1108,7 @@ function openBlankTaskModal(projectId){
       id: uid('t'), projectId, title: titleEl.value.trim(),
       description:'', reason:'', assignedType:type, assignedId:id,
       predecessorId: document.getElementById('btPredecessor').value || null,
-      startDate:'', endDate:'', originalEndDate:'', extended:false, status:'open', closedDate:null,
+      startDate:'', endDate:'', originalEndDate:'', extended:false, blockedByTeamId:null, status:'open', closedDate:null,
       datesLocked:false, extensionHistory:[]
     };
     state.tasks.push(t); persist(); closeModal(); render();
@@ -994,7 +1132,7 @@ function openTaskModal(taskId){
             <div class="field"><label>Start date</label><input type="date" id="tfStart" value="${t.startDate}" ${datesEditable?'':'disabled'} required></div>
             <div class="field"><label>End date (agreed)</label><input type="date" id="tfEnd" value="${t.endDate}" ${datesEditable?'':'disabled'} required></div>
           </div>
-          ${!datesEditable ? '<div class="hint">Dates are locked once saved. Use "Extend date" from the project view, or ask an admin.</div>' : ''}
+          ${!datesEditable ? '<div class="hint">The agreed timeline is locked once saved. Use "Extend date" from the project view to record a new date — the original stays on permanent record. Admins can still override dates directly if needed.</div>' : (admin && t.datesLocked ? '<div class="hint">You\'re editing a locked timeline as admin — this replaces the permanent original record. For normal delays, prefer "Extend date" instead so the original stays on record.</div>' : '')}
           <div class="field"><label>Reason — why this much time?</label><textarea id="tfReason" placeholder="Explain the estimate...">${t.reason||''}</textarea></div>
           <div class="field"><label>Assign to</label><select id="tfAssignee" ${admin?'':'disabled'}>${assigneeOptions(t.assignedType,t.assignedId)}</select></div>
           ${admin ? `<div class="field"><label>Depends on</label><select id="tfPredecessor">${predecessorOptions(t.projectId,t.id,t.predecessorId)}</select></div>` : ''}
@@ -1090,20 +1228,24 @@ function bindModalClose(){
 /* ============================== REPORTS ============================== */
 
 function renderReports(){
+  const accessIds = accessibleProjectIds();
+  const scopedTasks = accessIds===null ? state.tasks : state.tasks.filter(t=>accessIds.includes(t.projectId));
+  const scopedProjects = visibleProjects();
+
   const f = ui.reportFilters;
-  let rows = state.tasks.slice();
+  let rows = scopedTasks.slice();
   if(f.project) rows = rows.filter(t=>t.projectId===f.project);
   if(f.team) rows = rows.filter(t=>t.assignedType==='team' && t.assignedId===f.team);
   if(f.user) rows = rows.filter(t=>t.assignedType==='user' && t.assignedId===f.user);
   if(f.status) rows = rows.filter(t=>taskDerivedStatus(t)===f.status);
 
-  const total = state.tasks.length;
-  const onTime = state.tasks.filter(t=>!t.extended).length;
-  const late = state.tasks.filter(t=>t.extended).length;
+  const total = scopedTasks.length;
+  const onTime = scopedTasks.filter(t=>!isTaskDelayed(t)).length;
+  const late = scopedTasks.filter(t=>isTaskDelayed(t)).length;
 
   // leaderboard of delays by team/user
   const lb = {};
-  state.tasks.filter(t=>t.extended).forEach(t=>{
+  scopedTasks.filter(t=>isTaskDelayed(t)).forEach(t=>{
     const name = entityName(t.assignedType,t.assignedId);
     lb[name] = (lb[name]||0)+1;
   });
@@ -1117,13 +1259,14 @@ function renderReports(){
     const labelMap = {'closed-on-time':['green','Closed on time'],'closed-late':['red','Closed late'],'open-on-track':['amber','Open · on track'],'open-delayed':['red','Open · delayed']};
     const [color,label] = labelMap[ds];
     const proj = state.projects.find(p=>p.id===t.projectId);
-    const delayDays = t.extended ? daysBetween(t.originalEndDate, t.endDate) : 0;
+    const delayed = isTaskDelayed(t);
+    const delayDays = delayed ? Math.max(daysBetween(t.originalEndDate, effectiveEndDate(t)), 0) : 0;
     return `<tr>
       <td>${proj ? proj.name : '—'}</td>
       <td><div class="task-title">${t.title||'Untitled'}</div></td>
       <td>${entityName(t.assignedType,t.assignedId)}</td>
       <td class="mono" style="font-size:11px;">${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}</td>
-      <td class="mono" style="font-size:11px;${t.extended?'color:var(--red)':''}">${t.extended ? fmtDate(t.endDate) : '—'}</td>
+      <td class="mono" style="font-size:11px;${delayed?'color:var(--red)':''}">${t.extended ? fmtDate(t.endDate) : '—'}</td>
       <td>${pill(color,label)}</td>
       <td class="mono" style="font-size:11px;${delayDays>0?'color:var(--red)':''}">${delayDays>0 ? '-'+delayDays+'d' : '0d'}</td>
     </tr>`;
@@ -1147,7 +1290,7 @@ function renderReports(){
       <div class="card">
         <div class="section-title">Filter</div>
         <div class="filters">
-          <select id="fProject"><option value="">All projects</option>${state.projects.map(p=>`<option value="${p.id}" ${f.project===p.id?'selected':''}>${p.name}</option>`).join('')}</select>
+          <select id="fProject"><option value="">All workstreams</option>${scopedProjects.map(p=>`<option value="${p.id}" ${f.project===p.id?'selected':''}>${p.name}</option>`).join('')}</select>
           <select id="fTeam"><option value="">All teams</option>${state.teams.map(t=>`<option value="${t.id}" ${f.team===t.id?'selected':''}>${t.name}</option>`).join('')}</select>
           <select id="fUser"><option value="">All individuals</option>${state.users.filter(u=>u.role!=='admin').map(u=>`<option value="${u.id}" ${f.user===u.id?'selected':''}>${u.name}</option>`).join('')}</select>
           <select id="fStatus">
@@ -1163,7 +1306,7 @@ function renderReports(){
 
     <div class="card">
       <table>
-        <thead><tr><th>Project</th><th>Task</th><th>Assigned</th><th>Agreed window</th><th>Extended to</th><th>Status</th><th>Delay</th></tr></thead>
+        <thead><tr><th>Workstream</th><th>Task</th><th>Assigned</th><th>Agreed window</th><th>Extended to</th><th>Status</th><th>Delay</th></tr></thead>
         <tbody>${tableRows || `<tr><td colspan="7" class="empty-state">No tasks match these filters.</td></tr>`}</tbody>
       </table>
     </div>
@@ -1191,11 +1334,11 @@ function bindReports(){
 function renderAdmin(){
   return `
     <div class="eyebrow">Admin</div>
-    <h1 class="page-title" style="margin-bottom:20px;">Users, teams &amp; projects</h1>
+    <h1 class="page-title" style="margin-bottom:20px;">Users, teams &amp; workstreams</h1>
     <div class="tabs">
       <button class="tab ${ui.adminTab==='users'?'active':''}" data-tab="users">Users</button>
       <button class="tab ${ui.adminTab==='teams'?'active':''}" data-tab="teams">Teams</button>
-      <button class="tab ${ui.adminTab==='projects'?'active':''}" data-tab="projects">Projects</button>
+      <button class="tab ${ui.adminTab==='projects'?'active':''}" data-tab="projects">Workstreams</button>
     </div>
     ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='teams' ? renderAdminTeams() : renderAdminProjects()}
   `;
@@ -1203,17 +1346,24 @@ function renderAdmin(){
 
 function renderAdminUsers(){
   const rows = state.users.filter(u=>u.role!=='admin').map(u=>{
-    const team = state.teams.find(t=>t.id===u.teamId);
+    const isViewer = u.role==='viewer';
+    const accessLabel = isViewer ? (u.viewerProjectIds==='all' ? 'All workstreams' : `${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length} workstream${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length===1?'':'s'}`) : '—';
     return `<tr>
       <td><div class="userchip"><div class="initials">${initials(u.name)}</div>${u.name}</div></td>
       <td class="mono" style="font-size:12px;">${u.username}</td>
+      <td>${isViewer ? pill('amber','Viewer') : pill('green','Member')}</td>
       <td>
+        ${isViewer ? `<span class="mono" style="font-size:12px;">${accessLabel}</span>` : `
         <select data-user-team="${u.id}">
           <option value="">Unassigned</option>
           ${state.teams.map(t=>`<option value="${t.id}" ${u.teamId===t.id?'selected':''}>${t.name}</option>`).join('')}
-        </select>
+        </select>`}
       </td>
-      <td><div class="row-actions"><button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button><button class="btn btn-sm btn-danger" data-del-user="${u.id}">Remove</button></div></td>
+      <td><div class="row-actions">
+        ${isViewer ? `<button class="btn btn-sm" data-edit-access="${u.id}">Edit access</button>` : ''}
+        <button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button>
+        <button class="btn btn-sm btn-danger" data-del-user="${u.id}">Remove</button>
+      </div></td>
     </tr>`;
   }).join('');
   return `
@@ -1223,8 +1373,8 @@ function renderAdminUsers(){
         <button class="btn btn-primary btn-sm" data-add-user>+ Create user</button>
       </div>
       <table>
-        <thead><tr><th>Name</th><th>Username</th><th>Team</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4" class="empty-state">No users yet.</td></tr>`}</tbody>
+        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team / Access</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="empty-state">No users yet.</td></tr>`}</tbody>
       </table>
     </div>`;
 }
@@ -1258,10 +1408,10 @@ function renderAdminProjects(){
   return `
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-        <div class="section-title" style="margin-bottom:0;">Projects</div>
-        <button class="btn btn-primary btn-sm" data-add-project>+ Create project</button>
+        <div class="section-title" style="margin-bottom:0;">Workstreams</div>
+        <button class="btn btn-primary btn-sm" data-add-project>+ Create workstream</button>
       </div>
-      <table><thead><tr><th>Project</th><th>Started</th><th>Tasks</th><th>Status</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="empty-state">No projects yet.</td></tr>`}</tbody></table>
+      <table><thead><tr><th>Workstream</th><th>Started</th><th>Tasks</th><th>Status</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="empty-state">No workstreams yet.</td></tr>`}</tbody></table>
     </div>`;
 }
 
@@ -1284,6 +1434,9 @@ function bindAdmin(){
     const u = state.users.find(x=>x.id===b.dataset.viewCreds);
     showCredentialsModal(u);
   }));
+  document.querySelectorAll('[data-edit-access]').forEach(b=>b.addEventListener('click', ()=>{
+    openEditAccessModal(b.dataset.editAccess);
+  }));
 
   const addTeam = document.querySelector('[data-add-team]');
   if(addTeam) addTeam.addEventListener('click', openAddTeamModal);
@@ -1304,7 +1457,7 @@ function openDeleteProjectModal(projectId, projectName, taskCount){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
-        <h3>Delete project?</h3>
+        <h3>Delete workstream?</h3>
         <div class="modal-sub">This can't be undone.</div>
         <p style="font-size:13px;color:var(--paper-dim);line-height:1.6;">
           This will permanently delete <b style="color:var(--paper);">${projectName}</b>
@@ -1312,7 +1465,7 @@ function openDeleteProjectModal(projectId, projectName, taskCount){
         </p>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" data-close>Cancel</button>
-          <button type="button" class="btn btn-danger" id="confirmDeleteProjectBtn">Delete project</button>
+          <button type="button" class="btn btn-danger" id="confirmDeleteProjectBtn">Delete workstream</button>
         </div>
       </div>
     </div>`;
@@ -1339,7 +1492,23 @@ function openAddUserModal(){
         <form id="userForm">
           <div class="field"><label>Full name</label><input id="uName" required></div>
           <div class="field"><label>Username</label><input id="uUsername" required></div>
-          <div class="field"><label>Team</label><select id="uTeam"><option value="">Unassigned</option>${state.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div>
+          <div class="field"><label>Role</label>
+            <select id="uRole">
+              <option value="member">Member — assigned to a team, works on tasks</option>
+              <option value="viewer">Viewer — read-only, no task assignments</option>
+            </select>
+          </div>
+          <div class="field" id="uTeamField"><label>Team</label><select id="uTeam"><option value="">Unassigned</option>${state.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div>
+          <div class="field" id="uAccessField" style="display:none;">
+            <label>Workstream access</label>
+            <select id="uAccessMode">
+              <option value="all">All workstreams</option>
+              <option value="specific">Specific workstreams</option>
+            </select>
+            <div id="uAccessList" style="display:none;margin-top:10px;display:flex;flex-direction:column;gap:6px;">
+              ${state.projects.map(p=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;"><input type="checkbox" value="${p.id}" class="uAccessCheck"> ${p.name}</label>`).join('') || '<div class="hint">No workstreams exist yet.</div>'}
+            </div>
+          </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="userSubmitBtn" class="btn btn-primary">Create</button>
@@ -1348,13 +1517,66 @@ function openAddUserModal(){
       </div>
     </div>`;
   bindModalClose();
+  const roleSel = document.getElementById('uRole');
+  const teamField = document.getElementById('uTeamField');
+  const accessField = document.getElementById('uAccessField');
+  const accessMode = document.getElementById('uAccessMode');
+  const accessList = document.getElementById('uAccessList');
+  roleSel.addEventListener('change', ()=>{
+    const isViewer = roleSel.value==='viewer';
+    teamField.style.display = isViewer ? 'none' : '';
+    accessField.style.display = isViewer ? '' : 'none';
+  });
+  accessMode.addEventListener('change', ()=>{
+    accessList.style.display = accessMode.value==='specific' ? 'flex' : 'none';
+  });
   runOnClickAndEnter('userForm', 'userSubmitBtn', ()=>{
     const nameEl = document.getElementById('uName');
     const userEl = document.getElementById('uUsername');
     if(!nameEl.value.trim() || !userEl.value.trim()){ (nameEl.value.trim()?userEl:nameEl).focus(); return; }
-    const u = { id: uid('u'), name: nameEl.value.trim(), username: userEl.value.trim(), password: randomPassword(), role:'member', teamId: document.getElementById('uTeam').value || null };
+    const isViewer = roleSel.value==='viewer';
+    const u = { id: uid('u'), name: nameEl.value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null) };
+    if(isViewer){
+      u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
+    }
     state.users.push(u); persist();
     showCredentialsModal(u);
+  });
+}
+
+function openEditAccessModal(userId){
+  const u = state.users.find(x=>x.id===userId);
+  if(!u) return;
+  const currentIds = Array.isArray(u.viewerProjectIds) ? u.viewerProjectIds : [];
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Edit access — ${u.name}</h3>
+        <div class="modal-sub">Choose which workstreams this viewer can see.</div>
+        <form id="accessForm">
+          <div class="field">
+            <select id="eaMode">
+              <option value="all" ${u.viewerProjectIds==='all'?'selected':''}>All workstreams</option>
+              <option value="specific" ${u.viewerProjectIds!=='all'?'selected':''}>Specific workstreams</option>
+            </select>
+            <div id="eaList" style="margin-top:10px;display:${u.viewerProjectIds==='all'?'none':'flex'};flex-direction:column;gap:6px;">
+              ${state.projects.map(p=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;"><input type="checkbox" value="${p.id}" class="eaCheck" ${currentIds.includes(p.id)?'checked':''}> ${p.name}</label>`).join('') || '<div class="hint">No workstreams exist yet.</div>'}
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="eaSubmitBtn" class="btn btn-primary">Save access</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  const eaMode = document.getElementById('eaMode');
+  const eaList = document.getElementById('eaList');
+  eaMode.addEventListener('change', ()=>{ eaList.style.display = eaMode.value==='specific' ? 'flex' : 'none'; });
+  runOnClickAndEnter('accessForm', 'eaSubmitBtn', ()=>{
+    u.viewerProjectIds = eaMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.eaCheck:checked')).map(c=>c.value);
+    persist(); closeModal(); render();
   });
 }
 
@@ -1400,9 +1622,9 @@ function openAddProjectModal(){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
-        <h3>Create project</h3>
+        <h3>Create workstream</h3>
         <form id="projForm">
-          <div class="field"><label>Project name</label><input id="pName" required></div>
+          <div class="field"><label>Workstream name</label><input id="pName" required></div>
           <div class="field"><label>Start date</label><input type="date" id="pStart" value="${todayISO()}" required></div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>

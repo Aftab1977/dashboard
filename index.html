@@ -85,6 +85,7 @@
   }
   .crumb{font-family:var(--f-mono);font-size:12px;color:var(--paper-dim);letter-spacing:.03em;}
   .crumb b{color:var(--paper);font-weight:600;}
+  .today-display{font-size:12px;font-weight:600;color:var(--amber);letter-spacing:.03em;padding:4px 12px;border:1px solid rgba(224,172,63,.4);background:var(--amber-soft);border-radius:99px;box-shadow:0 0 12px -4px rgba(224,172,63,.35);}
   .who{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--paper-dim);}
   .who .avatar{
     width:28px;height:28px;border-radius:50%;background:var(--panel-hi);
@@ -141,6 +142,19 @@
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
   .pill-blink{animation:pillBlink 1.6s ease-in-out infinite;}
   @keyframes pillBlink{0%,100%{opacity:1;}50%{opacity:.4;}}
+
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:6px;}
+  .cal-dow{font-size:10px;color:var(--paper-faint);text-align:center;text-transform:uppercase;letter-spacing:.06em;padding-bottom:2px;}
+  .cal-day{aspect-ratio:1;border-radius:6px;background:var(--panel-raised);display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:11px;color:var(--paper-dim);border:1px solid var(--line-soft);}
+  .cal-day.blank{background:transparent;border:none;}
+  .cal-day.weekend{border-style:dashed;}
+  .cal-day.weekend:not(.closed):not(.current):not(.future){background:rgba(255,255,255,.025);color:var(--paper-faint);}
+  .cal-day.closed{background:rgba(230,159,90,.22);color:#E6A560;border-color:rgba(230,159,90,.45);}
+  .cal-day.current{background:rgba(232,214,107,.22);color:#E8D66B;border-color:rgba(232,214,107,.45);font-weight:700;}
+  .cal-day.future{background:rgba(126,182,224,.2);color:#7EB6E0;border-color:rgba(126,182,224,.42);}
+  .cal-day.free{background:rgba(143,214,158,.18);color:#8FD69E;border-color:rgba(143,214,158,.38);}
+  .cal-day.admin-toggle{cursor:pointer;}
+  .cal-day.admin-toggle:hover{outline:1px solid var(--paper-dim);outline-offset:1px;}
 
   /* ---------- portfolio cards ---------- */
   .proj-card{
@@ -377,7 +391,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, adminTab:'users', portfolioFilter:'all', reportFilters:{project:'',team:'',user:'',status:''}, loginError:'' };
+let ui = { view:'login', projectId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'' };
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -399,16 +413,43 @@ function todayISO(){
   const IST_OFFSET_MS = (5*60+30)*60*1000;
   return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0,10);
 }
-function addDays(iso, n){ const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function addDays(iso, n){
+  const d = new Date(iso+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00')) / 86400000); }
 function fmtDate(iso){ if(!iso) return '—'; const d = new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'2-digit',year:'numeric'}); }
+function isWeekendISO(iso){ const dow = new Date(iso+'T00:00:00').getDay(); return dow===0 || dow===6; }
+// Inclusive day span between two dates, and how many of those days fall on a Sat/Sun —
+// purely informational, doesn't feed into any delay or duration math.
+function calendarVsWorkingDays(start, end){
+  if(!start || !end || end < start) return null;
+  let calendarDays = 0, weekendDays = 0;
+  let cur = new Date(start+'T00:00:00');
+  const endD = new Date(end+'T00:00:00');
+  while(cur<=endD){
+    calendarDays++;
+    const dow = cur.getDay();
+    if(dow===0||dow===6) weekendDays++;
+    cur.setDate(cur.getDate()+1);
+  }
+  return { calendarDays, weekendDays, workingDays: calendarDays-weekendDays };
+}
+function dateRangeHint(start, end){
+  const r = calendarVsWorkingDays(start, end);
+  if(!r) return '';
+  if(r.weekendDays===0) return `${r.calendarDays} calendar day${r.calendarDays===1?'':'s'} · no weekend days in range`;
+  return `${r.calendarDays} calendar day${r.calendarDays===1?'':'s'} · ${r.workingDays} working day${r.workingDays===1?'':'s'} · includes ${r.weekendDays} weekend day${r.weekendDays===1?'':'s'}`;
+}
 function initials(name){ return name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
 
 // A task is delayed the moment either condition happens, and it stays delayed
 // permanently after that — even once the task or the whole project is closed:
 //  1) it was ever pushed back with the Extend Date option, or
-//  2) today (IST) passed its original agreed deadline while it was still open
-//     (and if it later closed, it closed after that original deadline).
+//  2) today (IST) has passed its original agreed deadline while it's still open —
+//     this is live, no button needed, and once it's happened it stays true even
+//     after the task later closes (admins can always amend the record via "Amend timeline").
 function isTaskDelayed(t){
   if(t.extended) return true;
   if(t.status==='closed'){
@@ -418,7 +459,7 @@ function isTaskDelayed(t){
 }
 // The date a task's current duration should be measured against: its agreed/extended
 // end date, but if it's still open and that date has already passed, the gap keeps
-// growing with each day (today) until it's closed or extended — then it freezes.
+// growing with each day (today, IST) until it's closed or extended — then it freezes.
 function effectiveEndDate(t){
   if(!t.endDate) return t.endDate;
   if(t.status==='closed'){
@@ -434,12 +475,20 @@ function blockedTeamsForProject(projectId){
   return Array.from(ids).map(id => (state.teams.find(tm=>tm.id===id) || {}).name || 'Unknown team');
 }
 
+// Which teams/individuals actually have a delayed task in this project — used to
+// show "DELAYED 5D BY <who>" so it's obvious at a glance who to go ask.
+function delayResponsibleNames(projectId){
+  const names = new Set();
+  projectTasks(projectId).forEach(t=>{ if(isTaskDelayed(t)) names.add(entityName(t.assignedType,t.assignedId)); });
+  return Array.from(names);
+}
+
 function seedState(){
   const t0 = addDays(todayISO(), -12);
   const teams = [
-    {id:'team_design', name:'Design'},
-    {id:'team_backend', name:'Backend'},
-    {id:'team_qa', name:'QA'},
+    {id:'team_design', name:'Design', checklist:[{id:'cl_1', text:'Confirm design tokens match the latest brand guide'}, {id:'cl_2', text:'Check responsive behaviour on mobile widths'}]},
+    {id:'team_backend', name:'Backend', checklist:[{id:'cl_3', text:'API responses reviewed for consistent error format'}]},
+    {id:'team_qa', name:'QA', checklist:[]},
   ];
   const users = [
     {id:'admin', name:'Admin', username:'admin', password:'admin123', role:'admin', teamId:null},
@@ -450,8 +499,8 @@ function seedState(){
   const p1 = 'proj_portal';
   const p2 = 'proj_vendor';
   const projects = [
-    {id:p1, name:'Client Portal Revamp', startDate:t0, createdAt:t0},
-    {id:p2, name:'Vendor Onboarding Flow', startDate:addDays(todayISO(),-5), createdAt:addDays(todayISO(),-5)},
+    {id:p1, name:'Client Portal Revamp', startDate:t0, createdAt:t0, requireChecklist:true},
+    {id:p2, name:'Vendor Onboarding Flow', startDate:addDays(todayISO(),-5), createdAt:addDays(todayISO(),-5), requireChecklist:false},
   ];
 
   const t1s = t0, t1e = addDays(t0,2);
@@ -461,11 +510,11 @@ function seedState(){
   const t5s = addDays(t0,3), t5e = addDays(t0,5);
 
   const tasks = [
-    {id:'t1', projectId:p1, title:'Wireframes', description:'Low-fi wireframes for the four core portal screens.', reason:'Two working days covers discovery plus one revision pass.', assignedType:'team', assignedId:'team_design', predecessorId:null, startDate:t1s, endDate:t1e, originalEndDate:t1e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t1e,-1), datesLocked:true, extensionHistory:[]},
-    {id:'t2', projectId:p1, title:'Content Audit', description:'Audit existing marketing copy and flag gaps for the new portal.', reason:'Three days to review all existing pages and interview stakeholders.', assignedType:'team', assignedId:'team_qa', predecessorId:null, startDate:t2s, endDate:t2e, originalEndDate:t2e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t2e,-1), datesLocked:true, extensionHistory:[]},
-    {id:'t3', projectId:p1, title:'Design System Build', description:'Component library covering buttons, forms, cards and navigation.', reason:'Five days needed to cover every shared component before build starts.', assignedType:'team', assignedId:'team_design', predecessorId:null, startDate:t3s, endDate:t3eNow, originalEndDate:t3eOrig, extended:true, blockedByTeamId:null, status:'open', closedDate:null, datesLocked:true, extensionHistory:[{date:addDays(t3eOrig,-1), newEndDate:t3eNow, reason:'Token review with brand ran long; needed two extra days.'}]},
-    {id:'t4', projectId:p1, title:'API Development', description:'Build the account, billing and document endpoints.', reason:'Three days for the three endpoint groups.', assignedType:'team', assignedId:'team_backend', predecessorId:null, startDate:t4s, endDate:t4e, originalEndDate:t4e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t4e,-1), datesLocked:true, extensionHistory:[]},
-    {id:'t5', projectId:p1, title:'Integration Testing', description:'End-to-end tests against the new API endpoints.', reason:'Two days once the API handoff lands.', assignedType:'team', assignedId:'team_qa', predecessorId:'t4', startDate:t5s, endDate:t5e, originalEndDate:t5e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t5e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t1', projectId:p1, title:'Wireframes', description:'Low-fi wireframes for the four core portal screens.', reason:'Two working days covers discovery plus one revision pass.', assignedType:'user', assignedId:'u_priya', predecessorId:null, startDate:t1s, endDate:t1e, originalEndDate:t1e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t1e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t2', projectId:p1, title:'Content Audit', description:'Audit existing marketing copy and flag gaps for the new portal.', reason:'Three days to review all existing pages and interview stakeholders.', assignedType:'user', assignedId:'u_meera', predecessorId:null, startDate:t2s, endDate:t2e, originalEndDate:t2e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t2e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t3', projectId:p1, title:'Design System Build', description:'Component library covering buttons, forms, cards and navigation.', reason:'Five days needed to cover every shared component before build starts.', assignedType:'user', assignedId:'u_priya', predecessorId:null, startDate:t3s, endDate:t3eNow, originalEndDate:t3eOrig, extended:true, blockedByTeamId:null, status:'open', closedDate:null, datesLocked:true, extensionHistory:[{date:addDays(t3eOrig,-1), newEndDate:t3eNow, reason:'Token review with brand ran long; needed two extra days.'}]},
+    {id:'t4', projectId:p1, title:'API Development', description:'Build the account, billing and document endpoints.', reason:'Three days for the three endpoint groups.', assignedType:'user', assignedId:'u_arjun', predecessorId:null, startDate:t4s, endDate:t4e, originalEndDate:t4e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t4e,-1), datesLocked:true, extensionHistory:[]},
+    {id:'t5', projectId:p1, title:'Integration Testing', description:'End-to-end tests against the new API endpoints.', reason:'Two days once the API handoff lands.', assignedType:'user', assignedId:'u_meera', predecessorId:'t4', startDate:t5s, endDate:t5e, originalEndDate:t5e, extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(t5e,-1), datesLocked:true, extensionHistory:[]},
 
     {id:'t6', projectId:p2, title:'Vendor Docs Checklist', description:'Collect W-9s, insurance certs and banking details.', reason:'Two days to chase paperwork from three vendors.', assignedType:'user', assignedId:'u_meera', predecessorId:null, startDate:addDays(todayISO(),-5), endDate:addDays(todayISO(),-3), originalEndDate:addDays(todayISO(),-3), extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(todayISO(),-4), datesLocked:true, extensionHistory:[]},
     {id:'t7', projectId:p2, title:'Portal Access Setup', description:'Provision vendor logins to the procurement portal.', reason:'', assignedType:'user', assignedId:'u_arjun', predecessorId:'t6', startDate:addDays(todayISO(),-3), endDate:addDays(todayISO(),2), originalEndDate:addDays(todayISO(),2), extended:false, blockedByTeamId:null, status:'open', closedDate:null, datesLocked:true, extensionHistory:[]},
@@ -567,6 +616,24 @@ function canAccessProject(projectId){
   const ids = accessibleProjectIds();
   return ids===null || ids.includes(projectId);
 }
+// Admins and members can always see Active Assignments (members are limited to their
+// own row there — see renderAssignments). Viewers only get it if an admin switched it on.
+function canSeeAssignmentsPage(){
+  const u = currentUser();
+  if(!u) return false;
+  if(u.role==='admin' || u.role==='member') return true;
+  if(u.role==='viewer') return !!u.viewerCanSeeAssignments;
+  return false;
+}
+// Once a task is closed, only admins can open/edit it again — everyone else loses
+// access at that point, even if it was originally assigned to them.
+function canEditTask(t){
+  const cu = currentUser();
+  if(isAdmin()) return true;
+  if(!cu || cu.role==='viewer') return false;
+  const isAssignedToMe = (t.assignedType==='user' && t.assignedId===cu.id) || (t.assignedType==='team' && t.assignedId===cu.teamId);
+  return isAssignedToMe && t.status!=='closed';
+}
 
 function projectTasks(projectId){ return state.tasks.filter(t=>t.projectId===projectId); }
 
@@ -597,7 +664,7 @@ function chainSum(chain, useCurrent){
 function projectTimeline(projectId){
   const tasks = projectTasks(projectId);
   if(tasks.length === 0){
-    return { chains:[], originalTotal:0, currentTotal:0, delay:0, isRed:false, criticalIndex:-1 };
+    return { chains:[], originalTotal:0, currentTotal:0, delay:0, isRed:false, criticalIndex:-1, originalDeadline:null, currentDeadline:null };
   }
   const chains = buildChains(tasks);
   const origSums = chains.map(c=>chainSum(c,false));
@@ -607,7 +674,11 @@ function projectTimeline(projectId){
   const delay = currentTotal - originalTotal;
   const isRed = tasks.some(t=>isTaskDelayed(t));
   const criticalIndex = curSums.indexOf(Math.max(...curSums));
-  return { chains, origSums, curSums, originalTotal, currentTotal, delay, isRed, criticalIndex };
+  // The deadline shown on the dashboard should be the actual latest task date on record,
+  // not an assumed project-start-plus-duration figure — this always matches what's on the tasks.
+  const originalDeadline = tasks.reduce((max,t)=> (t.originalEndDate && (!max || t.originalEndDate > max)) ? t.originalEndDate : max, null);
+  const currentDeadline = tasks.reduce((max,t)=> { const e = effectiveEndDate(t); return (e && (!max || e > max)) ? e : max; }, null);
+  return { chains, origSums, curSums, originalTotal, currentTotal, delay, isRed, criticalIndex, originalDeadline, currentDeadline };
 }
 
 function taskStatusColor(t){
@@ -618,7 +689,10 @@ function taskStatusColor(t){
 
 function entityName(assignedType, assignedId){
   if(assignedType==='team'){ const tm = state.teams.find(x=>x.id===assignedId); return tm ? tm.name : 'Unassigned'; }
-  const u = state.users.find(x=>x.id===assignedId); return u ? u.name : 'Unassigned';
+  const u = state.users.find(x=>x.id===assignedId);
+  if(!u) return 'Unassigned';
+  const tm = u.teamId ? state.teams.find(x=>x.id===u.teamId) : null;
+  return tm ? `${u.username}-${tm.name}` : u.name;
 }
 
 function progressByEntity(projectId){
@@ -658,6 +732,7 @@ function svgIcon(name){
     portfolio: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
     project: '<svg viewBox="0 0 24 24"><path d="M4 19V5a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M14 3v6h6"/></svg>',
     reports: '<svg viewBox="0 0 24 24"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>',
+    assignments: '<svg viewBox="0 0 24 24"><circle cx="9" cy="7" r="3.2"/><path d="M2.5 20c1.2-3.8 3.6-5.6 6.5-5.6s5.3 1.8 6.5 5.6"/><path d="M16 4.2a3.2 3.2 0 0 1 0 6.2"/><path d="M18.5 14.6c2 .6 3.4 2.3 4 5.4"/></svg>',
     admin: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
     logout: '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
   };
@@ -678,6 +753,7 @@ function render(){
       <div class="brand"></div>
       ${navBtn('portfolio','portfolio','Focus Area')}
       ${ui.projectId ? navBtn('project','project','Workstream') : ''}
+      ${canSeeAssignmentsPage() ? navBtn('assignments','assignments','Assignments') : ''}
       ${navBtn('reports','reports','Reports')}
       ${isAdmin() ? navBtn('admin','admin','Admin') : ''}
       <div class="spacer"></div>
@@ -686,7 +762,10 @@ function render(){
     <div class="main">
       <div class="topbar">
         <div class="crumb">${breadcrumb()}</div>
-        <div class="who"><span>${currentUser() ? currentUser().name : ''}</span><div class="avatar">${currentUser() ? initials(currentUser().name) : ''}</div></div>
+        <div style="display:flex;align-items:center;gap:16px;">
+          <div class="today-display mono" title="Today's date (IST)">${fmtDate(todayISO())}</div>
+          <div class="who"><span>${currentUser() ? currentUser().name : ''}</span><div class="avatar">${currentUser() ? initials(currentUser().name) : ''}</div></div>
+        </div>
       </div>
       <div class="content">${renderView()}</div>
     </div>
@@ -705,6 +784,7 @@ function breadcrumb(){
     const p = state.projects.find(p=>p.id===ui.projectId);
     return `IMPROVEID DASHBOARD / <b>${p ? p.name.toUpperCase() : 'WORKSTREAM'}</b>`;
   }
+  if(ui.view==='assignments') return 'IMPROVEID DASHBOARD / <b>ACTIVE ASSIGNMENTS</b>';
   if(ui.view==='reports') return 'IMPROVEID DASHBOARD / <b>REPORTS</b>';
   if(ui.view==='admin') return 'IMPROVEID DASHBOARD / <b>ADMIN</b>';
   return 'IMPROVEID DASHBOARD';
@@ -713,8 +793,9 @@ function breadcrumb(){
 function renderView(){
   if(ui.view==='portfolio') return renderPortfolio();
   if(ui.view==='project') return renderProject();
+  if(ui.view==='assignments') return canSeeAssignmentsPage() ? renderAssignments() : renderPortfolio();
   if(ui.view==='reports') return renderReports();
-  if(ui.view==='admin') return renderAdmin();
+  if(ui.view==='admin') return isAdmin() ? renderAdmin() : renderPortfolio();
   return '';
 }
 
@@ -731,6 +812,7 @@ function bindGlobalNav(){
 function bindView(){
   if(ui.view==='portfolio') bindPortfolio();
   if(ui.view==='project') bindProject();
+  if(ui.view==='assignments') bindAssignments();
   if(ui.view==='reports') bindReports();
   if(ui.view==='admin') bindAdmin();
 }
@@ -746,6 +828,7 @@ function renderLogin(){
       <div class="login-mark"></div>
       <div class="login-title">ImproveID Dashboard</div>
       <div class="muted" style="font-size:13px;">Sign in to track project timelines and handoffs.</div>
+      <div class="mono" style="font-size:11px;color:var(--paper-faint);margin-top:6px;">${fmtDate(todayISO())}</div>
       <form id="loginForm" style="margin-top:22px;">
         <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
         <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" required></div>
@@ -806,35 +889,61 @@ function bindLogin(){
 
 function renderPortfolio(){
   const allProjects = visibleProjects();
+  const today0 = todayISO();
   let summaries = allProjects.map(p=>{
     const tl = projectTimeline(p.id);
     const tasks = projectTasks(p.id);
     const closed = tasks.filter(t=>t.status==='closed').length;
     const pct = tasks.length ? Math.round(closed/tasks.length*100) : 0;
     const isClosedProject = tasks.length>0 && closed===tasks.length;
-    return { p, tl, tasks, closed, pct, isClosedProject };
+    const isFutureProject = p.startDate > today0;
+    return { p, tl, tasks, closed, pct, isClosedProject, isFutureProject };
   });
-  const onTrack = summaries.filter(s=>!s.tl.isRed).length;
-  const delayed = summaries.filter(s=>s.tl.isRed).length;
 
-  const filter = ui.portfolioFilter || 'all';
-  const filtered = summaries.filter(s=> filter==='all' ? true : filter==='open' ? !s.isClosedProject : s.isClosedProject);
+  // Today digest — an urgency-first snapshot, scoped to whatever this person can see
+  const allScopedTasks = allProjects.flatMap(p=>projectTasks(p.id));
+  const today = todayISO();
+  const dueTodayTasks = allScopedTasks.filter(t=>t.status!=='closed' && effectiveEndDate(t)===today);
+  const delayedOpenTasks = allScopedTasks.filter(t=>t.status!=='closed' && isTaskDelayed(t));
+  const blockedOpenTasks = allScopedTasks.filter(t=>t.status!=='closed' && t.blockedByTeamId);
+  const digestItems = dueTodayTasks.slice(0,5).map(t=>{
+    const proj = state.projects.find(p=>p.id===t.projectId);
+    return `<div class="lb-row" data-open-project-row="${t.projectId}" style="cursor:pointer;"><div class="lb-name">${t.title||'Untitled task'} <span class="muted" style="font-size:11px;">— ${entityName(t.assignedType,t.assignedId)} · ${proj?proj.name:''}</span></div></div>`;
+  }).join('');
+
+  const filter = ui.portfolioFilter || 'open';
+  const filtered = summaries.filter(s=>{
+    if(filter==='all') return true;
+    if(filter==='closed') return s.isClosedProject;
+    if(filter==='future') return s.isFutureProject;
+    return !s.isClosedProject && !s.isFutureProject; // 'open' — default
+  });
+
+  // Stat strip reflects whatever is currently in view, not the whole portfolio
+  const onTrack = filtered.filter(s=>!s.tl.isRed).length;
+  const delayed = filtered.filter(s=>s.tl.isRed).length;
+  const tasksTracked = filtered.reduce((sum,s)=>sum+s.tasks.length, 0);
 
   const cards = filtered.map(s=>{
     const status = s.tl.isRed ? 'red':'green';
-    const deadline = addDays(s.p.startDate, s.tl.originalTotal);
+    const deadline = s.tl.originalDeadline || addDays(s.p.startDate, s.tl.originalTotal);
     const blockingTeams = blockedTeamsForProject(s.p.id);
+    const delayNames = status==='red' ? delayResponsibleNames(s.p.id) : [];
     return `
     <div class="proj-card status-${status}" data-open-project="${s.p.id}">
-      <div class="eyebrow">${s.tasks.length} task${s.tasks.length===1?'':'s'} · started ${fmtDate(s.p.startDate)}${s.isClosedProject ? ' · closed' : ''}</div>
-      <div class="pname">${s.p.name}</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d` : 'On agreed timeline')}
-        ${blockingTeams.length ? `<span class="pill pill-amber pill-blink"><span class="dot"></span>Blocked</span>` : ''}
-      </div>
-      <div class="proj-meta">
+      <div class="pname" style="margin:2px 0 4px;">${s.p.name}</div>
+      <div class="eyebrow" style="margin-bottom:10px;">${s.tasks.length} task${s.tasks.length===1?'':'s'}</div>
+      <div style="margin-bottom:10px;">${pill(s.isClosedProject?'green':'amber', s.isClosedProject?'Closed':(s.isFutureProject?'Future':'Open'))}</div>
+      <div class="proj-meta" style="margin-top:0;">
+        <span>STARTED <b style="color:var(--paper);">${fmtDate(s.p.startDate)}</b></span>
         <span>DEADLINE <b style="color:var(--paper);">${fmtDate(deadline)}</b></span>
-        <span>${s.pct}% CLOSED</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
+        ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
+        ${blockingTeams.length ? `<span class="pill pill-amber pill-blink"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+      </div>
+      <div class="proj-meta" style="margin-top:14px;">
+        <span>${s.pct}% PROGRESS</span>
       </div>
       <div class="bar-track"><div class="bar-fill ${status==='red'?'red':''}" style="width:${s.pct}%"></div></div>
     </div>`;
@@ -842,20 +951,31 @@ function renderPortfolio(){
 
   return `
     <div class="eyebrow">Focus Area</div>
-    <h1 class="page-title" style="margin-bottom:22px;">All workstreams, one board</h1>
+    <h1 class="page-title" style="margin-bottom:16px;">All workstreams, one board</h1>
+
+    <div class="card" style="margin-bottom:22px;">
+      <div class="section-title" style="margin-bottom:10px;">Today — ${fmtDate(today)}</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:${digestItems?'12px':'0'};">
+        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--paper);">${dueTodayTasks.length}</b> <span class="muted">due today</span></span>
+        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--red);">${delayedOpenTasks.length}</b> <span class="muted">currently delayed</span></span>
+        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--amber);">${blockedOpenTasks.length}</b> <span class="muted">blocked</span></span>
+      </div>
+      ${digestItems || (dueTodayTasks.length===0 ? `<div class="muted" style="font-size:12px;">Nothing due today.</div>` : '')}
+    </div>
 
     <div class="stat-strip">
-      <div class="stat-chip"><div class="n">${allProjects.length}</div><div class="l">Workstreams</div></div>
+      <div class="stat-chip"><div class="n">${filtered.length}</div><div class="l">Workstreams</div></div>
       <div class="stat-chip"><div class="n" style="color:var(--green);">${onTrack}</div><div class="l">On agreed timeline</div></div>
       <div class="stat-chip"><div class="n" style="color:var(--red);">${delayed}</div><div class="l">Delayed</div></div>
-      <div class="stat-chip"><div class="n">${allProjects.reduce((s,p)=>s+projectTasks(p.id).length,0)}</div><div class="l">Tasks tracked</div></div>
+      <div class="stat-chip"><div class="n">${tasksTracked}</div><div class="l">Tasks tracked</div></div>
     </div>
 
     <div class="filters">
       <select id="portfolioFilter">
-        <option value="all" ${filter==='all'?'selected':''}>All workstreams</option>
         <option value="open" ${filter==='open'?'selected':''}>Open workstreams</option>
         <option value="closed" ${filter==='closed'?'selected':''}>Closed workstreams</option>
+        <option value="future" ${filter==='future'?'selected':''}>Future workstreams</option>
+        <option value="all" ${filter==='all'?'selected':''}>All workstreams</option>
       </select>
     </div>
 
@@ -869,6 +989,9 @@ function renderPortfolio(){
 function bindPortfolio(){
   document.querySelectorAll('[data-open-project]').forEach(c=>{
     c.addEventListener('click', ()=>{ ui.projectId = c.dataset.openProject; ui.view='project'; render(); });
+  });
+  document.querySelectorAll('[data-open-project-row]').forEach(c=>{
+    c.addEventListener('click', ()=>{ ui.projectId = c.dataset.openProjectRow; ui.view='project'; render(); });
   });
   document.querySelectorAll('[data-nav="admin"]').forEach(b=>b.addEventListener('click', ()=>{ ui.view='admin'; render(); }));
   const filterSel = document.getElementById('portfolioFilter');
@@ -886,8 +1009,8 @@ function renderProject(){
   const closed = tasks.filter(t=>t.status==='closed').length;
   const overallPct = tasks.length ? Math.round(closed/tasks.length*100) : 0;
   const status = tl.isRed ? 'red' : 'green';
-  const deadline = addDays(p.startDate, tl.originalTotal);
-  const daysRemaining = daysBetween(todayISO(), deadline);
+  const deadline = tl.originalDeadline || addDays(p.startDate, tl.originalTotal);
+  const lastClosedDate = (tasks.length>0 && closed===tasks.length) ? tasks.reduce((max,t)=> (t.closedDate && (!max || t.closedDate > max)) ? t.closedDate : max, null) : null;
 
   const railRows = tl.chains.map((chain, idx)=>{
     const isCritical = idx === tl.criticalIndex && tl.chains.length>1;
@@ -925,8 +1048,7 @@ function renderProject(){
 
   const taskRows = tasks.map(t=>{
     const color = taskStatusColor(t);
-    const cu = currentUser();
-    const canEdit = isAdmin() || (cu && cu.role!=='viewer' && ((t.assignedType==='user' && t.assignedId===cu.id) || (t.assignedType==='team' && t.assignedId===cu.teamId)));
+    const canEdit = canEditTask(t);
     const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
     return `
     <tr>
@@ -934,6 +1056,7 @@ function renderProject(){
         <div class="task-title">${t.title || '<span class="muted">Untitled task</span>'}</div>
         ${t.description ? `<div class="task-desc">${t.description}</div>` : '<div class="task-desc">No description yet</div>'}
         ${blockedTeamName ? `<div style="margin-top:6px;">${pill('amber', 'Blocked by '+blockedTeamName)}</div>` : ''}
+        ${t.weekendWork ? `<div style="margin-top:6px;">${pill('amber', 'Includes weekend work')}</div>` : ''}
       </td>
       <td>${entityName(t.assignedType,t.assignedId)}</td>
       <td class="date-pair">
@@ -941,8 +1064,9 @@ function renderProject(){
         ${t.extended
           ? `<span class="strike">${fmtDate(t.originalEndDate)}</span> <span class="ext">${fmtDate(t.endDate)}</span>`
           : (isTaskDelayed(t) ? `<span class="ext">${fmtDate(t.endDate)}</span>` : fmtDate(t.endDate))}
+        ${t.status==='closed' && t.closedDate ? `<div class="orig" style="margin-top:4px;">Closed ${fmtDate(t.closedDate)}</div>` : ''}
       </td>
-      <td>${pill(color, color==='green' ? (t.status==='closed'?'Closed on time':'On track') : color==='red' ? (t.extended?'Extended':'Overdue') : 'Open')}</td>
+      <td>${pill(color, color==='green' ? (t.status==='closed'?'Closed on time':'On track') : color==='red' ? (t.extended?'Extended':(t.status==='closed'?'Closed late':'Overdue')) : 'Open')}</td>
       <td>
         <div class="row-actions">
           ${canEdit ? `<button class="btn btn-sm" data-edit-task="${t.id}">Edit</button>` : ''}
@@ -956,20 +1080,27 @@ function renderProject(){
   }).join('');
 
   const blockingTeams = blockedTeamsForProject(p.id);
+  const delayNames = status==='red' ? delayResponsibleNames(p.id) : [];
+  const switcherOptions = visibleProjects();
 
   return `
+    <div class="filters" style="margin-bottom:16px;">
+      <select id="workstreamSwitcher">
+        ${switcherOptions.map(sp=>`<option value="${sp.id}" ${sp.id===p.id?'selected':''}>${sp.name}</option>`).join('')}
+      </select>
+    </div>
     <div class="hero status-${status}">
       <div>
         <div class="eyebrow">Workstream</div>
         <h1 class="page-title">${p.name}</h1>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-          ${pill(status, status==='red' ? 'Delayed — timeline breached' : 'On agreed timeline')}
+          ${pill(status, status==='red' ? `Delayed ${tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
           ${blockingTeams.length ? `<span class="pill pill-amber pill-blink"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
         </div>
       </div>
       <div class="hero-metrics">
         <div class="metric"><div class="eyebrow">Total days agreed</div><div class="val">${tl.originalTotal}</div><div class="sub">${tasks.length} tasks combined</div></div>
-        <div class="metric"><div class="eyebrow">Deadline</div><div class="val" style="font-size:20px;">${fmtDate(deadline)}</div><div class="sub">${daysRemaining>=0 ? daysRemaining+'d remaining' : Math.abs(daysRemaining)+'d past due'}</div></div>
+        <div class="metric"><div class="eyebrow">Deadline</div><div class="val" style="font-size:20px;">${fmtDate(deadline)}</div><div class="sub">${lastClosedDate ? 'Closed on '+fmtDate(lastClosedDate) : ''}</div></div>
         <div class="metric"><div class="eyebrow">Delay</div><div class="val ${tl.delay>0?'red':'green'}">${tl.delay>0 ? '-'+tl.delay : '0'}</div><div class="sub">days vs. original agreement</div></div>
       </div>
     </div>
@@ -985,7 +1116,7 @@ function renderProject(){
     </div>
 
     <div class="card" style="margin-top:20px;">
-      <div class="section-title">By team &amp; individual</div>
+      <div class="section-title">By Individual &amp; Team</div>
       <div class="gauge-grid">${gauges || '<div class="empty-state">Nothing assigned yet.</div>'}</div>
     </div>
 
@@ -1012,9 +1143,13 @@ function renderProject(){
 }
 
 function bindProject(){
+  const switcher = document.getElementById('workstreamSwitcher');
+  if(switcher) switcher.addEventListener('change', ()=>{ ui.projectId = switcher.value; render(); });
   document.querySelectorAll('[data-task-node],[data-edit-task]').forEach(el=>{
     el.addEventListener('click', ()=>{
       const id = el.dataset.taskNode || el.dataset.editTask;
+      const t = state.tasks.find(x=>x.id===id);
+      if(t && !canEditTask(t)) return; // closed tasks (or tasks not yours) can't be reopened from the rail either
       openTaskModal(id);
     });
   });
@@ -1069,9 +1204,11 @@ function openBlockerModal(taskId){
 /* ============================== TASK MODALS ============================== */
 
 function assigneeOptions(selectedType, selectedId){
-  const teamOpts = state.teams.map(t=>`<option value="team:${t.id}" ${selectedType==='team'&&selectedId===t.id?'selected':''}>Team — ${t.name}</option>`).join('');
-  const userOpts = state.users.filter(u=>u.role==='member').map(u=>`<option value="user:${u.id}" ${selectedType==='user'&&selectedId===u.id?'selected':''}>${u.name}</option>`).join('');
-  return teamOpts + userOpts;
+  return state.users.filter(u=>u.role==='member').map(u=>{
+    const tm = u.teamId ? state.teams.find(x=>x.id===u.teamId) : null;
+    const label = tm ? `${u.name} — ${tm.name}` : `${u.name} (no team)`;
+    return `<option value="user:${u.id}" ${selectedType==='user'&&selectedId===u.id?'selected':''}>${label}</option>`;
+  }).join('');
 }
 
 function predecessorOptions(projectId, excludeId, selected){
@@ -1083,6 +1220,7 @@ function predecessorOptions(projectId, excludeId, selected){
 function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
 function openBlankTaskModal(projectId){
+  if(!isAdmin()) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1109,7 +1247,7 @@ function openBlankTaskModal(projectId){
       description:'', reason:'', assignedType:type, assignedId:id,
       predecessorId: document.getElementById('btPredecessor').value || null,
       startDate:'', endDate:'', originalEndDate:'', extended:false, blockedByTeamId:null, status:'open', closedDate:null,
-      datesLocked:false, extensionHistory:[]
+      datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[]
     };
     state.tasks.push(t); persist(); closeModal(); render();
   });
@@ -1118,8 +1256,9 @@ function openBlankTaskModal(projectId){
 function openTaskModal(taskId){
   const t = state.tasks.find(x=>x.id===taskId);
   if(!t) return;
+  if(!canEditTask(t)) return; // closed tasks are admin-only from here on
   const admin = isAdmin();
-  const datesEditable = admin || !t.datesLocked;
+  const firstTimeSave = !t.datesLocked; // dates are only part of THIS form before they're ever locked
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1128,11 +1267,24 @@ function openTaskModal(taskId){
         <form id="taskForm">
           <div class="field"><label>Title</label><input id="tfTitle" value="${t.title.replace(/"/g,'&quot;')}" required></div>
           <div class="field"><label>Description</label><textarea id="tfDesc">${t.description||''}</textarea></div>
+          ${firstTimeSave ? `
           <div class="field-row">
-            <div class="field"><label>Start date</label><input type="date" id="tfStart" value="${t.startDate}" ${datesEditable?'':'disabled'} required></div>
-            <div class="field"><label>End date (agreed)</label><input type="date" id="tfEnd" value="${t.endDate}" ${datesEditable?'':'disabled'} required></div>
+            <div class="field"><label>Start date</label><input type="date" id="tfStart" value="${t.startDate}" required></div>
+            <div class="field"><label>End date (agreed)</label><input type="date" id="tfEnd" value="${t.endDate}" required></div>
           </div>
-          ${!datesEditable ? '<div class="hint">The agreed timeline is locked once saved. Use "Extend date" from the project view to record a new date — the original stays on permanent record. Admins can still override dates directly if needed.</div>' : (admin && t.datesLocked ? '<div class="hint">You\'re editing a locked timeline as admin — this replaces the permanent original record. For normal delays, prefer "Extend date" instead so the original stays on record.</div>' : '')}
+          <div class="hint" id="tfDateHint">${dateRangeHint(t.startDate,t.endDate)}</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:10px 0 4px;"><input type="checkbox" id="tfWeekendWork" ${t.weekendWork?'checked':''}> This timeline includes weekend work</label>
+          <div class="hint">Once saved, this becomes the permanent agreed timeline — it can't be changed here again. Use "Extend date" later for delays, or an admin can amend it directly if needed.</div>
+          ` : `
+          <div class="field-row">
+            <div class="field"><label>Agreed timeline</label><input value="${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}" disabled></div>
+            ${t.extended ? `<div class="field"><label>Extended to</label><input value="${fmtDate(t.endDate)}" disabled></div>` : ''}
+            ${t.status==='closed' ? `<div class="field"><label>Closed on</label><input value="${fmtDate(t.closedDate)}" disabled></div>` : ''}
+          </div>
+          ${t.weekendWork ? `<div style="margin:6px 0;">${pill('amber','Includes weekend work')}</div>` : ''}
+          ${t.checklistRecord ? `<div class="field"><label>Checklist confirmed</label><div class="hint">Completed by ${t.checklistRecord.completedByName} on ${fmtDate(t.checklistRecord.completedAt)}${t.checklistRecord.items.map(i=>`<br>✓ ${i.text}`).join('')}</div></div>` : ''}
+          ${admin ? `<div class="hint">To correct these dates, use "Amend timeline" below — it's kept separate from Save so closing or editing a task never silently changes the permanent record.</div>` : ''}
+          `}
           <div class="field"><label>Reason — why this much time?</label><textarea id="tfReason" placeholder="Explain the estimate...">${t.reason||''}</textarea></div>
           <div class="field"><label>Assign to</label><select id="tfAssignee" ${admin?'':'disabled'}>${assigneeOptions(t.assignedType,t.assignedId)}</select></div>
           ${admin ? `<div class="field"><label>Depends on</label><select id="tfPredecessor">${predecessorOptions(t.projectId,t.id,t.predecessorId)}</select></div>` : ''}
@@ -1143,43 +1295,78 @@ function openTaskModal(taskId){
               <option value="closed" ${t.status==='closed'?'selected':''}>Closed</option>
             </select>
           </div>
-          ${t.extensionHistory && t.extensionHistory.length ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
+          ${t.extensionHistory && t.extensionHistory.length ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             ${admin ? `<button type="button" class="btn btn-danger" data-delete-task="${t.id}">Delete</button>` : ''}
+            ${admin && !firstTimeSave ? `<button type="button" class="btn" id="amendTimelineBtn">Amend timeline</button>` : ''}
             <button type="button" id="tfSubmitBtn" class="btn btn-primary">Save</button>
           </div>
         </form>
       </div>
     </div>`;
   bindModalClose();
+  if(firstTimeSave){
+    const hintEl = document.getElementById('tfDateHint');
+    const updateHint = ()=>{ hintEl.textContent = dateRangeHint(document.getElementById('tfStart').value, document.getElementById('tfEnd').value); };
+    document.getElementById('tfStart').addEventListener('input', updateHint);
+    document.getElementById('tfEnd').addEventListener('input', updateHint);
+  }
   runOnClickAndEnter('taskForm', 'tfSubmitBtn', ()=>{
     const titleEl = document.getElementById('tfTitle');
     if(!titleEl.value.trim()){ titleEl.focus(); return; }
-    if(datesEditable){
-      const sVal = document.getElementById('tfStart').value;
-      const eVal = document.getElementById('tfEnd').value;
+    let sVal, eVal;
+    if(firstTimeSave){
+      sVal = document.getElementById('tfStart').value;
+      eVal = document.getElementById('tfEnd').value;
       if(!sVal || !eVal){ return; }
     }
-    t.title = titleEl.value.trim();
-    t.description = document.getElementById('tfDesc').value.trim();
-    t.reason = document.getElementById('tfReason').value.trim();
-    t.status = document.getElementById('tfStatus').value;
-    if(t.status==='closed' && !t.closedDate) t.closedDate = todayISO();
-    if(t.status==='open') t.closedDate = null;
-    if(datesEditable){
-      t.startDate = document.getElementById('tfStart').value;
-      t.endDate = document.getElementById('tfEnd').value;
-      t.originalEndDate = t.endDate;
-      t.datesLocked = true;
+    const commit = ()=>{
+      t.title = titleEl.value.trim();
+      t.description = document.getElementById('tfDesc').value.trim();
+      t.reason = document.getElementById('tfReason').value.trim();
+      t.status = document.getElementById('tfStatus').value;
+      if(t.status==='closed' && !t.closedDate) t.closedDate = todayISO();
+      if(t.status==='open') t.closedDate = null;
+      if(firstTimeSave){
+        t.startDate = sVal;
+        t.endDate = eVal;
+        t.originalEndDate = eVal;
+        t.datesLocked = true;
+        if(document.getElementById('tfWeekendWork').checked) t.weekendWork = true;
+      }
+      if(admin){
+        const [type,id] = document.getElementById('tfAssignee').value.split(':');
+        t.assignedType = type; t.assignedId = id;
+        t.predecessorId = document.getElementById('tfPredecessor').value || null;
+      }
+      persist(); closeModal(); render();
+    };
+    const overlapThenCommit = ()=>{
+      if(firstTimeSave){
+        const assignedType = admin ? document.getElementById('tfAssignee').value.split(':')[0] : t.assignedType;
+        const assignedId = admin ? document.getElementById('tfAssignee').value.split(':')[1] : t.assignedId;
+        const overlaps = findOverlappingTasks(assignedType, assignedId, sVal, eVal, t.id);
+        if(overlaps.length){ openOverlapConfirmModal(overlaps, commit); return; }
+      }
+      commit();
+    };
+    const pendingStatus = document.getElementById('tfStatus').value;
+    const isClosingNow = t.status!=='closed' && pendingStatus==='closed';
+    if(isClosingNow){
+      const proj = state.projects.find(p=>p.id===t.projectId);
+      const teamId = t.assignedType==='team' ? t.assignedId : (state.users.find(u=>u.id===t.assignedId)||{}).teamId;
+      const team = teamId ? state.teams.find(tm=>tm.id===teamId) : null;
+      const items = (team && Array.isArray(team.checklist)) ? team.checklist : [];
+      if(proj && proj.requireChecklist && items.length){
+        openChecklistGateModal(t, team, items, (record)=>{ t.checklistRecord = record; overlapThenCommit(); });
+        return;
+      }
     }
-    if(admin){
-      const [type,id] = document.getElementById('tfAssignee').value.split(':');
-      t.assignedType = type; t.assignedId = id;
-      t.predecessorId = document.getElementById('tfPredecessor').value || null;
-    }
-    persist(); closeModal(); render();
+    overlapThenCommit();
   });
+  const amendBtn = document.getElementById('amendTimelineBtn');
+  if(amendBtn) amendBtn.addEventListener('click', ()=> openAmendTimelineModal(t.id));
   const delBtn = document.querySelector('[data-delete-task]');
   if(delBtn) delBtn.addEventListener('click', ()=>{
     state.tasks = state.tasks.filter(x=>x.id!==t.id);
@@ -1188,9 +1375,60 @@ function openTaskModal(taskId){
   });
 }
 
+function openAmendTimelineModal(taskId){
+  const t = state.tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Amend timeline</h3>
+        <div class="modal-sub">${t.title} — this directly rewrites the permanent record. Use with care.</div>
+        <form id="amendForm">
+          <div class="field-row">
+            <div class="field"><label>Start date</label><input type="date" id="amStart" value="${t.startDate}" required></div>
+            <div class="field"><label>Original agreed end date</label><input type="date" id="amOrigEnd" value="${t.originalEndDate}" required></div>
+          </div>
+          ${t.extended ? `<div class="field"><label>Extended end date</label><input type="date" id="amExtEnd" value="${t.endDate}" required></div>` : ''}
+          <div class="hint" id="amDateHint">${dateRangeHint(t.startDate, t.originalEndDate)}</div>
+          ${t.status==='closed' ? `<div class="field"><label>Closed date</label><input type="date" id="amClosedDate" value="${t.closedDate||''}" required></div><div class="hint">This date is what the delay shown on the workstream is measured against once a task is closed.</div>` : ''}
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:10px 0 4px;"><input type="checkbox" id="amWeekendWork" ${t.weekendWork?'checked':''}> This timeline includes weekend work</label>
+          <div class="hint">This is separate from the normal Save action on purpose — closing or editing a task will never change these dates on its own.</div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="amendSubmitBtn" class="btn btn-danger">Save amended timeline</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  const amUpdateHint = ()=>{ document.getElementById('amDateHint').textContent = dateRangeHint(document.getElementById('amStart').value, document.getElementById('amOrigEnd').value); };
+  document.getElementById('amStart').addEventListener('input', amUpdateHint);
+  document.getElementById('amOrigEnd').addEventListener('input', amUpdateHint);
+  runOnClickAndEnter('amendForm', 'amendSubmitBtn', ()=>{
+    const start = document.getElementById('amStart').value;
+    const origEnd = document.getElementById('amOrigEnd').value;
+    const extEnd = t.extended ? document.getElementById('amExtEnd').value : null;
+    const closedDateVal = t.status==='closed' ? document.getElementById('amClosedDate').value : null;
+    if(!start || !origEnd || (t.extended && !extEnd) || (t.status==='closed' && !closedDateVal)) return;
+    t.startDate = start;
+    t.originalEndDate = origEnd;
+    t.weekendWork = document.getElementById('amWeekendWork').checked;
+    if(t.status==='closed'){
+      t.closedDate = closedDateVal;
+    }
+    if(t.extended){
+      t.endDate = extEnd;
+    } else {
+      t.endDate = origEnd;
+    }
+    persist(); closeModal(); render();
+  });
+}
+
 function openExtendModal(taskId){
   const t = state.tasks.find(x=>x.id===taskId);
   if(!t) return;
+  const DELAY_CATEGORIES = ['Client delay','Dependency on another team','Scope change','Underestimated','Resource unavailable','Other'];
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1198,7 +1436,10 @@ function openExtendModal(taskId){
         <div class="modal-sub">${t.title} — currently agreed for ${fmtDate(t.endDate)}</div>
         <form id="extendForm">
           <div class="field"><label>New end date</label><input type="date" id="exDate" min="${addDays(t.endDate,1)}" value="${addDays(t.endDate,1)}" required></div>
+          <div class="hint" id="exDateHint">${dateRangeHint(t.startDate, addDays(t.endDate,1))}</div>
+          <div class="field"><label>Why is this late?</label><select id="exCategory">${DELAY_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></div>
           <div class="field"><label>Reason for the extension</label><textarea id="exReason" placeholder="What pushed this back?" required></textarea></div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:10px 0 4px;"><input type="checkbox" id="exWeekendWork" ${t.weekendWork?'checked':''}> This includes weekend work</label>
           <div class="hint">The original date (${fmtDate(t.originalEndDate)}) stays on record. This task, its chain and the project dashboard will switch to red.</div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
@@ -1208,14 +1449,20 @@ function openExtendModal(taskId){
       </div>
     </div>`;
   bindModalClose();
+  document.getElementById('exDate').addEventListener('input', ()=>{
+    document.getElementById('exDateHint').textContent = dateRangeHint(t.startDate, document.getElementById('exDate').value);
+  });
   runOnClickAndEnter('extendForm', 'exSubmitBtn', ()=>{
     const newDate = document.getElementById('exDate').value;
     const reason = document.getElementById('exReason').value.trim();
+    const category = document.getElementById('exCategory').value;
     if(!newDate || !reason) return;
     t.extensionHistory = t.extensionHistory || [];
-    t.extensionHistory.push({date: todayISO(), newEndDate:newDate, reason});
+    t.extensionHistory.push({date: todayISO(), newEndDate:newDate, reason, category});
+    t.lastDelayCategory = category;
     t.endDate = newDate;
     t.extended = true;
+    if(document.getElementById('exWeekendWork').checked) t.weekendWork = true;
     persist(); closeModal(); render();
   });
 }
@@ -1223,6 +1470,89 @@ function openExtendModal(taskId){
 function bindModalClose(){
   document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', closeModal));
   document.querySelector('[data-backdrop]').addEventListener('click', (e)=>{ if(e.target.dataset.backdrop!==undefined && e.target===e.currentTarget) closeModal(); });
+}
+
+// Other still-open tasks for the same person whose date range overlaps the one being saved.
+function findOverlappingTasks(assignedType, assignedId, start, end, excludeTaskId){
+  if(!start || !end) return [];
+  return state.tasks.filter(o=>
+    o.id!==excludeTaskId &&
+    o.assignedType===assignedType && o.assignedId===assignedId &&
+    o.status!=='closed' &&
+    o.startDate && o.endDate &&
+    start <= o.endDate && end >= o.startDate
+  );
+}
+
+// A stacked confirmation shown on top of the task form (without closing it) when the
+// dates just entered overlap another open task for the same person. "Change dates"
+// simply dismisses this overlay so they can edit the form underneath; "Keep dates
+// anyway" runs the save that was already prepared.
+function openOverlapConfirmModal(overlaps, onContinue){
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Overlapping timeline</h3>
+        <div class="modal-sub">These dates overlap ${overlaps.length} other open task${overlaps.length===1?'':'s'} already assigned to this person.</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin:14px 0;">
+          ${overlaps.map(o=>`<div class="hint">→ ${o.title||'Untitled task'} (${fmtDate(o.startDate)} → ${fmtDate(o.endDate)})</div>`).join('')}
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="overlapChangeBtn">Change dates</button>
+          <button type="button" class="btn btn-danger" id="overlapContinueBtn">Keep these dates anyway</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  const cleanup = ()=> div.remove();
+  div.querySelector('#overlapChangeBtn').addEventListener('click', cleanup);
+  div.querySelector('#overlapContinueBtn').addEventListener('click', ()=>{ cleanup(); onContinue(); });
+}
+
+// Blocks closing a task until every one of the assigned team's checklist points is
+// ticked — this workstream has "Require checklist" turned on. Records exactly what
+// was ticked, by whom, and when, as a permanent snapshot on the task.
+function openChecklistGateModal(t, team, items, onComplete){
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Checklist required to close</h3>
+        <div class="modal-sub">${team.name} team checklist for "${t.title||'this task'}" — tick every point before it can close.</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin:14px 0;">
+          ${items.map(it=>`<label style="display:flex;align-items:flex-start;gap:10px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;"><input type="checkbox" class="clGateCheck" value="${it.id}" style="margin-top:2px;"> <span>${it.text}</span></label>`).join('')}
+        </div>
+        <div class="hint" id="clGateHint">0 of ${items.length} checked</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="clGateCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="clGateConfirm" disabled>Confirm &amp; close task</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  const checks = div.querySelectorAll('.clGateCheck');
+  const hint = div.querySelector('#clGateHint');
+  const confirmBtn = div.querySelector('#clGateConfirm');
+  const updateState = ()=>{
+    const checkedCount = Array.from(checks).filter(c=>c.checked).length;
+    hint.textContent = `${checkedCount} of ${items.length} checked`;
+    confirmBtn.disabled = checkedCount !== items.length;
+  };
+  checks.forEach(c=>c.addEventListener('change', updateState));
+  updateState();
+  div.querySelector('#clGateCancel').addEventListener('click', ()=> div.remove());
+  confirmBtn.addEventListener('click', ()=>{
+    if(confirmBtn.disabled) return;
+    const record = {
+      completedBy: session.userId,
+      completedByName: (currentUser()||{}).name || 'Unknown',
+      completedAt: todayISO(),
+      items: items.map(it=>({ id: it.id, text: it.text, checked: true }))
+    };
+    div.remove();
+    onComplete(record);
+  });
 }
 
 /* ============================== REPORTS ============================== */
@@ -1238,12 +1568,13 @@ function renderReports(){
   if(f.team) rows = rows.filter(t=>t.assignedType==='team' && t.assignedId===f.team);
   if(f.user) rows = rows.filter(t=>t.assignedType==='user' && t.assignedId===f.user);
   if(f.status) rows = rows.filter(t=>taskDerivedStatus(t)===f.status);
+  if(f.reason) rows = rows.filter(t=> f.reason==='Uncategorized' ? (t.extended && !t.lastDelayCategory) : t.lastDelayCategory===f.reason);
 
   const total = scopedTasks.length;
   const onTime = scopedTasks.filter(t=>!isTaskDelayed(t)).length;
   const late = scopedTasks.filter(t=>isTaskDelayed(t)).length;
 
-  // leaderboard of delays by team/user
+  // leaderboard of delays by team/user, with repeat offenders flagged
   const lb = {};
   scopedTasks.filter(t=>isTaskDelayed(t)).forEach(t=>{
     const name = entityName(t.assignedType,t.assignedId);
@@ -1251,8 +1582,23 @@ function renderReports(){
   });
   const lbMax = Math.max(1, ...Object.values(lb));
   const lbRows = Object.entries(lb).sort((a,b)=>b[1]-a[1]).map(([name,count])=>`
-    <div class="lb-row"><div class="lb-name">${name}</div><div class="lb-bar"><span style="width:${count/lbMax*100}%"></span></div><div class="lb-count">${count} delay${count===1?'':'s'}</div></div>
+    <div class="lb-row"><div class="lb-name">${name}${count>=3?' <span class="mono" style="color:var(--red);font-size:10px;">· REPEAT</span>':''}</div><div class="lb-bar"><span style="width:${count/lbMax*100}%;${count>=3?'background:var(--red);':''}"></span></div><div class="lb-count">${count} delay${count===1?'':'s'}</div></div>
   `).join('') || `<div class="muted" style="font-size:12px;">No delays recorded — nice.</div>`;
+
+  // why things are late, aggregated across every extension on record in scope
+  const reasonCounts = {};
+  scopedTasks.forEach(t=>{
+    (t.extensionHistory||[]).forEach(h=>{
+      const cat = h.category || 'Uncategorized';
+      reasonCounts[cat] = (reasonCounts[cat]||0)+1;
+    });
+  });
+  const reasonMax = Math.max(1, ...Object.values(reasonCounts));
+  const reasonRows = Object.entries(reasonCounts).sort((a,b)=>b[1]-a[1]).map(([cat,count])=>`
+    <div class="lb-row" data-filter-reason="${cat}" style="cursor:pointer;${f.reason===cat?'background:var(--panel-hi);border-radius:6px;':''}">
+      <div class="lb-name">${cat}</div><div class="lb-bar"><span style="width:${count/reasonMax*100}%;background:var(--amber);"></span></div><div class="lb-count">${count}×</div>
+    </div>
+  `).join('') || `<div class="muted" style="font-size:12px;">No extensions recorded yet.</div>`;
 
   const tableRows = rows.map(t=>{
     const ds = taskDerivedStatus(t);
@@ -1267,6 +1613,7 @@ function renderReports(){
       <td>${entityName(t.assignedType,t.assignedId)}</td>
       <td class="mono" style="font-size:11px;">${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}</td>
       <td class="mono" style="font-size:11px;${delayed?'color:var(--red)':''}">${t.extended ? fmtDate(t.endDate) : '—'}</td>
+      <td class="mono" style="font-size:11px;">${t.lastDelayCategory || '—'}</td>
       <td>${pill(color,label)}</td>
       <td class="mono" style="font-size:11px;${delayDays>0?'color:var(--red)':''}">${delayDays>0 ? '-'+delayDays+'d' : '0d'}</td>
     </tr>`;
@@ -1282,10 +1629,15 @@ function renderReports(){
       <div class="stat-chip"><div class="n" style="color:var(--red);">${late}</div><div class="l">Extended at least once</div></div>
     </div>
 
-    <div class="grid g2" style="align-items:start;margin-bottom:22px;">
+    <div class="grid g3" style="align-items:start;margin-bottom:22px;">
       <div class="card">
         <div class="section-title">Most delays, by team &amp; individual</div>
         ${lbRows}
+      </div>
+      <div class="card">
+        <div class="section-title">Why things are late</div>
+        <div class="muted" style="font-size:11px;margin-bottom:8px;margin-top:-4px;">Click a reason to see exactly which tasks it covers.</div>
+        ${reasonRows}
       </div>
       <div class="card">
         <div class="section-title">Filter</div>
@@ -1305,9 +1657,10 @@ function renderReports(){
     </div>
 
     <div class="card">
+      ${f.reason ? `<div class="banner"><span>Filtered to "${f.reason}" delays</span><button type="button" class="btn btn-sm btn-ghost" id="clearReasonFilter" style="margin-left:auto;">Clear ✕</button></div>` : ''}
       <table>
-        <thead><tr><th>Workstream</th><th>Task</th><th>Assigned</th><th>Agreed window</th><th>Extended to</th><th>Status</th><th>Delay</th></tr></thead>
-        <tbody>${tableRows || `<tr><td colspan="7" class="empty-state">No tasks match these filters.</td></tr>`}</tbody>
+        <thead><tr><th>Workstream</th><th>Task</th><th>Assigned</th><th>Agreed window</th><th>Extended to</th><th>Why late</th><th>Status</th><th>Delay</th></tr></thead>
+        <tbody>${tableRows || `<tr><td colspan="8" class="empty-state">No tasks match these filters.</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -1323,9 +1676,342 @@ function bindReports(){
         team: document.getElementById('fTeam').value,
         user: document.getElementById('fUser').value,
         status: document.getElementById('fStatus').value,
+        reason: ui.reportFilters.reason,
       };
       render();
     });
+  });
+  document.querySelectorAll('[data-filter-reason]').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const cat = row.dataset.filterReason;
+      ui.reportFilters.reason = (ui.reportFilters.reason===cat) ? '' : cat; // click again to clear
+      render();
+    });
+  });
+  const clearBtn = document.getElementById('clearReasonFilter');
+  if(clearBtn) clearBtn.addEventListener('click', ()=>{ ui.reportFilters.reason=''; render(); });
+}
+
+/* ============================== ACTIVE ASSIGNMENTS ============================== */
+
+// Per-member workload: what they're on right now, what's next, and a tentative
+// date for when they'll be free of everything currently assigned to them.
+function activeAssignmentsData(){
+  const accessIds = accessibleProjectIds();
+  const scopedTasks = accessIds===null ? state.tasks : state.tasks.filter(t=>accessIds.includes(t.projectId));
+  const cu = currentUser();
+  let members = state.users.filter(u=>u.role==='member');
+  if(cu && cu.role==='member') members = members.filter(u=>u.id===cu.id); // members only ever see themselves here
+
+  return members.map(u=>{
+    const myTasks = scopedTasks.filter(t=>
+      (t.assignedType==='user' && t.assignedId===u.id) ||
+      (t.assignedType==='team' && t.assignedId===u.teamId)
+    );
+    const openTasks = myTasks
+      .filter(t=>t.status!=='closed' && t.datesLocked) // a blank task with no timeline yet isn't real workload
+      .slice()
+      .sort((a,b)=> (effectiveEndDate(a)||'9999') < (effectiveEndDate(b)||'9999') ? -1 : 1);
+    const closedTasks = myTasks
+      .filter(t=>t.status==='closed')
+      .slice()
+      .sort((a,b)=> (b.closedDate||'') < (a.closedDate||'') ? -1 : 1);
+    const current = openTasks[0] || null;
+    const future = openTasks.slice(1);
+    const freeBy = openTasks.reduce((max,t)=>{ const e=effectiveEndDate(t); return (e && (!max||e>max)) ? e : max; }, null);
+    return { user:u, team: state.teams.find(tm=>tm.id===u.teamId), allTasks: myTasks, openTasks, closedTasks, current, future, freeBy, openCount: openTasks.length };
+  });
+}
+
+function taskWorkloadStatus(t){
+  if(t.blockedByTeamId){
+    const teamName = (state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team';
+    return { color:'amber', label:'Blocked by '+teamName };
+  }
+  if(isTaskDelayed(t)) return { color:'red', label: t.extended?'Extended':'Overdue' };
+  return { color:'green', label:'In progress' };
+}
+
+// closed / current / future — the three-way bucket used for both the row accent
+// color and the calendar coloring.
+function taskCategory(t, currentTaskId){
+  if(t.status==='closed') return 'closed';
+  if(t.id===currentTaskId) return 'current';
+  return 'future';
+}
+const CATEGORY_COLOR = { closed:'#7C93B3', current:'var(--green)', future:'var(--amber)' };
+const CATEGORY_LABEL = { closed:'Closed', current:'Current', future:'Future' };
+
+function taskEffectiveRange(t){
+  const end = t.status==='closed' ? (t.closedDate && t.closedDate>t.endDate ? t.closedDate : t.endDate) : effectiveEndDate(t);
+  return { start: t.startDate, end };
+}
+
+function taskOverlapsMonth(t, monthKey){
+  if(!monthKey) return true;
+  const {start,end} = taskEffectiveRange(t);
+  if(!start || !end) return false;
+  const [y,m] = monthKey.split('-').map(Number);
+  const monthStart = `${monthKey}-01`;
+  const monthEndD = new Date(y, m, 0);
+  const monthEnd = `${monthEndD.getFullYear()}-${String(monthEndD.getMonth()+1).padStart(2,'0')}-${String(monthEndD.getDate()).padStart(2,'0')}`;
+  return start <= monthEnd && end >= monthStart;
+}
+
+// Every month touched by any in-scope task, plus the current month, for the month filter dropdown.
+function monthsInRange(rows){
+  const set = new Set([todayISO().slice(0,7)]);
+  rows.forEach(r=> r.allTasks.forEach(t=>{
+    const {start,end} = taskEffectiveRange(t);
+    if(!start || !end) return;
+    let cur = new Date(start+'T00:00:00');
+    const endD = new Date(end+'T00:00:00');
+    let guard = 0;
+    while(cur<=endD && guard<240){
+      set.add(`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`);
+      cur.setMonth(cur.getMonth()+1);
+      guard++;
+    }
+  }));
+  return Array.from(set).sort();
+}
+function monthLabel(monthKey){
+  const [y,m] = monthKey.split('-').map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+}
+
+const CAL_COLOR = { closed:'#E6A560', current:'#E8D66B', future:'#7EB6E0', free:'#8FD69E' };
+
+// Highest-priority task covering a given date (current > future > closed) — used to
+// decide both the day's color and, for weekends, which task any marked work belongs to.
+function findCoveringTask(row, iso, currentTaskId){
+  const rank = { current:3, future:2, closed:1 };
+  let best = null, bestRank = -1;
+  row.allTasks.forEach(t=>{
+    const {start,end} = taskEffectiveRange(t);
+    if(!start || !end || iso<start || iso>end) return;
+    const c = taskCategory(t, currentTaskId);
+    if(rank[c] > bestRank){ bestRank = rank[c]; best = t; }
+  });
+  return best;
+}
+
+function buildCalendarHtml(row, monthKey, currentTaskId){
+  const [y,m] = monthKey.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const startWeekday = new Date(y, m-1, 1).getDay();
+  const dows = ['S','M','T','W','T','F','S'];
+  const admin = isAdmin();
+  let cells = dows.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  for(let i=0;i<startWeekday;i++) cells += `<div class="cal-day blank"></div>`;
+  for(let d=1; d<=daysInMonth; d++){
+    const iso = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const weekend = isWeekendISO(iso);
+    const covering = findCoveringTask(row, iso, currentTaskId);
+    let cat = null;
+    let clickable = false;
+    if(weekend){
+      const worked = covering && Array.isArray(covering.workedWeekendDates) && covering.workedWeekendDates.includes(iso);
+      if(worked) cat = taskCategory(covering, currentTaskId);
+      if(covering && admin) clickable = true;
+    } else {
+      cat = covering ? taskCategory(covering, currentTaskId) : 'free';
+    }
+    const cls = `cal-day ${cat||''}${weekend?' weekend':''}${clickable?' admin-toggle':''}`;
+    const toggleAttr = clickable ? ` data-cal-toggle="${iso}|${covering.id}"` : '';
+    const titleAttr = weekend ? (cat ? 'Worked this weekend — click to unmark' : (clickable ? 'Weekly off — click to mark as worked' : 'Weekly off')) : '';
+    cells += `<div class="${cls}"${toggleAttr} title="${titleAttr}">${d}</div>`;
+  }
+  return `<div style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${CAL_COLOR.closed};margin-right:5px;"></span>Closed</span>
+      <span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${CAL_COLOR.current};margin-right:5px;"></span>Current</span>
+      <span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${CAL_COLOR.future};margin-right:5px;"></span>Future</span>
+      <span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${CAL_COLOR.free};margin-right:5px;"></span>Free</span>
+      <span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--panel-raised);border:1px dashed var(--paper-faint);margin-right:5px;"></span>Weekly off${admin ? ' — click a weekend day to mark it worked' : ''}</span>
+    </div>
+    <div class="cal-grid">${cells}</div>`;
+}
+
+function renderAssignments(){
+  const allRows = activeAssignmentsData();
+  const availableCount = allRows.filter(r=>r.openCount===0).length;
+  const working = allRows.filter(r=>r.openCount>0 && !r.openTasks.some(t=>isTaskDelayed(t)||t.blockedByTeamId)).length;
+  const atRisk = allRows.filter(r=>r.openTasks.some(t=>isTaskDelayed(t)||t.blockedByTeamId)).length;
+
+  const cu = currentUser();
+  const isMemberSelf = cu && cu.role==='member';
+  const viewBy = isMemberSelf ? 'individual' : (ui.assignmentsFilters.viewBy || 'individual'); // 'individual' | 'team'
+  const userFilter = isMemberSelf ? cu.id : ui.assignmentsFilters.user;
+  const teamFilter = isMemberSelf ? '' : ui.assignmentsFilters.team;
+  const statusFilter = ui.assignmentsFilters.status; // 'current' | 'future' | 'closed' | 'available' | 'all'
+  const monthFilter = ui.assignmentsFilters.month; // '' or 'YYYY-MM'
+  const personFilter = ui.assignmentsFilters.personFilter; // '' | 'available' | 'working' | 'atrisk'
+
+  let rows = allRows;
+  let scoped = false;
+  if(viewBy==='individual' && userFilter){ rows = allRows.filter(r=>r.user.id===userFilter); scoped = true; }
+  else if(viewBy==='team' && teamFilter){ rows = allRows.filter(r=>r.team && r.team.id===teamFilter); scoped = true; }
+
+  if(personFilter==='available') rows = rows.filter(r=>r.openCount===0);
+  else if(personFilter==='working') rows = rows.filter(r=>r.openCount>0 && !r.openTasks.some(t=>isTaskDelayed(t)||t.blockedByTeamId));
+  else if(personFilter==='atrisk') rows = rows.filter(r=>r.openTasks.some(t=>isTaskDelayed(t)||t.blockedByTeamId));
+
+  if(statusFilter==='available') rows = rows.filter(r=>r.openCount===0);
+  else if(statusFilter==='current') rows = rows.filter(r=>!!r.current);
+  else if(statusFilter==='future') rows = rows.filter(r=>r.future.length>0);
+  else if(statusFilter==='closed') rows = rows.filter(r=>r.closedTasks.length>0);
+
+  const showCalendarFor = scoped; // show each scoped card's own calendar, whether it's one person or a whole team
+  const availableMonths = monthsInRange(allRows);
+
+  const cards = rows.map(r=>{
+    const headerStatus = r.openCount===0
+      ? pill('green','Available')
+      : (r.openTasks.some(t=>t.blockedByTeamId) ? pill('amber', 'Blocked')
+        : r.openTasks.some(t=>isTaskDelayed(t)) ? pill('red','Delayed')
+        : pill('green','On track'));
+
+    let taskList;
+    if(statusFilter==='closed') taskList = r.closedTasks;
+    else if(statusFilter==='current') taskList = r.current ? [r.current] : [];
+    else if(statusFilter==='future') taskList = r.future;
+    else if(statusFilter==='available') taskList = [];
+    else taskList = r.allTasks; // 'all'
+
+    taskList = taskList.filter(t=>taskOverlapsMonth(t, monthFilter)).slice().sort((a,b)=>{
+      const ea = taskEffectiveRange(a).start||'9999', eb = taskEffectiveRange(b).start||'9999';
+      return ea<eb?-1:1;
+    });
+
+    const taskRowsHtml = taskList.map(t=>{
+      const tp = state.projects.find(p=>p.id===t.projectId);
+      const cat = taskCategory(t, r.current?r.current.id:null);
+      const st = cat==='closed'
+        ? pill(isTaskDelayed(t)?'red':'green', isTaskDelayed(t)?'Closed late':'Closed on time')
+        : pill(taskWorkloadStatus(t).color, taskWorkloadStatus(t).label);
+      const range = taskEffectiveRange(t);
+      return `<tr data-open-project-row="${tp?tp.id:''}" style="cursor:pointer;">
+        <td style="border-left:3px solid ${CATEGORY_COLOR[cat]};">
+          <div class="task-title" style="font-size:13px;">${cat==='current'?'▸ ':''}${t.title||'Untitled task'}</div>
+          <div class="task-desc">${tp?tp.name:''}</div>
+        </td>
+        <td class="mono" style="font-size:12px;">${fmtDate(t.startDate)} → ${fmtDate(range.end)}</td>
+        <td>${pill(cat==='closed'?'green':cat==='current'?'green':'amber', CATEGORY_LABEL[cat])}</td>
+        <td class="mono" style="font-size:12px;">${cat==='closed' ? fmtDate(t.closedDate) : '—'}</td>
+        <td>${st}</td>
+      </tr>`;
+    }).join('');
+
+    const emptyMsg = statusFilter==='available' ? 'Available — nothing currently assigned.' : 'Nothing to show for this filter.';
+
+    return `
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <div class="userchip"><div class="initials">${initials(r.user.name)}</div>
+          <div>
+            <div style="font-weight:600;">${r.user.name}</div>
+            <div class="muted" style="font-size:11px;">${r.team?r.team.name:'No team'}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          ${headerStatus}
+          <span class="mono" style="font-size:11px;color:var(--paper-faint);">${r.freeBy ? 'Available by '+fmtDate(r.freeBy) : 'Available now'}</span>
+        </div>
+      </div>
+      ${taskList.length ? `
+      <table>
+        <thead><tr><th>Task</th><th>Timeline</th><th>Category</th><th>Closed</th><th>Status</th></tr></thead>
+        <tbody>${taskRowsHtml}</tbody>
+      </table>` : `<div class="empty-state" style="padding:20px;">${emptyMsg}</div>`}
+      ${showCalendarFor ? `<div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft);"><div class="section-title" style="font-size:15px;margin-bottom:10px;">${monthLabel(monthFilter||todayISO().slice(0,7))}</div>${buildCalendarHtml(r, monthFilter||todayISO().slice(0,7), r.current?r.current.id:null)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="eyebrow">Active Assignments</div>
+    <h1 class="page-title" style="margin-bottom:22px;">Who's working on what, and until when</h1>
+
+    <div class="stat-strip">
+      <div class="stat-chip"><div class="n">${allRows.length}</div><div class="l">People tracked</div></div>
+      <div class="stat-chip" data-person-filter="available" style="cursor:pointer;${personFilter==='available'?'border-color:var(--green);':''}"><div class="n" style="color:var(--green);">${availableCount}</div><div class="l">Available right now</div></div>
+      <div class="stat-chip" data-person-filter="working" style="cursor:pointer;${personFilter==='working'?'border-color:var(--green);':''}"><div class="n" style="color:var(--green);">${working}</div><div class="l">Working, on track</div></div>
+      <div class="stat-chip" data-person-filter="atrisk" style="cursor:pointer;${personFilter==='atrisk'?'border-color:var(--red);':''}"><div class="n" style="color:var(--red);">${atRisk}</div><div class="l">Delayed or blocked</div></div>
+    </div>
+
+    <div class="filters">
+      ${!isMemberSelf ? `<select id="asgViewBy">
+        <option value="individual" ${viewBy==='individual'?'selected':''}>View by individual</option>
+        <option value="team" ${viewBy==='team'?'selected':''}>View by team</option>
+      </select>` : ''}
+      ${!isMemberSelf && viewBy==='individual' ? `<select id="asgUserFilter">
+        <option value="">All employees</option>
+        ${allRows.map(r=>`<option value="${r.user.id}" ${userFilter===r.user.id?'selected':''}>${r.user.name}</option>`).join('')}
+      </select>` : ''}
+      ${!isMemberSelf && viewBy==='team' ? `<select id="asgTeamFilter">
+        <option value="">All teams</option>
+        ${state.teams.map(t=>`<option value="${t.id}" ${teamFilter===t.id?'selected':''}>${t.name}</option>`).join('')}
+      </select>` : ''}
+      <select id="asgStatusFilter">
+        <option value="current" ${statusFilter==='current'?'selected':''}>Current</option>
+        <option value="future" ${statusFilter==='future'?'selected':''}>Future</option>
+        <option value="closed" ${statusFilter==='closed'?'selected':''}>Closed</option>
+        <option value="available" ${statusFilter==='available'?'selected':''}>Available</option>
+        <option value="all" ${statusFilter==='all'?'selected':''}>All (Closed, Current, Future &amp; Available)</option>
+      </select>
+      <select id="asgMonthFilter">
+        <option value="">All months</option>
+        ${availableMonths.map(mk=>`<option value="${mk}" ${monthFilter===mk?'selected':''}>${monthLabel(mk)}</option>`).join('')}
+      </select>
+      <button type="button" class="btn btn-sm" id="asgResetBtn">Reset</button>
+    </div>
+
+    ${cards || `<div class="empty-state">No members to show yet.</div>`}
+    <div class="footnote">"Available by" is the latest due date across everything currently assigned to that person. Calendars appear once you narrow down to a specific individual or team — pick a month filter to move them, otherwise they show the current month.</div>
+  `;
+}
+
+function bindAssignments(){
+  const vb = document.getElementById('asgViewBy');
+  if(vb) vb.addEventListener('change', ()=>{ ui.assignmentsFilters.viewBy = vb.value; ui.assignmentsFilters.user=''; ui.assignmentsFilters.team=''; render(); });
+  const uf = document.getElementById('asgUserFilter');
+  if(uf) uf.addEventListener('change', ()=>{ ui.assignmentsFilters.user = uf.value; render(); });
+  const tf = document.getElementById('asgTeamFilter');
+  if(tf) tf.addEventListener('change', ()=>{ ui.assignmentsFilters.team = tf.value; render(); });
+  const sf = document.getElementById('asgStatusFilter');
+  if(sf) sf.addEventListener('change', ()=>{ ui.assignmentsFilters.status = sf.value; ui.assignmentsFilters.personFilter=''; render(); });
+  const mf = document.getElementById('asgMonthFilter');
+  if(mf) mf.addEventListener('change', ()=>{ ui.assignmentsFilters.month = mf.value; render(); });
+  document.querySelectorAll('[data-open-project-row]').forEach(row=>{
+    const id = row.dataset.openProjectRow;
+    if(!id) return;
+    row.addEventListener('click', ()=>{ ui.projectId = id; ui.view='project'; render(); });
+  });
+  document.querySelectorAll('[data-cal-toggle]').forEach(cell=>{
+    cell.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(!isAdmin()) return;
+      const [iso, taskId] = cell.dataset.calToggle.split('|');
+      const t = state.tasks.find(x=>x.id===taskId);
+      if(!t) return;
+      if(!Array.isArray(t.workedWeekendDates)) t.workedWeekendDates = [];
+      const idx = t.workedWeekendDates.indexOf(iso);
+      if(idx>=0) t.workedWeekendDates.splice(idx,1); else t.workedWeekendDates.push(iso);
+      persist(); render();
+    });
+  });
+  document.querySelectorAll('[data-person-filter]').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const val = chip.dataset.personFilter;
+      if(ui.assignmentsFilters.personFilter===val) return; // already showing this — repeat clicks do nothing
+      ui.assignmentsFilters.personFilter = val;
+      ui.assignmentsFilters.status = val==='available' ? 'available' : 'current';
+      render();
+    });
+  });
+  const resetBtn = document.getElementById('asgResetBtn');
+  if(resetBtn) resetBtn.addEventListener('click', ()=>{
+    ui.assignmentsFilters = { viewBy:'individual', user:'', team:'', status:'current', month: todayISO().slice(0,7), personFilter:'' };
+    render();
   });
 }
 
@@ -1345,6 +2031,7 @@ function renderAdmin(){
 }
 
 function renderAdminUsers(){
+  const admin = currentUser();
   const rows = state.users.filter(u=>u.role!=='admin').map(u=>{
     const isViewer = u.role==='viewer';
     const accessLabel = isViewer ? (u.viewerProjectIds==='all' ? 'All workstreams' : `${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length} workstream${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length===1?'':'s'}`) : '—';
@@ -1362,11 +2049,21 @@ function renderAdminUsers(){
       <td><div class="row-actions">
         ${isViewer ? `<button class="btn btn-sm" data-edit-access="${u.id}">Edit access</button>` : ''}
         <button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button>
+        <button class="btn btn-sm" data-change-password="${u.id}">Change password</button>
         <button class="btn btn-sm btn-danger" data-del-user="${u.id}">Remove</button>
       </div></td>
     </tr>`;
   }).join('');
   return `
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div class="section-title" style="margin-bottom:2px;">Your account</div>
+          <div class="muted" style="font-size:12px;">${admin ? admin.name+' · '+admin.username : ''}</div>
+        </div>
+        <button class="btn btn-sm" data-change-password="${admin?admin.id:''}">Change my password</button>
+      </div>
+    </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div class="section-title" style="margin-bottom:0;">Users</div>
@@ -1382,7 +2079,8 @@ function renderAdminUsers(){
 function renderAdminTeams(){
   const rows = state.teams.map(t=>{
     const count = state.users.filter(u=>u.teamId===t.id).length;
-    return `<tr><td>${t.name}</td><td class="mono" style="font-size:12px;">${count} member${count===1?'':'s'}</td><td><div class="row-actions"><button class="btn btn-sm btn-danger" data-del-team="${t.id}">Remove</button></div></td></tr>`;
+    const clCount = (t.checklist||[]).length;
+    return `<tr><td>${t.name}</td><td class="mono" style="font-size:12px;">${count} member${count===1?'':'s'}</td><td class="mono" style="font-size:12px;">${clCount} item${clCount===1?'':'s'}</td><td><div class="row-actions"><button class="btn btn-sm" data-manage-checklist="${t.id}">Manage checklist</button><button class="btn btn-sm btn-danger" data-del-team="${t.id}">Remove</button></div></td></tr>`;
   }).join('');
   return `
     <div class="card">
@@ -1390,7 +2088,8 @@ function renderAdminTeams(){
         <div class="section-title" style="margin-bottom:0;">Teams</div>
         <button class="btn btn-primary btn-sm" data-add-team>+ Create team</button>
       </div>
-      <table><thead><tr><th>Team</th><th>Members</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="empty-state">No teams yet.</td></tr>`}</tbody></table>
+      <table><thead><tr><th>Team</th><th>Members</th><th>Checklist</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="4" class="empty-state">No teams yet.</td></tr>`}</tbody></table>
+      <div class="footnote">Checklists only apply on workstreams where "Require checklist" was turned on when the workstream was created.</div>
     </div>`;
 }
 
@@ -1437,6 +2136,9 @@ function bindAdmin(){
   document.querySelectorAll('[data-edit-access]').forEach(b=>b.addEventListener('click', ()=>{
     openEditAccessModal(b.dataset.editAccess);
   }));
+  document.querySelectorAll('[data-change-password]').forEach(b=>b.addEventListener('click', ()=>{
+    if(b.dataset.changePassword) openChangePasswordModal(b.dataset.changePassword);
+  }));
 
   const addTeam = document.querySelector('[data-add-team]');
   if(addTeam) addTeam.addEventListener('click', openAddTeamModal);
@@ -1444,6 +2146,9 @@ function bindAdmin(){
     state.teams = state.teams.filter(t=>t.id!==b.dataset.delTeam);
     state.users.forEach(u=>{ if(u.teamId===b.dataset.delTeam) u.teamId=null; });
     persist(); render();
+  }));
+  document.querySelectorAll('[data-manage-checklist]').forEach(b=>b.addEventListener('click', ()=>{
+    openManageChecklistModal(b.dataset.manageChecklist);
   }));
 
   const addProject = document.querySelector('[data-add-project]');
@@ -1454,6 +2159,7 @@ function bindAdmin(){
 }
 
 function openDeleteProjectModal(projectId, projectName, taskCount){
+  if(!isAdmin()) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1484,6 +2190,7 @@ function randomPassword(){
 }
 
 function openAddUserModal(){
+  if(!isAdmin()) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1508,6 +2215,7 @@ function openAddUserModal(){
             <div id="uAccessList" style="display:none;margin-top:10px;display:flex;flex-direction:column;gap:6px;">
               ${state.projects.map(p=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;"><input type="checkbox" value="${p.id}" class="uAccessCheck"> ${p.name}</label>`).join('') || '<div class="hint">No workstreams exist yet.</div>'}
             </div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-top:12px;"><input type="checkbox" id="uCanSeeAssignments"> Can also view Active Assignments</label>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
@@ -1538,6 +2246,7 @@ function openAddUserModal(){
     const u = { id: uid('u'), name: nameEl.value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null) };
     if(isViewer){
       u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
+      u.viewerCanSeeAssignments = document.getElementById('uCanSeeAssignments').checked;
     }
     state.users.push(u); persist();
     showCredentialsModal(u);
@@ -1545,6 +2254,7 @@ function openAddUserModal(){
 }
 
 function openEditAccessModal(userId){
+  if(!isAdmin()) return;
   const u = state.users.find(x=>x.id===userId);
   if(!u) return;
   const currentIds = Array.isArray(u.viewerProjectIds) ? u.viewerProjectIds : [];
@@ -1562,6 +2272,7 @@ function openEditAccessModal(userId){
             <div id="eaList" style="margin-top:10px;display:${u.viewerProjectIds==='all'?'none':'flex'};flex-direction:column;gap:6px;">
               ${state.projects.map(p=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;"><input type="checkbox" value="${p.id}" class="eaCheck" ${currentIds.includes(p.id)?'checked':''}> ${p.name}</label>`).join('') || '<div class="hint">No workstreams exist yet.</div>'}
             </div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-top:12px;"><input type="checkbox" id="eaCanSeeAssignments" ${u.viewerCanSeeAssignments?'checked':''}> Can also view Active Assignments</label>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
@@ -1576,6 +2287,7 @@ function openEditAccessModal(userId){
   eaMode.addEventListener('change', ()=>{ eaList.style.display = eaMode.value==='specific' ? 'flex' : 'none'; });
   runOnClickAndEnter('accessForm', 'eaSubmitBtn', ()=>{
     u.viewerProjectIds = eaMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.eaCheck:checked')).map(c=>c.value);
+    u.viewerCanSeeAssignments = document.getElementById('eaCanSeeAssignments').checked;
     persist(); closeModal(); render();
   });
 }
@@ -1595,7 +2307,41 @@ function showCredentialsModal(u){
   document.querySelector('[data-close]').addEventListener('click', ()=>{ closeModal(); render(); });
 }
 
+function openChangePasswordModal(userId){
+  if(!isAdmin()) return;
+  const u = state.users.find(x=>x.id===userId);
+  if(!u) return;
+  const isSelf = u.id===session.userId;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Change password</h3>
+        <div class="modal-sub">${isSelf ? 'Set a new password for your own account.' : `For ${u.name} (${u.username})`}</div>
+        <form id="pwForm">
+          <div class="field"><label>New password</label><input id="pwNew" type="text" required></div>
+          <div class="field"><label>Confirm password</label><input id="pwConfirm" type="text" required></div>
+          <div class="hint">This replaces their current password immediately — they'll need to sign in with the new one next time.</div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="pwSubmitBtn" class="btn btn-primary">Update password</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('pwForm', 'pwSubmitBtn', ()=>{
+    const p1 = document.getElementById('pwNew').value;
+    const p2 = document.getElementById('pwConfirm').value;
+    const errEl = document.getElementById('pwForm');
+    if(!p1 || p1.length<4){ document.getElementById('pwNew').focus(); return; }
+    if(p1!==p2){ document.getElementById('pwConfirm').focus(); return; }
+    u.password = p1;
+    persist(); closeModal(); render();
+  });
+}
+
 function openAddTeamModal(){
+  if(!isAdmin()) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1613,12 +2359,65 @@ function openAddTeamModal(){
   runOnClickAndEnter('teamForm', 'teamSubmitBtn', ()=>{
     const nameEl = document.getElementById('tName');
     if(!nameEl.value.trim()){ nameEl.focus(); return; }
-    state.teams.push({ id: uid('team'), name: nameEl.value.trim() });
+    state.teams.push({ id: uid('team'), name: nameEl.value.trim(), checklist:[] });
+    persist(); closeModal(); render();
+  });
+}
+
+function openManageChecklistModal(teamId){
+  if(!isAdmin()) return;
+  const t = state.teams.find(x=>x.id===teamId);
+  if(!t) return;
+  if(!Array.isArray(t.checklist)) t.checklist = [];
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>${t.name} checklist</h3>
+        <div class="modal-sub">Shown to whoever's assigned when they try to close a task, on any workstream where checklists are required. They must tick every point before the task can close.</div>
+        <div id="clItemsWrap" style="display:flex;flex-direction:column;gap:8px;margin:14px 0;">
+          ${t.checklist.map(item=>`
+            <div class="field-row" data-cl-item="${item.id}" style="align-items:center;">
+              <input type="text" class="clItemText" value="${item.text.replace(/"/g,'&quot;')}" style="flex:1;background:var(--ink);border:1px solid var(--line);border-radius:7px;padding:8px 10px;color:var(--paper);font-size:13px;">
+              <button type="button" class="icon-btn" data-remove-cl-item="${item.id}" title="Remove">✕</button>
+            </div>`).join('') || '<div class="hint">No checklist points yet — add one below.</div>'}
+        </div>
+        <div class="field-row">
+          <input type="text" id="clNewItem" placeholder="e.g. Confirm QA sign-off before closing" style="flex:1;background:var(--ink);border:1px solid var(--line);border-radius:7px;padding:8px 10px;color:var(--paper);font-size:13px;">
+          <button type="button" class="btn btn-sm" id="clAddBtn">+ Add point</button>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" class="btn btn-primary" id="clSaveBtn">Save checklist</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  const rerender = ()=>{ closeModal(); openManageChecklistModal(teamId); };
+  document.querySelectorAll('[data-remove-cl-item]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      t.checklist = t.checklist.filter(i=>i.id!==b.dataset.removeClItem);
+      rerender();
+    });
+  });
+  document.getElementById('clAddBtn').addEventListener('click', ()=>{
+    const val = document.getElementById('clNewItem').value.trim();
+    if(!val) return;
+    t.checklist.push({ id: uid('cl'), text: val });
+    rerender();
+  });
+  document.getElementById('clSaveBtn').addEventListener('click', ()=>{
+    document.querySelectorAll('[data-cl-item]').forEach(row=>{
+      const id = row.dataset.clItem;
+      const item = t.checklist.find(i=>i.id===id);
+      const val = row.querySelector('.clItemText').value.trim();
+      if(item && val) item.text = val;
+    });
     persist(); closeModal(); render();
   });
 }
 
 function openAddProjectModal(){
+  if(!isAdmin()) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1626,6 +2425,8 @@ function openAddProjectModal(){
         <form id="projForm">
           <div class="field"><label>Workstream name</label><input id="pName" required></div>
           <div class="field"><label>Start date</label><input type="date" id="pStart" value="${todayISO()}" required></div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:6px 0;"><input type="checkbox" id="pRequireChecklist"> Require each team's checklist before tasks can be closed</label>
+          <div class="hint">If on, anyone closing a task here has to tick their team's checklist points first (set those up under Admin → Teams). Leave off for workstreams that don't need it.</div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="projSubmitBtn" class="btn btn-primary">Create</button>
@@ -1638,7 +2439,7 @@ function openAddProjectModal(){
     const nameEl = document.getElementById('pName');
     const startEl = document.getElementById('pStart');
     if(!nameEl.value.trim() || !startEl.value){ (nameEl.value.trim()?startEl:nameEl).focus(); return; }
-    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO() };
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked };
     state.projects.push(p); persist(); closeModal();
     ui.projectId = p.id; ui.view='project'; render();
   });

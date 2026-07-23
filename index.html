@@ -85,7 +85,8 @@
   }
   .crumb{font-family:var(--f-mono);font-size:12px;color:var(--paper-dim);letter-spacing:.03em;}
   .crumb b{color:var(--paper);font-weight:600;}
-  .today-display{font-size:12px;font-weight:600;color:var(--amber);letter-spacing:.03em;padding:4px 12px;border:1px solid rgba(224,172,63,.4);background:var(--amber-soft);border-radius:99px;box-shadow:0 0 12px -4px rgba(224,172,63,.35);}
+  .today-display{font-size:12px;font-weight:600;color:var(--amber);letter-spacing:.03em;padding:6px 14px;border:1px solid rgba(224,172,63,.4);background:var(--amber-soft);border-radius:14px;box-shadow:0 0 12px -4px rgba(224,172,63,.35);text-align:center;line-height:1.3;}
+  .today-time{font-size:10px;font-weight:500;color:rgba(224,172,63,.75);letter-spacing:.06em;}
   .who{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--paper-dim);}
   .who .avatar{
     width:28px;height:28px;border-radius:50%;background:var(--panel-hi);
@@ -190,6 +191,7 @@
 
   /* ---------- handoff rail (signature element) ---------- */
   .rail-wrap{overflow-x:auto;padding-bottom:6px;}
+
   .chain-row{display:flex;align-items:center;gap:0;margin:22px 0;min-width:max-content;}
   .chain-label{
     width:150px;flex:0 0 150px;font-family:var(--f-mono);font-size:11px;color:var(--paper-dim);
@@ -199,11 +201,12 @@
   .chain-track{display:flex;align-items:center;}
   .rail-node{
     position:relative;border-radius:9px;border:1.5px solid var(--line);
-    background:var(--panel-raised);padding:10px 14px;min-width:96px;
+    background:var(--panel-raised);padding:10px 14px;min-width:96px;max-width:190px;
     display:flex;flex-direction:column;gap:3px;
   }
-  .rail-node .nt{font-size:12px;font-weight:600;color:var(--paper);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;}
+  .rail-node .nt{font-size:12px;font-weight:600;color:var(--paper);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:162px;}
   .rail-node .nd{font-family:var(--f-mono);font-size:10px;color:var(--paper-dim);}
+  .rail-node .nu{font-size:9.5px;color:var(--paper);line-height:1.3;margin-top:1px;}
   .rail-node.green{border-color:var(--green);box-shadow:0 0 0 1px rgba(51,168,92,.15) inset;}
   .rail-node.green .nd{color:var(--green);}
   .rail-node.red{border-color:var(--red);box-shadow:0 0 12px -2px var(--red-glow);}
@@ -250,7 +253,7 @@
   tbody td{padding:12px;border-bottom:1px solid var(--line-soft);vertical-align:middle;}
   tbody tr:hover{background:var(--panel-raised);}
   .task-title{font-weight:600;}
-  .task-desc{color:var(--paper-faint);font-size:11px;margin-top:2px;max-width:280px;}
+  .task-desc{color:var(--paper-dim);font-size:11px;margin-top:2px;max-width:280px;}
   .date-pair{font-family:var(--f-mono);font-size:11px;}
   .date-pair .orig{color:var(--paper-dim);}
   .date-pair .ext{color:var(--red);text-decoration:none;}
@@ -370,12 +373,13 @@ const storageAdapter = supaClient ? {
     return { key, value };
   }
 } : (HAS_CLAUDE_STORAGE ? {
-  get: (key) => window.storage.get(key, false),
-  set: (key, value) => window.storage.set(key, value, false),
+  get: (key) => window.storage.get(key, true),
+  set: (key, value) => window.storage.set(key, value, true),
 } : null);
 
 // sessionAdapter: which user THIS browser is currently signed in as — this should
-// stay local to the device, so it prefers localStorage once actually hosted online.
+// stay local to the device, so it prefers localStorage once actually hosted online,
+// and stays personal (not shared) even on the Claude-preview storage path.
 function safeLocalGet(key){ try{ return localStorage.getItem(key); }catch(e){ return null; } }
 function safeLocalSet(key,val){ try{ localStorage.setItem(key,val); return true; }catch(e){ return false; } }
 const sessionAdapter = supaClient ? {
@@ -387,7 +391,7 @@ const sessionAdapter = supaClient ? {
 } : null);
 
 const HAS_STORAGE = !!storageAdapter;
-const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'Claude preview storage' : 'none — demo mode only';
+const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'Claude storage (shared)' : 'none — demo mode only';
 
 let state = null;
 let session = { userId: null };
@@ -412,6 +416,46 @@ function uid(prefix){ return prefix + '_' + Math.random().toString(36).slice(2,9
 function todayISO(){
   const IST_OFFSET_MS = (5*60+30)*60*1000;
   return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0,10);
+}
+// Current time in IST, 24-hour HH:MM — purely for display, not used in any date math.
+function nowTimeIST(){
+  const IST_OFFSET_MS = (5*60+30)*60*1000;
+  const d = new Date(Date.now() + IST_OFFSET_MS);
+  return `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+}
+// A combined IST date+time stamp, e.g. "2026-07-20T22:03", for recording exactly
+// when something was last touched (used by the task update-history chart).
+function nowDateTimeIST(){
+  const IST_OFFSET_MS = (5*60+30)*60*1000;
+  const d = new Date(Date.now() + IST_OFFSET_MS);
+  const date = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+  const time = `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+  return `${date}T${time}`;
+}
+function ordinalSuffix(n){
+  if(n>3 && n<21) return 'th';
+  switch(n%10){ case 1: return 'st'; case 2: return 'nd'; case 3: return 'rd'; default: return 'th'; }
+}
+// Formats a nowDateTimeIST() value as "22:03 20th Jul 2026".
+function fmtDateTime(iso){
+  if(!iso) return '';
+  const [datePart, timePart] = iso.split('T');
+  const d = new Date(datePart+'T00:00:00');
+  const day = d.getDate();
+  const month = d.toLocaleDateString('en-US',{month:'short'});
+  return `${timePart} ${day}${ordinalSuffix(day)} ${month} ${d.getFullYear()}`;
+}
+// Who's currently using the app, in the same username-Team format used everywhere else.
+function currentUserDisplayName(){
+  const u = currentUser();
+  if(!u) return 'Unknown';
+  const tm = u.teamId ? state.teams.find(x=>x.id===u.teamId) : null;
+  return tm ? `${u.username}-${tm.name}` : u.name;
+}
+// Stamps a task with who touched it and when — called from every action that changes
+// a task (save, extend, blocker, amend) so the update-history chart always has this.
+function touchTask(t){
+  t.lastUpdated = { at: nowDateTimeIST(), byName: currentUserDisplayName() };
 }
 function addDays(iso, n){
   const d = new Date(iso+'T00:00:00');
@@ -533,6 +577,65 @@ function withTimeout(promise, ms){
 function isValidState(s){
   return s && Array.isArray(s.users) && Array.isArray(s.teams) && Array.isArray(s.projects) && Array.isArray(s.tasks) && s.users.length > 0;
 }
+// A rough measure of "how much real content is in here" — used to decide whether a
+// legacy storage bucket has more genuine data than what's currently active, without
+// needing to understand exactly what changed.
+function stateRichness(s){
+  if(!isValidState(s)) return -1;
+  return s.users.length + s.teams.length + s.projects.length + s.tasks.length;
+}
+
+// Manually triggered from Admin — lets the admin explicitly check the old "personal"
+// storage bucket for data stranded there by an earlier version of this app, and choose
+// whether to load it in. This never runs silently; the admin always sees the comparison
+// and decides.
+async function checkForLegacyData(){
+  const btn = document.getElementById('recoverLegacyBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Checking…'; }
+  let legacyState = null;
+  try{
+    const legacyRes = await withTimeout(window.storage.get(STORAGE_KEY, false), 5000);
+    legacyState = legacyRes && legacyRes.value ? JSON.parse(legacyRes.value) : null;
+  }catch(e){ legacyState = null; }
+  if(btn){ btn.disabled = false; btn.textContent = 'Check for legacy data'; }
+
+  if(!isValidState(legacyState)){
+    document.getElementById('modalRoot').innerHTML = `
+      <div class="modal-backdrop" data-backdrop>
+        <div class="modal">
+          <h3>No legacy data found</h3>
+          <div class="modal-sub">Nothing usable was found in the older storage location.</div>
+          <div class="modal-actions"><button class="btn btn-primary" data-close>OK</button></div>
+        </div>
+      </div>`;
+    bindModalClose();
+    return;
+  }
+
+  const currentCounts = `${state.users.length} users, ${state.teams.length} teams, ${state.projects.length} workstreams, ${state.tasks.length} tasks`;
+  const legacyCounts = `${legacyState.users.length} users, ${legacyState.teams.length} teams, ${legacyState.projects.length} workstreams, ${legacyState.tasks.length} tasks`;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Legacy data found</h3>
+        <div class="modal-sub">Compare before deciding — loading legacy data replaces what's currently active.</div>
+        <div class="field"><label>Currently active</label><div class="hint">${currentCounts}</div></div>
+        <div class="field"><label>Found in legacy storage</label><div class="hint">${legacyCounts}</div></div>
+        <div class="hint">This does not merge the two — it replaces the active data with the legacy set. If you need both combined, tell me what's in each and I can help reconcile it manually.</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" class="btn btn-danger" id="loadLegacyBtn">Load legacy data instead</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.getElementById('loadLegacyBtn').addEventListener('click', async ()=>{
+    state = legacyState;
+    await persist();
+    closeModal();
+    render();
+  });
+}
 
 // Synchronous, instant setup so the UI never has to wait on storage to show something usable.
 function loadAllInstant(){
@@ -553,8 +656,23 @@ async function reconcileWithStorage(){
       (sessionAdapter ? sessionAdapter.get(SESSION_KEY) : Promise.resolve(null)).catch(()=>null),
     ]), 4000);
 
-    const parsedState = stateRes && stateRes.value ? JSON.parse(stateRes.value) : null;
+    let parsedState = stateRes && stateRes.value ? JSON.parse(stateRes.value) : null;
     const parsedSession = sessionRes && sessionRes.value ? JSON.parse(sessionRes.value) : null;
+
+    // One-time migration: earlier versions of this app saved the shared app data under
+    // Claude's "personal" storage bucket instead of "shared". Compare RICHNESS, not just
+    // validity — a brief window existed where the new shared bucket could have been
+    // seeded with fresh demo data before this migration existed, which would otherwise
+    // permanently mask real legacy data sitting in the old bucket.
+    if(HAS_CLAUDE_STORAGE && !supaClient){
+      try{
+        const legacyRes = await withTimeout(window.storage.get(STORAGE_KEY, false), 4000);
+        const legacyState = legacyRes && legacyRes.value ? JSON.parse(legacyRes.value) : null;
+        if(isValidState(legacyState) && stateRichness(legacyState) > stateRichness(parsedState)){
+          parsedState = legacyState;
+        }
+      }catch(e){ /* no legacy data to recover, that's fine */ }
+    }
 
     if(isValidState(parsedState) && stillOnFreshLogin()){
       state = parsedState;
@@ -563,6 +681,7 @@ async function reconcileWithStorage(){
         ui.view = 'portfolio';
       }
       render();
+      persist(); // ensures a migrated legacy state gets written into the shared bucket right away
     } else if(!isValidState(parsedState)){
       // nothing usable saved yet — persist our fresh seed so future loads (and other people) have something to find
       persist();
@@ -763,7 +882,7 @@ function render(){
       <div class="topbar">
         <div class="crumb">${breadcrumb()}</div>
         <div style="display:flex;align-items:center;gap:16px;">
-          <div class="today-display mono" title="Today's date (IST)">${fmtDate(todayISO())}</div>
+          <div class="today-display mono" title="Today's date & time (IST)">${fmtDate(todayISO())}<div class="today-time" id="topbarTime">${nowTimeIST()} IST</div></div>
           <div class="who"><span>${currentUser() ? currentUser().name : ''}</span><div class="avatar">${currentUser() ? initials(currentUser().name) : ''}</div></div>
         </div>
       </div>
@@ -828,7 +947,7 @@ function renderLogin(){
       <div class="login-mark"></div>
       <div class="login-title">ImproveID Dashboard</div>
       <div class="muted" style="font-size:13px;">Sign in to track project timelines and handoffs.</div>
-      <div class="mono" style="font-size:11px;color:var(--paper-faint);margin-top:6px;">${fmtDate(todayISO())}</div>
+      <div class="mono" id="loginDateTime" style="font-size:11px;color:var(--paper-faint);margin-top:6px;">${fmtDate(todayISO())} · ${nowTimeIST()} IST</div>
       <form id="loginForm" style="margin-top:22px;">
         <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
         <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" required></div>
@@ -1015,13 +1134,16 @@ function renderProject(){
   const railRows = tl.chains.map((chain, idx)=>{
     const isCritical = idx === tl.criticalIndex && tl.chains.length>1;
     const nodes = chain.map((t,i)=>{
-      const color = taskStatusColor(t);
+      const color = t.status==='closed' ? 'green' : 'red';
       const dur = taskDuration(t, true);
+      const lu = t.lastUpdated;
+      const luText = lu ? `Updated by ${lu.byName} at ${fmtDateTime(lu.at)}` : 'Not yet updated';
       return `
         ${i>0 ? '<div class="rail-connector"></div>' : ''}
         <div class="rail-node ${color}" data-task-node="${t.id}" style="cursor:pointer;">
           <span class="nt">${t.title || 'Untitled task'}</span>
           <span class="nd">${entityName(t.assignedType,t.assignedId)} · ${dur}d</span>
+          <span class="nu">${luText}</span>
         </div>`;
     }).join('');
     return `
@@ -1046,12 +1168,13 @@ function renderProject(){
       </div>`;
   }).join('');
 
-  const taskRows = tasks.map(t=>{
+  const taskRows = tasks.map((t,i)=>{
     const color = taskStatusColor(t);
     const canEdit = canEditTask(t);
     const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
     return `
     <tr>
+      <td class="mono" style="color:var(--paper);">${i+1}.</td>
       <td>
         <div class="task-title">${t.title || '<span class="muted">Untitled task</span>'}</div>
         ${t.description ? `<div class="task-desc">${t.description}</div>` : '<div class="task-desc">No description yet</div>'}
@@ -1122,7 +1245,7 @@ function renderProject(){
 
     <div class="card" style="margin-top:20px;">
       <div class="section-title">Handoff rail</div>
-      <div class="muted" style="font-size:12px;margin-bottom:4px;">Every chain of dependent tasks, combined into one timeline. Parallel chains run at once — the longest one sets the project length.</div>
+      <div class="muted" style="font-size:12px;margin-bottom:4px;">Every chain of dependent tasks, combined into one timeline. Parallel chains run at once — the longest one sets the project length. Each node also shows who last touched that task, and when. Green means the task is closed; red means it's still open.</div>
       <div class="rail-wrap">${railRows || '<div class="empty-state">No tasks yet.</div>'}</div>
     </div>
 
@@ -1135,8 +1258,8 @@ function renderProject(){
         </div>
       </div>
       <table>
-        <thead><tr><th>Task</th><th>Assigned</th><th>Timeline</th><th>Status</th><th></th></tr></thead>
-        <tbody>${taskRows || `<tr><td colspan="5" class="empty-state">No tasks in this project.</td></tr>`}</tbody>
+        <thead><tr><th>#</th><th>Task</th><th>Assigned</th><th>Timeline</th><th>Status</th><th></th></tr></thead>
+        <tbody>${taskRows || `<tr><td colspan="6" class="empty-state">No tasks in this project.</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -1163,7 +1286,7 @@ function bindProject(){
     el.addEventListener('click', (e)=>{
       e.stopPropagation();
       const t = state.tasks.find(x=>x.id===el.dataset.clearBlocker);
-      if(t){ t.blockedByTeamId = null; persist(); render(); }
+      if(t){ t.blockedByTeamId = null; touchTask(t); persist(); render(); }
     });
   });
   const addBtn = document.querySelector('[data-add-task]');
@@ -1197,6 +1320,7 @@ function openBlockerModal(taskId){
     const teamId = document.getElementById('bkTeam').value;
     if(!teamId) return;
     t.blockedByTeamId = teamId;
+    touchTask(t);
     persist(); closeModal(); render();
   });
 }
@@ -1247,7 +1371,7 @@ function openBlankTaskModal(projectId){
       description:'', reason:'', assignedType:type, assignedId:id,
       predecessorId: document.getElementById('btPredecessor').value || null,
       startDate:'', endDate:'', originalEndDate:'', extended:false, blockedByTeamId:null, status:'open', closedDate:null,
-      datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[]
+      datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[], lastUpdated:null
     };
     state.tasks.push(t); persist(); closeModal(); render();
   });
@@ -1340,6 +1464,7 @@ function openTaskModal(taskId){
         t.assignedType = type; t.assignedId = id;
         t.predecessorId = document.getElementById('tfPredecessor').value || null;
       }
+      touchTask(t);
       persist(); closeModal(); render();
     };
     const overlapThenCommit = ()=>{
@@ -1421,6 +1546,7 @@ function openAmendTimelineModal(taskId){
     } else {
       t.endDate = origEnd;
     }
+    touchTask(t);
     persist(); closeModal(); render();
   });
 }
@@ -1463,6 +1589,7 @@ function openExtendModal(taskId){
     t.endDate = newDate;
     t.extended = true;
     if(document.getElementById('exWeekendWork').checked) t.weekendWork = true;
+    touchTask(t);
     persist(); closeModal(); render();
   });
 }
@@ -2064,6 +2191,16 @@ function renderAdminUsers(){
         <button class="btn btn-sm" data-change-password="${admin?admin.id:''}">Change my password</button>
       </div>
     </div>
+    ${(HAS_CLAUDE_STORAGE && !supaClient) ? `
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div class="section-title" style="margin-bottom:2px;">Data recovery</div>
+          <div class="muted" style="font-size:12px;">Check for data stranded in an older storage location and load it in.</div>
+        </div>
+        <button class="btn btn-sm" id="recoverLegacyBtn">Check for legacy data</button>
+      </div>
+    </div>` : ''}
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div class="section-title" style="margin-bottom:0;">Users</div>
@@ -2139,6 +2276,8 @@ function bindAdmin(){
   document.querySelectorAll('[data-change-password]').forEach(b=>b.addEventListener('click', ()=>{
     if(b.dataset.changePassword) openChangePasswordModal(b.dataset.changePassword);
   }));
+  const recoverBtn = document.getElementById('recoverLegacyBtn');
+  if(recoverBtn) recoverBtn.addEventListener('click', checkForLegacyData);
 
   const addTeam = document.querySelector('[data-add-team]');
   if(addTeam) addTeam.addEventListener('click', openAddTeamModal);
@@ -2452,6 +2591,16 @@ function openAddProjectModal(){
   render();
   reconcileWithStorage();
 })();
+
+// Keep the displayed clock live without disturbing anything else on screen —
+// updates just the time text in place, on whichever of these elements currently exists.
+setInterval(()=>{
+  const t = nowTimeIST() + ' IST';
+  const topbarEl = document.getElementById('topbarTime');
+  if(topbarEl) topbarEl.textContent = t;
+  const loginEl = document.getElementById('loginDateTime');
+  if(loginEl) loginEl.textContent = `${fmtDate(todayISO())} · ${t}`;
+}, 15000);
 </script>
 </body>
 </html>

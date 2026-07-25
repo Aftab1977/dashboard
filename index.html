@@ -355,6 +355,9 @@
   .att-cell.att-weekend{background:rgba(255,255,255,.02);color:var(--paper-faint);}
   .att-cell.att-clickable{cursor:pointer;}
   .att-cell.att-clickable:hover{outline:1px solid var(--paper-faint);outline-offset:-1px;}
+  .appraisal-cell{padding:8px 12px;text-align:left;white-space:nowrap;color:var(--paper-dim);}
+  .appraisal-overdue{color:var(--red) !important;font-weight:600;}
+  tr[data-appraisal-row]:hover .att-name, tr[data-appraisal-row]:hover .appraisal-cell{background:var(--panel-hi);}
 </style>
 </head>
 <body>
@@ -437,7 +440,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, attendanceMonth:null };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, attendanceMonth:null, navHistory:[] };
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -621,9 +624,12 @@ function seedState(){
     {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
     {id:'feat_fai', name:'FAI — Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
     {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
+    {id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:1, contentItems:[], description:'', specialView:'attendance'},
+    {id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:2, contentItems:[], description:'', specialView:'appraisal'},
+    {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
   ];
 
-  return { teams, users, projects, tasks, featureNodes, attendance: {} };
+  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {} };
 }
 
 function withTimeout(promise, ms){
@@ -656,6 +662,9 @@ function normalizeState(s){
       {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
       {id:'feat_fai', name:'FAI — Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
       {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
+      {id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:1, contentItems:[], description:'', specialView:'attendance'},
+      {id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:2, contentItems:[], description:'', specialView:'appraisal'},
+      {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
     ];
   } else {
     // migrate feature nodes already saved by an earlier version of this app
@@ -667,9 +676,56 @@ function normalizeState(s){
       if(n.nodeType==='heading' && (n.name||'').trim().toLowerCase()==='attendance' && !n.specialView){
         n.specialView = 'attendance';
       }
+      // Same for "Appraisal" — becomes the appraisal sheet view automatically.
+      if(n.nodeType==='heading' && (n.name||'').trim().toLowerCase()==='appraisal' && !n.specialView){
+        n.specialView = 'appraisal';
+      }
     });
+    // One-time addition: an "Appraisal" heading under HR, requested directly rather
+    // than through the (now removed) in-app creation buttons. Keyed by a stable id so
+    // this only ever runs once — if it's later renamed or deleted, it won't come back.
+    if(!s.featureNodes.some(n=>n.id==='h_appraisal') && s.featureNodes.some(n=>n.id==='feat_hr')){
+      const hrKids = s.featureNodes.filter(n=>n.parentId==='feat_hr');
+      const nextOrder = hrKids.length ? Math.max(...hrKids.map(n=>n.order||0))+1 : 1;
+      s.featureNodes.push({id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:nextOrder, contentItems:[], description:'', specialView:'appraisal'});
+    }
+    // One-time removal: both "Attendance" and "Staff Attendance" headings under HR,
+    // and anything nested under them, at the user's explicit request to start over.
+    // Also clears the underlying attendance records (P/L/WFH/NS marks) for a genuinely
+    // clean slate. Keyed by a flag so this only ever runs once — recreating either
+    // heading afterward (manually, or via a future prompt here) won't be undone by this.
+    if(!s._removedAttendanceHeadingsV2 && s.featureNodes.some(n=>n.id==='feat_hr')){
+      const namesToRemove = ['attendance','staff attendance'];
+      const toRemove = s.featureNodes.filter(n=>n.nodeType==='heading' && n.parentId==='feat_hr' && namesToRemove.includes((n.name||'').trim().toLowerCase()));
+      toRemove.forEach(n=>{
+        const removeIds = new Set([n.id]);
+        let changed = true;
+        while(changed){
+          changed = false;
+          s.featureNodes.forEach(x=>{ if(x.parentId && removeIds.has(x.parentId) && !removeIds.has(x.id)){ removeIds.add(x.id); changed = true; } });
+        }
+        s.featureNodes = s.featureNodes.filter(x=>!removeIds.has(x.id));
+      });
+      s.attendance = {};
+      s._removedAttendanceHeadingsV2 = true;
+    }
+    // One-time addition: a fresh "Attendance" heading under HR (new stable id, so it
+    // doesn't conflict with the removal migration above), wired straight to the
+    // attendance sheet view.
+    if(!s.featureNodes.some(n=>n.id==='h_attendance_v3') && s.featureNodes.some(n=>n.id==='feat_hr')){
+      const hrKidsAtt = s.featureNodes.filter(n=>n.parentId==='feat_hr');
+      const nextOrderAtt = hrKidsAtt.length ? Math.max(...hrKidsAtt.map(n=>n.order||0))+1 : 1;
+      s.featureNodes.push({id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:nextOrderAtt, contentItems:[], description:'', specialView:'attendance'});
+    }
+    // One-time addition: a plain "Policies" heading under HR.
+    if(!s.featureNodes.some(n=>n.id==='h_policies') && s.featureNodes.some(n=>n.id==='feat_hr')){
+      const hrKids4 = s.featureNodes.filter(n=>n.parentId==='feat_hr');
+      const nextOrder4 = hrKids4.length ? Math.max(...hrKids4.map(n=>n.order||0))+1 : 1;
+      s.featureNodes.push({id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:nextOrder4, contentItems:[], description:'', specialView:null});
+    }
   }
   if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
+  if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
   return s;
 }
 
@@ -786,18 +842,26 @@ function describeError(e){
   return parts.length ? parts.join(' | ') : JSON.stringify(e);
 }
 
-async function persist(){
-  if(!HAS_STORAGE) return;
-  try{
-    await storageAdapter.set(STORAGE_KEY, JSON.stringify(state));
-    if(ui.saveError){ ui.saveError = null; render(); }
-  }
-  catch(e){
-    const msg = describeError(e);
-    console.error('save failed:', msg);
-    ui.saveError = msg;
-    render();
-  }
+// Every persist() call is chained after the previous one, so saves always land in the
+// order they were made — rapid successive edits (like adding three headings quickly)
+// used to be able to finish out of order over the network, letting an earlier, staler
+// write overwrite a later, more complete one. Chaining removes that race entirely.
+let persistChain = Promise.resolve();
+function persist(){
+  persistChain = persistChain.then(async ()=>{
+    if(!HAS_STORAGE) return;
+    try{
+      await storageAdapter.set(STORAGE_KEY, JSON.stringify(state));
+      if(ui.saveError){ ui.saveError = null; render(); }
+    }
+    catch(e){
+      const msg = describeError(e);
+      console.error('save failed:', msg);
+      ui.saveError = msg;
+      render();
+    }
+  });
+  return persistChain;
 }
 async function persistSession(){
   if(!sessionAdapter) return;
@@ -972,6 +1036,24 @@ function svgIcon(name){
 
 /* ============================== ROOT RENDER ============================== */
 
+let lastViewSnapshot = null;
+let suppressHistoryPush = false;
+function currentNavSnapshot(){ return { view: ui.view, projectId: ui.projectId, featureNodeId: ui.featureNodeId }; }
+function snapshotsEqual(a,b){ return a && b && a.view===b.view && a.projectId===b.projectId && a.featureNodeId===b.featureNodeId; }
+
+function goBack(){
+  if(ui.navHistory && ui.navHistory.length){
+    const prev = ui.navHistory.pop();
+    ui.view = prev.view;
+    ui.projectId = prev.projectId;
+    ui.featureNodeId = prev.featureNodeId;
+  } else {
+    ui.view = 'home';
+  }
+  suppressHistoryPush = true;
+  render();
+}
+
 function render(){
   const app = document.getElementById('app');
   if(ui.view === 'login'){
@@ -979,6 +1061,14 @@ function render(){
     bindLogin();
     return;
   }
+  const curSnap = currentNavSnapshot();
+  if(!suppressHistoryPush && lastViewSnapshot && !snapshotsEqual(lastViewSnapshot, curSnap)){
+    if(!ui.navHistory) ui.navHistory = [];
+    ui.navHistory.push(lastViewSnapshot);
+    if(ui.navHistory.length > 20) ui.navHistory.shift();
+  }
+  suppressHistoryPush = false;
+  lastViewSnapshot = curSnap;
   app.innerHTML = `
     <div class="navrail">
       <div class="brand"></div>
@@ -990,7 +1080,7 @@ function render(){
     <div class="main">
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:14px;">
-          ${ui.view!=='home' ? `<button class="btn btn-sm" data-nav="home" style="padding:6px 14px;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(224,172,63,.4);box-shadow:0 0 10px -4px rgba(224,172,63,.35);font-weight:600;">← Focus Area</button>` : ''}
+          ${ui.view!=='home' ? `<button class="btn btn-sm" data-go-back style="padding:6px 14px;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(224,172,63,.4);box-shadow:0 0 10px -4px rgba(224,172,63,.35);font-weight:600;">← Go Back</button>` : ''}
           <div class="crumb">${breadcrumb()}</div>
         </div>
         <div style="display:flex;align-items:center;gap:16px;">
@@ -1046,12 +1136,14 @@ function bindGlobalNav(){
   document.querySelectorAll('[data-nav]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const v = btn.dataset.nav;
-      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; render(); return; }
+      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; ui.navHistory=[]; lastViewSnapshot=null; render(); return; }
       ui.view = v; render();
     });
   });
   const dismissBtn = document.getElementById('dismissSaveError');
   if(dismissBtn) dismissBtn.addEventListener('click', ()=>{ ui.saveError=null; render(); });
+  const goBackBtn = document.querySelector('[data-go-back]');
+  if(goBackBtn) goBackBtn.addEventListener('click', goBack);
 }
 
 function bindView(){
@@ -1168,7 +1260,6 @@ function renderFocusAreaHome(){
         <div style="display:flex;gap:8px;align-items:center;">
           ${childCount ? `<button class="btn btn-sm btn-ghost" data-browse-feature="${f.id}">Browse content (${childCount})</button>` : ''}
           ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description">✎</button>` : ''}
-          ${isAdmin() ? `<button class="btn btn-sm" data-quick-add-feature="${f.id}">+</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -1211,9 +1302,6 @@ function bindFocusAreaHome(){
   });
   document.querySelectorAll('[data-browse-feature]').forEach(el=>{
     el.addEventListener('click', (e)=>{ e.stopPropagation(); ui.view='feature'; ui.featureNodeId = el.dataset.browseFeature; render(); });
-  });
-  document.querySelectorAll('[data-quick-add-feature]').forEach(el=>{
-    el.addEventListener('click', (e)=>{ e.stopPropagation(); openAddNodeChoiceModal(el.dataset.quickAddFeature); });
   });
   document.querySelectorAll('[data-edit-feature-desc]').forEach(el=>{
     el.addEventListener('click', (e)=>{ e.stopPropagation(); openEditNodeModal(el.dataset.editFeatureDesc); });
@@ -1376,9 +1464,9 @@ function renderAttendanceSheet(node){
   const [y,m] = monthKey.split('-').map(Number);
   const daysInMonth = new Date(y,m,0).getDate();
   const admin = isAdmin();
-  // Who shows up as a row — everyone but Viewers for now; which specific users belong
-  // here will become configurable once role-based access to this heading is designed.
-  const rows = state.users.filter(u=>u.role!=='viewer');
+  const cu = currentUser();
+  // Admins see the whole team; anyone else only ever sees their own attendance row.
+  const rows = admin ? state.users.filter(u=>u.role!=='viewer') : (cu ? [cu] : []);
 
   const dayHeaders = Array.from({length:daysInMonth},(_,i)=>{
     const day=i+1;
@@ -1482,6 +1570,133 @@ function openRevertAttendanceConfirm(iso, onConfirm){
   div.querySelector('#revertAttConfirm').addEventListener('click', ()=>{ cleanup(); onConfirm(); });
 }
 
+/* ============================== APPRAISAL SHEET (special Heading view) ============================== */
+
+// "X yr Y mo" from a Date-of-Joining to today — purely for display.
+function tenureLabel(doj){
+  if(!doj) return '—';
+  const start = new Date(doj+'T00:00:00');
+  const now = new Date(todayISO()+'T00:00:00');
+  if(isNaN(start.getTime()) || start > now) return '—';
+  let years = now.getFullYear() - start.getFullYear();
+  let months = now.getMonth() - start.getMonth();
+  if(now.getDate() < start.getDate()) months--;
+  if(months < 0){ years--; months += 12; }
+  const parts = [];
+  if(years>0) parts.push(`${years} yr`);
+  parts.push(`${months} mo`);
+  return parts.join(' ');
+}
+// A review is overdue once a full year has passed since the last appraisal date.
+function isAppraisalOverdue(lastDate){
+  if(!lastDate) return false;
+  return todayISO() > addDays(lastDate, 365);
+}
+function fmtMoney(n){
+  if(n===null || n===undefined || n==='') return '';
+  return Number(n).toLocaleString('en-US');
+}
+
+function renderAppraisalSheet(node){
+  const admin = isAdmin();
+  if(!admin){
+    return `
+      <div class="eyebrow">Heading</div>
+      <h1 class="page-title" style="margin-bottom:16px;">${node.name}</h1>
+      <div class="empty-state"><div class="et">Admins only</div>Appraisal and salary details are restricted to admins.</div>
+    `;
+  }
+  const rows = state.users.filter(u=>u.role!=='viewer');
+  const cols = ['Designation','DOJ','Tenure','Current Salary','Last Appraisal Date','Last Increase %','Comments','Current Recommendations','New Salary'];
+
+  const bodyRows = rows.map(u=>{
+    const rec = state.appraisal[u.id] || {};
+    const overdue = isAppraisalOverdue(rec.lastAppraisalDate);
+    const lastDateCell = rec.lastAppraisalDate
+      ? `${fmtDate(rec.lastAppraisalDate)}${overdue ? ' <span class="pill pill-red" style="margin-left:4px;">Review due</span>' : ''}`
+      : '';
+    return `
+      <tr data-appraisal-row="${u.id}" style="cursor:pointer;">
+        <td class="att-name">${u.name}</td>
+        <td class="appraisal-cell">${rec.designation||''}</td>
+        <td class="appraisal-cell mono">${rec.doj?fmtDate(rec.doj):''}</td>
+        <td class="appraisal-cell mono">${tenureLabel(rec.doj)}</td>
+        <td class="appraisal-cell mono">${rec.currentSalary!=null?fmtMoney(rec.currentSalary):''}</td>
+        <td class="appraisal-cell mono${overdue?' appraisal-overdue':''}">${lastDateCell}</td>
+        <td class="appraisal-cell mono">${rec.lastIncreasePct!=null?rec.lastIncreasePct+'%':''}</td>
+        <td class="appraisal-cell">${rec.comments||''}</td>
+        <td class="appraisal-cell">${rec.recommendations||''}</td>
+        <td class="appraisal-cell mono">${rec.newSalary!=null?fmtMoney(rec.newSalary):''}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="eyebrow">Heading</div>
+    <h1 class="page-title" style="margin-bottom:6px;">${node.name}</h1>
+    <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>
+    <div class="att-wrap">
+      <table class="att-table" style="font-size:12px;">
+        <thead><tr><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="text-align:left;font-weight:600;">${c}</th>`).join('')}</tr></thead>
+        <tbody>${bodyRows || `<tr><td colspan="${cols.length+1}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function bindAppraisalSheet(){
+  document.querySelectorAll('[data-appraisal-row]').forEach(el=>{
+    el.addEventListener('click', ()=> openAppraisalEditModal(el.dataset.appraisalRow));
+  });
+}
+
+function openAppraisalEditModal(userId){
+  if(!isAdmin()) return;
+  const u = state.users.find(x=>x.id===userId);
+  if(!u) return;
+  const rec = state.appraisal[userId] || {};
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>${u.name} — Appraisal details</h3>
+        <form id="appraisalForm">
+          <div class="field-row">
+            <div class="field"><label>Designation</label><input id="apDesignation" value="${(rec.designation||'').replace(/"/g,'&quot;')}"></div>
+            <div class="field"><label>Date of Joining</label><input type="date" id="apDoj" value="${rec.doj||''}"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Current Salary</label><input type="number" id="apCurrentSalary" value="${rec.currentSalary??''}"></div>
+            <div class="field"><label>New Salary</label><input type="number" id="apNewSalary" value="${rec.newSalary??''}"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Last Appraisal Date</label><input type="date" id="apLastDate" value="${rec.lastAppraisalDate||''}"></div>
+            <div class="field"><label>Last Increase %</label><input type="number" step="0.1" id="apLastIncrease" value="${rec.lastIncreasePct??''}"></div>
+          </div>
+          <div class="field"><label>Comments</label><textarea id="apComments">${(rec.comments||'').replace(/</g,'&lt;')}</textarea></div>
+          <div class="field"><label>Current Recommendations</label><textarea id="apRecommendations">${(rec.recommendations||'').replace(/</g,'&lt;')}</textarea></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="apSubmitBtn" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('appraisalForm','apSubmitBtn', ()=>{
+    const val = id => document.getElementById(id).value;
+    state.appraisal[userId] = {
+      designation: val('apDesignation').trim(),
+      doj: val('apDoj') || null,
+      currentSalary: val('apCurrentSalary') ? Number(val('apCurrentSalary')) : null,
+      newSalary: val('apNewSalary') ? Number(val('apNewSalary')) : null,
+      lastAppraisalDate: val('apLastDate') || null,
+      lastIncreasePct: val('apLastIncrease') ? Number(val('apLastIncrease')) : null,
+      comments: val('apComments').trim(),
+      recommendations: val('apRecommendations').trim(),
+    };
+    persist(); closeModal(); render();
+  });
+}
+
 function renderContentItem(it){
   if(it.type==='text') return `<div class="content-item"><div class="ci-title">${it.title||''}</div><div class="ci-text">${(it.text||'').replace(/\n/g,'<br>')}</div></div>`;
   if(it.type==='link') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">🔗 ${it.title||it.url}</a></div>`;
@@ -1494,7 +1709,7 @@ function renderContentItem(it){
 // items, plus any Sub Headings underneath, recursively.
 function renderHeadingCard(h, depth){
   if(h.specialView){
-    const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : 'Click to open';
+    const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : h.specialView==='appraisal' ? 'Appraisal sheet — click to open' : 'Click to open';
     return `
     <div class="heading-card" style="margin-left:${depth*20}px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
@@ -1539,6 +1754,9 @@ function renderFeatureNode(){
   if(node.nodeType==='heading' && node.specialView==='attendance'){
     return renderAttendanceSheet(node);
   }
+  if(node.nodeType==='heading' && node.specialView==='appraisal'){
+    return renderAppraisalSheet(node);
+  }
 
   if(node.nodeType==='heading' || node.nodeType==='subheading'){
     return `
@@ -1575,10 +1793,9 @@ function renderFeatureNode(){
   return `
     <div class="eyebrow">${node.parentId ? 'Feature' : 'Module'}</div>
     <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
-    ${isAdmin() ? `<button class="btn btn-primary btn-sm" style="margin-bottom:20px;" data-add-node="${node.id}">+ Add Feature or Heading</button>` : ''}
     ${subFeatureBoxes}
     ${headingCards}
-    ${(!subFeatures.length && !headings.length) ? `<div class="empty-state"><div class="et">Nothing here yet</div>${isAdmin() ? 'Use the button above to add a Feature or Heading.' : ''}</div>` : ''}
+    ${(!subFeatures.length && !headings.length) ? `<div class="empty-state"><div class="et">Nothing here yet</div></div>` : ''}
   `;
 }
 
@@ -1588,11 +1805,13 @@ function bindFeatureNode(){
     bindAttendanceSheet();
     return;
   }
+  if(node && node.nodeType==='heading' && node.specialView==='appraisal'){
+    bindAppraisalSheet();
+    return;
+  }
   document.querySelectorAll('[data-open-feature]').forEach(el=>{
     el.addEventListener('click', ()=>{ ui.featureNodeId = el.dataset.openFeature; render(); });
   });
-  const addBtn = document.querySelector('[data-add-node]');
-  if(addBtn) addBtn.addEventListener('click', ()=> openAddNodeChoiceModal(addBtn.dataset.addNode));
   document.querySelectorAll('[data-add-content]').forEach(el=>{
     el.addEventListener('click', ()=> openAddContentModal(el.dataset.addContent));
   });

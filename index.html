@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ImproveID Dashboard — Workstream Timeline Tracker</title>
+<title>ImproveID Workspace — Workstream Timeline Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -253,6 +253,8 @@
   tbody td{padding:12px;border-bottom:1px solid var(--line-soft);vertical-align:middle;}
   tbody tr:hover{background:var(--panel-raised);}
   .task-title{font-weight:600;}
+  .task-title-link{cursor:pointer;width:fit-content;}
+  .task-title-link:hover{text-decoration:underline;color:var(--paper);}
   .task-desc{color:var(--paper-dim);font-size:11px;margin-top:2px;max-width:280px;}
   .date-pair{font-family:var(--f-mono);font-size:11px;}
   .date-pair .orig{color:var(--paper-dim);}
@@ -333,6 +335,15 @@
     color:var(--amber);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:18px;
   }
   .footnote{margin-top:36px;padding-top:16px;border-top:1px solid var(--line-soft);color:var(--paper-faint);font-size:11px;font-family:var(--f-mono);}
+  .feature-box:hover{border-color:var(--paper-faint);}
+  .heading-card{border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px;}
+  .heading-card:first-child{border-top:none;padding-top:0;margin-top:0;}
+  .heading-name{font-family:var(--f-display);font-size:16px;font-weight:600;}
+  .content-item{background:var(--panel-raised);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-top:8px;}
+  .ci-title{font-size:12px;font-weight:600;color:var(--paper);margin-bottom:3px;}
+  .ci-text{font-size:13px;color:var(--paper-dim);line-height:1.6;}
+  .ci-link{font-size:13px;color:var(--amber);text-decoration:none;}
+  .ci-link:hover{text-decoration:underline;}
 </style>
 </head>
 <body>
@@ -347,15 +358,35 @@
  * anon public key below. Full steps are in the setup guide. Leave both blank
  * to keep running in local demo mode (data stays private to each browser).
  * ============================================================================ */
-const SUPABASE_URL = 'https://gjnxgdzpfdkbptzimbgf.supabase.co/rest/v1/';       // e.g. 'https://abcdefghijk.supabase.co'
+const SUPABASE_URL = 'https://gjnxgdzpfdkbptzimbgf.supabase.co';       // e.g. 'https://abcdefghijk.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqbnhnZHpwZmRrYnB0emltYmdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzOTI2MDQsImV4cCI6MjA5OTk2ODYwNH0.IYOuQARn6MiY9sc6e9w2-VGwuajWTerf6Ps48gwMBqM';  // your project's anon public key
 /* ============================================================================ */
 
 const STORAGE_KEY = 'controlroom_state_v1';
 const SESSION_KEY = 'controlroom_session_v1';
 
+// Some sandboxed preview environments (like Claude's own artifact preview) relay
+// fetch() calls to a parent frame via postMessage, which uses the structured clone
+// algorithm — and that algorithm can't clone a real Headers object. supabase-js
+// builds its requests using Headers internally, so we hand it a fetch wrapper that
+// flattens headers to a plain object first. Harmless on a normal, unsandboxed page
+// (like the real hosted site) — it's only ever needed inside a sandboxed preview.
+function sandboxSafeFetch(url, options){
+  const opts = options ? {...options} : {};
+  if(opts.headers){
+    if(typeof Headers !== 'undefined' && opts.headers instanceof Headers){
+      const plain = {};
+      opts.headers.forEach((v,k)=>{ plain[k]=v; });
+      opts.headers = plain;
+    } else if(Array.isArray(opts.headers)){
+      opts.headers = Object.fromEntries(opts.headers);
+    }
+  }
+  return fetch(url, opts);
+}
+
 const supaClient = (SUPABASE_URL && SUPABASE_ANON_KEY && typeof window.supabase !== 'undefined')
-  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { fetch: sandboxSafeFetch } })
   : null;
 const HAS_CLAUDE_STORAGE = typeof window.storage !== 'undefined';
 
@@ -395,7 +426,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'' };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null };
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -518,6 +549,14 @@ function blockedTeamsForProject(projectId){
   projectTasks(projectId).forEach(t=>{ if(t.blockedByTeamId) ids.add(t.blockedByTeamId); });
   return Array.from(ids).map(id => (state.teams.find(tm=>tm.id===id) || {}).name || 'Unknown team');
 }
+// Same as above, but paired with the reason given for each blocked task — used to
+// build a hover tooltip so people can see WHY without opening the task.
+function blockedDetailForProject(projectId){
+  return projectTasks(projectId)
+    .filter(t=>t.blockedByTeamId)
+    .map(t=>`${entityName(t.assignedType,t.assignedId)}: ${t.blockerReason || 'no reason given'}`)
+    .join(' | ');
+}
 
 // Which teams/individuals actually have a delayed task in this project — used to
 // show "DELAYED 5D BY <who>" so it's obvious at a glance who to go ask.
@@ -564,7 +603,16 @@ function seedState(){
     {id:'t7', projectId:p2, title:'Portal Access Setup', description:'Provision vendor logins to the procurement portal.', reason:'', assignedType:'user', assignedId:'u_arjun', predecessorId:'t6', startDate:addDays(todayISO(),-3), endDate:addDays(todayISO(),2), originalEndDate:addDays(todayISO(),2), extended:false, blockedByTeamId:null, status:'open', closedDate:null, datesLocked:true, extensionHistory:[]},
   ];
 
-  return { teams, users, projects, tasks };
+  const featureNodes = [
+    {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
+    {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
+    {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
+    {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
+    {id:'feat_fai', name:'FAI — Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
+    {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
+  ];
+
+  return { teams, users, projects, tasks, featureNodes };
 }
 
 function withTimeout(promise, ms){
@@ -583,6 +631,29 @@ function isValidState(s){
 function stateRichness(s){
   if(!isValidState(s)) return -1;
   return s.users.length + s.teams.length + s.projects.length + s.tasks.length;
+}
+// Data saved before the Feature/Knowledge tree existed won't have featureNodes at
+// all — add the six root Features in that case so nothing breaks and nothing already
+// saved is touched.
+function normalizeState(s){
+  if(!s) return s;
+  if(!Array.isArray(s.featureNodes) || s.featureNodes.length===0){
+    s.featureNodes = [
+      {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
+      {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
+      {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
+      {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
+      {id:'feat_fai', name:'FAI — Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
+      {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
+    ];
+  } else {
+    // migrate feature nodes already saved by an earlier version of this app
+    s.featureNodes.forEach(n=>{
+      if(typeof n.description !== 'string') n.description = '';
+      if(n.id==='feat_kr' && n.name==='Knowledge Repository') n.name = 'Repository'; // rename, but only if never customized
+    });
+  }
+  return s;
 }
 
 // Manually triggered from Admin — lets the admin explicitly check the old "personal"
@@ -630,7 +701,7 @@ async function checkForLegacyData(){
     </div>`;
   bindModalClose();
   document.getElementById('loadLegacyBtn').addEventListener('click', async ()=>{
-    state = legacyState;
+    state = normalizeState(legacyState);
     await persist();
     closeModal();
     render();
@@ -675,10 +746,10 @@ async function reconcileWithStorage(){
     }
 
     if(isValidState(parsedState) && stillOnFreshLogin()){
-      state = parsedState;
+      state = normalizeState(parsedState);
       if(parsedSession && typeof parsedSession==='object' && parsedSession.userId && state.users.find(u=>u.id===parsedSession.userId)){
         session = parsedSession;
-        ui.view = 'portfolio';
+        ui.view = 'home';
       }
       render();
       persist(); // ensures a migrated legacy state gets written into the shared bucket right away
@@ -691,10 +762,25 @@ async function reconcileWithStorage(){
   }
 }
 
+function describeError(e){
+  if(!e) return 'unknown error';
+  if(typeof e === 'string') return e;
+  const parts = [e.message, e.details, e.hint, e.code].filter(Boolean);
+  return parts.length ? parts.join(' | ') : JSON.stringify(e);
+}
+
 async function persist(){
   if(!HAS_STORAGE) return;
-  try{ await storageAdapter.set(STORAGE_KEY, JSON.stringify(state)); }
-  catch(e){ console.error('save failed', e); }
+  try{
+    await storageAdapter.set(STORAGE_KEY, JSON.stringify(state));
+    if(ui.saveError){ ui.saveError = null; render(); }
+  }
+  catch(e){
+    const msg = describeError(e);
+    console.error('save failed:', msg);
+    ui.saveError = msg;
+    render();
+  }
 }
 async function persistSession(){
   if(!sessionAdapter) return;
@@ -819,9 +905,17 @@ function progressByEntity(projectId){
   const map = {};
   tasks.forEach(t=>{
     const key = t.assignedType+':'+t.assignedId;
-    if(!map[key]) map[key] = { key, type:t.assignedType, id:t.assignedId, name:entityName(t.assignedType,t.assignedId), total:0, closed:0, red:false };
+    if(!map[key]) map[key] = { key, type:t.assignedType, id:t.assignedId, name:entityName(t.assignedType,t.assignedId), total:0, closed:0, closedOnTime:0, closedDelayed:0, delayDays:0, red:false };
     map[key].total++;
-    if(t.status==='closed') map[key].closed++;
+    if(t.status==='closed'){
+      map[key].closed++;
+      if(isTaskDelayed(t)){
+        map[key].closedDelayed++;
+        map[key].delayDays += Math.max(daysBetween(t.originalEndDate, effectiveEndDate(t)), 0);
+      } else {
+        map[key].closedOnTime++;
+      }
+    }
     if(isTaskDelayed(t)) map[key].red = true;
   });
   return Object.values(map);
@@ -840,10 +934,11 @@ function donutGradient(pct, colorVar){
   return `conic-gradient(var(${colorVar}) ${deg}deg, var(--line-soft) ${deg}deg)`;
 }
 
-function pill(status, label){
+function pill(status, label, tooltip){
   const cls = status==='red' ? 'pill-red' : status==='amber' ? 'pill-amber' : 'pill-green';
   const pulse = status==='red' ? ' pulse' : '';
-  return `<span class="pill ${cls}"><span class="dot${pulse}"></span>${label}</span>`;
+  const titleAttr = tooltip ? ` title="${tooltip.replace(/"/g,'&quot;')}"` : '';
+  return `<span class="pill ${cls}"${titleAttr}><span class="dot${pulse}"></span>${label}</span>`;
 }
 
 function svgIcon(name){
@@ -870,22 +965,27 @@ function render(){
   app.innerHTML = `
     <div class="navrail">
       <div class="brand"></div>
-      ${navBtn('portfolio','portfolio','Focus Area')}
-      ${ui.projectId ? navBtn('project','project','Workstream') : ''}
-      ${canSeeAssignmentsPage() ? navBtn('assignments','assignments','Assignments') : ''}
-      ${navBtn('reports','reports','Reports')}
+      ${navBtn('home','portfolio','Focus Area')}
       ${isAdmin() ? navBtn('admin','admin','Admin') : ''}
       <div class="spacer"></div>
       <button class="navbtn logout" data-nav="logout">${svgIcon('logout')}Exit</button>
     </div>
     <div class="main">
       <div class="topbar">
-        <div class="crumb">${breadcrumb()}</div>
+        <div style="display:flex;align-items:center;gap:14px;">
+          ${ui.view!=='home' ? `<button class="btn btn-sm" data-nav="home" style="padding:6px 14px;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(224,172,63,.4);box-shadow:0 0 10px -4px rgba(224,172,63,.35);font-weight:600;">← Focus Area</button>` : ''}
+          <div class="crumb">${breadcrumb()}</div>
+        </div>
         <div style="display:flex;align-items:center;gap:16px;">
           <div class="today-display mono" title="Today's date & time (IST)">${fmtDate(todayISO())}<div class="today-time" id="topbarTime">${nowTimeIST()} IST</div></div>
           <div class="who"><span>${currentUser() ? currentUser().name : ''}</span><div class="avatar">${currentUser() ? initials(currentUser().name) : ''}</div></div>
         </div>
       </div>
+      ${ui.saveError ? `
+      <div style="background:var(--red-soft);border-bottom:1px solid var(--red);padding:10px 28px;display:flex;align-items:center;gap:12px;">
+        <span style="color:var(--red);font-size:13px;flex:1;"><b>Your last change didn't save.</b> ${ui.saveError}. Check your connection and try again — if you're viewing this through a Claude preview link rather than your real published site, saves are expected to fail there.</span>
+        <button class="btn btn-sm" id="dismissSaveError">Dismiss</button>
+      </div>` : ''}
       <div class="content">${renderView()}</div>
     </div>
   `;
@@ -898,23 +998,30 @@ function navBtn(view, icon, label){
 }
 
 function breadcrumb(){
-  if(ui.view==='portfolio') return 'IMPROVEID DASHBOARD / <b>FOCUS AREA</b>';
+  if(ui.view==='home') return 'IMPROVEID WORKSPACE / <b>FOCUS AREA</b>';
+  if(ui.view==='portfolio') return 'IMPROVEID WORKSPACE / <b>WORKSTREAM</b>';
   if(ui.view==='project'){
     const p = state.projects.find(p=>p.id===ui.projectId);
-    return `IMPROVEID DASHBOARD / <b>${p ? p.name.toUpperCase() : 'WORKSTREAM'}</b>`;
+    return `IMPROVEID WORKSPACE / <b>${p ? p.name.toUpperCase() : 'WORKSTREAM'}</b>`;
   }
-  if(ui.view==='assignments') return 'IMPROVEID DASHBOARD / <b>ACTIVE ASSIGNMENTS</b>';
-  if(ui.view==='reports') return 'IMPROVEID DASHBOARD / <b>REPORTS</b>';
-  if(ui.view==='admin') return 'IMPROVEID DASHBOARD / <b>ADMIN</b>';
-  return 'IMPROVEID DASHBOARD';
+  if(ui.view==='assignments') return 'IMPROVEID WORKSPACE / <b>ACTIVE ASSIGNMENTS</b>';
+  if(ui.view==='reports') return 'IMPROVEID WORKSPACE / <b>REPORTS</b>';
+  if(ui.view==='feature'){
+    const path = featureNodePath(ui.featureNodeId);
+    return 'IMPROVEID WORKSPACE / ' + path.map(n=>`<b>${n.name.toUpperCase()}</b>`).join(' / ');
+  }
+  if(ui.view==='admin') return 'IMPROVEID WORKSPACE / <b>ADMIN</b>';
+  return 'IMPROVEID WORKSPACE';
 }
 
 function renderView(){
+  if(ui.view==='home') return renderFocusAreaHome();
   if(ui.view==='portfolio') return renderPortfolio();
   if(ui.view==='project') return renderProject();
-  if(ui.view==='assignments') return canSeeAssignmentsPage() ? renderAssignments() : renderPortfolio();
+  if(ui.view==='assignments') return canSeeAssignmentsPage() ? renderAssignments() : renderFocusAreaHome();
   if(ui.view==='reports') return renderReports();
-  if(ui.view==='admin') return isAdmin() ? renderAdmin() : renderPortfolio();
+  if(ui.view==='feature') return renderFeatureNode();
+  if(ui.view==='admin') return isAdmin() ? renderAdmin() : renderFocusAreaHome();
   return '';
 }
 
@@ -926,13 +1033,17 @@ function bindGlobalNav(){
       ui.view = v; render();
     });
   });
+  const dismissBtn = document.getElementById('dismissSaveError');
+  if(dismissBtn) dismissBtn.addEventListener('click', ()=>{ ui.saveError=null; render(); });
 }
 
 function bindView(){
+  if(ui.view==='home') bindFocusAreaHome();
   if(ui.view==='portfolio') bindPortfolio();
   if(ui.view==='project') bindProject();
   if(ui.view==='assignments') bindAssignments();
   if(ui.view==='reports') bindReports();
+  if(ui.view==='feature') bindFeatureNode();
   if(ui.view==='admin') bindAdmin();
 }
 
@@ -945,7 +1056,7 @@ function renderLogin(){
   <div class="login-shell">
     <div class="login-card">
       <div class="login-mark"></div>
-      <div class="login-title">ImproveID Dashboard</div>
+      <div class="login-title">ImproveID Workspace</div>
       <div class="muted" style="font-size:13px;">Sign in to track project timelines and handoffs.</div>
       <div class="mono" id="loginDateTime" style="font-size:11px;color:var(--paper-faint);margin-top:6px;">${fmtDate(todayISO())} · ${nowTimeIST()} IST</div>
       <form id="loginForm" style="margin-top:22px;">
@@ -995,7 +1106,7 @@ function bindLogin(){
       if(!match){ ui.loginError = 'Username or password not recognized. Check for extra spaces or try one of the demo logins below.'; render(); return; }
       session.userId = match.id; persistSession();
       ui.loginError='';
-      ui.view='portfolio';
+      ui.view='home';
       render();
     }catch(err){
       ui.loginError = 'Sign-in hit an unexpected error: ' + (err && err.message ? err.message : err);
@@ -1005,6 +1116,94 @@ function bindLogin(){
 }
 
 /* ============================== PORTFOLIO ============================== */
+
+function renderFocusAreaHome(){
+  const allProjects = visibleProjects();
+  const today = todayISO();
+  let summaries = allProjects.map(p=>{
+    const tl = projectTimeline(p.id);
+    const tasks = projectTasks(p.id);
+    return { p, tl, tasks };
+  });
+
+  const allScopedTasks = allProjects.flatMap(p=>projectTasks(p.id));
+  const dueTodayTasks = allScopedTasks.filter(t=>t.status!=='closed' && effectiveEndDate(t)===today);
+  const delayedOpenTasks = allScopedTasks.filter(t=>t.status!=='closed' && isTaskDelayed(t));
+  const blockedOpenTasks = allScopedTasks.filter(t=>t.status!=='closed' && t.blockedByTeamId);
+
+  const onTrack = summaries.filter(s=>!s.tl.isRed).length;
+  const delayed = summaries.filter(s=>s.tl.isRed).length;
+  const tasksTracked = summaries.reduce((sum,s)=>sum+s.tasks.length, 0);
+
+  const roots = rootFeatureNodesVisible();
+  const featureBoxes = roots.map(f=>{
+    const childCount = featureChildren(f.id).length;
+    const isSystem = !!f.systemView;
+    const defaultText = isSystem ? (f.systemView==='portfolio' ? 'All workstreams and their timelines' : f.systemView==='assignments' ? 'Who is working on what, and until when' : 'Delay history and patterns') : (childCount ? `${childCount} item${childCount===1?'':'s'}` : '');
+    const subtitle = f.description ? f.description : defaultText;
+    return `
+    <div class="card feature-box" style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div data-open-feature="${f.id}" style="cursor:pointer;flex:1;">
+          <div style="font-family:var(--f-display);font-size:22px;font-weight:600;">${f.name}</div>
+          <div class="muted" style="font-size:12px;margin-top:2px;">${subtitle || '<span style="color:var(--paper-faint);">No description yet</span>'}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          ${childCount ? `<button class="btn btn-sm btn-ghost" data-browse-feature="${f.id}">Browse content (${childCount})</button>` : ''}
+          ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description">✎</button>` : ''}
+          ${isAdmin() ? `<button class="btn btn-sm" data-quick-add-feature="${f.id}">+</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="eyebrow">Focus Area</div>
+    <h1 class="page-title" style="margin-bottom:16px;">Everything for your focus, in one place.</h1>
+
+    <div class="card" style="margin-bottom:22px;">
+      <div class="section-title" style="margin-bottom:10px;">Today — ${fmtDate(today)}</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;">
+        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--paper);">${dueTodayTasks.length}</b> <span class="muted">due today</span></span>
+        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--red);">${delayedOpenTasks.length}</b> <span class="muted">currently delayed</span></span>
+        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--amber);">${blockedOpenTasks.length}</b> <span class="muted">blocked</span></span>
+      </div>
+    </div>
+
+    <div class="stat-strip" style="margin-bottom:26px;">
+      <div class="stat-chip"><div class="n">${summaries.length}</div><div class="l">Workstreams</div></div>
+      <div class="stat-chip"><div class="n" style="color:var(--green);">${onTrack}</div><div class="l">On agreed timeline</div></div>
+      <div class="stat-chip"><div class="n" style="color:var(--red);">${delayed}</div><div class="l">Delayed</div></div>
+      <div class="stat-chip"><div class="n">${tasksTracked}</div><div class="l">Tasks tracked</div></div>
+    </div>
+
+    ${featureBoxes}
+    ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="addNewFeatureBtn" style="margin-top:4px;">+ Add new Feature</button>` : ''}
+  `;
+}
+
+function bindFocusAreaHome(){
+  document.querySelectorAll('[data-open-feature]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const node = featureNode(el.dataset.openFeature);
+      if(!node) return;
+      if(node.systemView){ ui.view = node.systemView; }
+      else { ui.view = 'feature'; ui.featureNodeId = node.id; }
+      render();
+    });
+  });
+  document.querySelectorAll('[data-browse-feature]').forEach(el=>{
+    el.addEventListener('click', (e)=>{ e.stopPropagation(); ui.view='feature'; ui.featureNodeId = el.dataset.browseFeature; render(); });
+  });
+  document.querySelectorAll('[data-quick-add-feature]').forEach(el=>{
+    el.addEventListener('click', (e)=>{ e.stopPropagation(); openAddNodeChoiceModal(el.dataset.quickAddFeature); });
+  });
+  document.querySelectorAll('[data-edit-feature-desc]').forEach(el=>{
+    el.addEventListener('click', (e)=>{ e.stopPropagation(); openEditNodeModal(el.dataset.editFeatureDesc); });
+  });
+  const addFeatureBtn = document.getElementById('addNewFeatureBtn');
+  if(addFeatureBtn) addFeatureBtn.addEventListener('click', ()=> openNameNodeModal(null, 'feature'));
+}
 
 function renderPortfolio(){
   const allProjects = visibleProjects();
@@ -1019,17 +1218,6 @@ function renderPortfolio(){
     return { p, tl, tasks, closed, pct, isClosedProject, isFutureProject };
   });
 
-  // Today digest — an urgency-first snapshot, scoped to whatever this person can see
-  const allScopedTasks = allProjects.flatMap(p=>projectTasks(p.id));
-  const today = todayISO();
-  const dueTodayTasks = allScopedTasks.filter(t=>t.status!=='closed' && effectiveEndDate(t)===today);
-  const delayedOpenTasks = allScopedTasks.filter(t=>t.status!=='closed' && isTaskDelayed(t));
-  const blockedOpenTasks = allScopedTasks.filter(t=>t.status!=='closed' && t.blockedByTeamId);
-  const digestItems = dueTodayTasks.slice(0,5).map(t=>{
-    const proj = state.projects.find(p=>p.id===t.projectId);
-    return `<div class="lb-row" data-open-project-row="${t.projectId}" style="cursor:pointer;"><div class="lb-name">${t.title||'Untitled task'} <span class="muted" style="font-size:11px;">— ${entityName(t.assignedType,t.assignedId)} · ${proj?proj.name:''}</span></div></div>`;
-  }).join('');
-
   const filter = ui.portfolioFilter || 'open';
   const filtered = summaries.filter(s=>{
     if(filter==='all') return true;
@@ -1038,7 +1226,6 @@ function renderPortfolio(){
     return !s.isClosedProject && !s.isFutureProject; // 'open' — default
   });
 
-  // Stat strip reflects whatever is currently in view, not the whole portfolio
   const onTrack = filtered.filter(s=>!s.tl.isRed).length;
   const delayed = filtered.filter(s=>s.tl.isRed).length;
   const tasksTracked = filtered.reduce((sum,s)=>sum+s.tasks.length, 0);
@@ -1048,6 +1235,7 @@ function renderPortfolio(){
     const deadline = s.tl.originalDeadline || addDays(s.p.startDate, s.tl.originalTotal);
     const blockingTeams = blockedTeamsForProject(s.p.id);
     const delayNames = status==='red' ? delayResponsibleNames(s.p.id) : [];
+    const lastClosedDate = s.isClosedProject ? s.tasks.reduce((max,t)=> (t.closedDate && (!max || t.closedDate > max)) ? t.closedDate : max, null) : null;
     return `
     <div class="proj-card status-${status}" data-open-project="${s.p.id}">
       <div class="pname" style="margin:2px 0 4px;">${s.p.name}</div>
@@ -1057,9 +1245,10 @@ function renderPortfolio(){
         <span>STARTED <b style="color:var(--paper);">${fmtDate(s.p.startDate)}</b></span>
         <span>DEADLINE <b style="color:var(--paper);">${fmtDate(deadline)}</b></span>
       </div>
+      ${lastClosedDate ? `<div class="proj-meta" style="margin-top:4px;"><span>CLOSED <b style="color:var(--paper);">${fmtDate(lastClosedDate)}</b></span></div>` : ''}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
         ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
-        ${blockingTeams.length ? `<span class="pill pill-amber pill-blink"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+        ${blockingTeams.length ? `<span class="pill pill-amber pill-blink" title="${blockedDetailForProject(s.p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
       </div>
       <div class="proj-meta" style="margin-top:14px;">
         <span>${s.pct}% PROGRESS</span>
@@ -1069,18 +1258,8 @@ function renderPortfolio(){
   }).join('');
 
   return `
-    <div class="eyebrow">Focus Area</div>
+    <div class="eyebrow">Workstream</div>
     <h1 class="page-title" style="margin-bottom:16px;">All workstreams, one board</h1>
-
-    <div class="card" style="margin-bottom:22px;">
-      <div class="section-title" style="margin-bottom:10px;">Today — ${fmtDate(today)}</div>
-      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:${digestItems?'12px':'0'};">
-        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--paper);">${dueTodayTasks.length}</b> <span class="muted">due today</span></span>
-        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--red);">${delayedOpenTasks.length}</b> <span class="muted">currently delayed</span></span>
-        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--amber);">${blockedOpenTasks.length}</b> <span class="muted">blocked</span></span>
-      </div>
-      ${digestItems || (dueTodayTasks.length===0 ? `<div class="muted" style="font-size:12px;">Nothing due today.</div>` : '')}
-    </div>
 
     <div class="stat-strip">
       <div class="stat-chip"><div class="n">${filtered.length}</div><div class="l">Workstreams</div></div>
@@ -1115,6 +1294,305 @@ function bindPortfolio(){
   document.querySelectorAll('[data-nav="admin"]').forEach(b=>b.addEventListener('click', ()=>{ ui.view='admin'; render(); }));
   const filterSel = document.getElementById('portfolioFilter');
   if(filterSel) filterSel.addEventListener('change', ()=>{ ui.portfolioFilter = filterSel.value; render(); });
+}
+
+/* ============================== FEATURE TREE (Knowledge system) ============================== */
+
+function featureChildren(parentId){
+  return state.featureNodes.filter(n=>n.parentId===parentId).sort((a,b)=>(a.order||0)-(b.order||0));
+}
+function featureNode(id){ return state.featureNodes.find(n=>n.id===id); }
+function featureNodePath(id){
+  const path=[]; let cur=featureNode(id);
+  while(cur){ path.unshift(cur); cur = cur.parentId ? featureNode(cur.parentId) : null; }
+  return path;
+}
+// Access control for the tree is deferred (per plan) — everyone logged in sees all
+// root Features for now. This is the one place that will change once access rules exist.
+function rootFeatureNodesVisible(){
+  return state.featureNodes.filter(n=>n.parentId===null).sort((a,b)=>(a.order||0)-(b.order||0));
+}
+function nextOrderFor(parentId){
+  const sibs = featureChildren(parentId);
+  return sibs.length ? Math.max(...sibs.map(s=>s.order||0))+1 : 1;
+}
+function countDescendants(nodeId){
+  let count=0;
+  featureChildren(nodeId).forEach(k=>{ count += 1 + countDescendants(k.id); });
+  return count;
+}
+function deleteNodeCascade(nodeId){
+  featureChildren(nodeId).forEach(k=> deleteNodeCascade(k.id));
+  state.featureNodes = state.featureNodes.filter(n=>n.id!==nodeId);
+}
+
+function renderContentItem(it){
+  if(it.type==='text') return `<div class="content-item"><div class="ci-title">${it.title||''}</div><div class="ci-text">${(it.text||'').replace(/\n/g,'<br>')}</div></div>`;
+  if(it.type==='link') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">🔗 ${it.title||it.url}</a></div>`;
+  if(it.type==='image') return `<div class="content-item">${it.title?`<div class="ci-title">${it.title}</div>`:''}<img src="${it.url}" style="max-width:100%;border-radius:8px;margin-top:4px;" alt="${it.title||''}"></div>`;
+  if(it.type==='document') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">📄 ${it.title||'Document'}</a></div>`;
+  return '';
+}
+
+// Renders a Heading (or Sub Heading) and everything nested inside it — its own content
+// items, plus any Sub Headings underneath, recursively.
+function renderHeadingCard(h, depth){
+  const items = h.contentItems || [];
+  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading');
+  const itemsHtml = items.map(it=>`
+    <div style="position:relative;">
+      ${renderContentItem(it)}
+      ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
+    </div>`).join('');
+  return `
+    <div class="heading-card" style="margin-left:${depth*20}px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div class="heading-name">${h.name}</div>
+        ${isAdmin() ? `<div class="row-actions">
+          <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
+          <button class="btn btn-sm btn-ghost" data-add-subheading="${h.id}">+ Add sub heading</button>
+          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${h.id}" title="Rename or add a description">✎</button>
+          <button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>
+        </div>` : ''}
+      </div>
+      <div style="margin-top:8px;">${itemsHtml || '<div class="muted" style="font-size:12px;">No content yet.</div>'}</div>
+      ${subHeadings.map(sh=>renderHeadingCard(sh, depth+1)).join('')}
+    </div>`;
+}
+
+function renderFeatureNode(){
+  const node = featureNode(ui.featureNodeId);
+  if(!node) return `<div class="empty-state"><div class="et">Not found</div></div>`;
+
+  if(node.nodeType==='heading' || node.nodeType==='subheading'){
+    return `
+      <div class="eyebrow">${node.nodeType==='heading'?'Heading':'Sub Heading'}</div>
+      <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
+      <div class="card">${renderHeadingCard(node, 0)}</div>
+    `;
+  }
+
+  const children = featureChildren(node.id);
+  const subFeatures = children.filter(c=>c.nodeType==='feature'||c.nodeType==='subfeature');
+  const headings = children.filter(c=>c.nodeType==='heading');
+
+  const subFeatureBoxes = subFeatures.map(sf=>{
+    const cnt = featureChildren(sf.id).length;
+    const subtitle = sf.description ? sf.description : (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet');
+    return `
+    <div class="card" style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div data-open-feature="${sf.id}" style="cursor:pointer;flex:1;">
+          <div style="font-family:var(--f-display);font-size:18px;font-weight:600;">${sf.name}</div>
+          <div class="muted" style="font-size:12px;">${subtitle}</div>
+        </div>
+        ${isAdmin() ? `<div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${sf.id}" title="Rename or add a description">✎</button>
+          <button class="btn btn-sm btn-danger" data-delete-node="${sf.id}">Delete</button>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  const headingCards = headings.map(h=>`<div class="card" style="margin-bottom:14px;">${renderHeadingCard(h,0)}</div>`).join('');
+
+  return `
+    <div class="eyebrow">${node.parentId ? 'Sub Feature' : 'Feature'}</div>
+    <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
+    ${isAdmin() ? `<button class="btn btn-primary btn-sm" style="margin-bottom:20px;" data-add-node="${node.id}">+ Add Sub Feature or Heading</button>` : ''}
+    ${subFeatureBoxes}
+    ${headingCards}
+    ${(!subFeatures.length && !headings.length) ? `<div class="empty-state"><div class="et">Nothing here yet</div>${isAdmin() ? 'Use the button above to add a Sub Feature or Heading.' : ''}</div>` : ''}
+  `;
+}
+
+function bindFeatureNode(){
+  document.querySelectorAll('[data-open-feature]').forEach(el=>{
+    el.addEventListener('click', ()=>{ ui.featureNodeId = el.dataset.openFeature; render(); });
+  });
+  const addBtn = document.querySelector('[data-add-node]');
+  if(addBtn) addBtn.addEventListener('click', ()=> openAddNodeChoiceModal(addBtn.dataset.addNode));
+  document.querySelectorAll('[data-add-content]').forEach(el=>{
+    el.addEventListener('click', ()=> openAddContentModal(el.dataset.addContent));
+  });
+  document.querySelectorAll('[data-add-subheading]').forEach(el=>{
+    el.addEventListener('click', ()=> openNameNodeModal(el.dataset.addSubheading, 'subheading'));
+  });
+  document.querySelectorAll('[data-delete-node]').forEach(el=>{
+    el.addEventListener('click', ()=> openDeleteNodeConfirm(el.dataset.deleteNode));
+  });
+  document.querySelectorAll('[data-edit-feature-desc]').forEach(el=>{
+    el.addEventListener('click', ()=> openEditNodeModal(el.dataset.editFeatureDesc));
+  });
+  document.querySelectorAll('[data-delete-content]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      if(!isAdmin()) return;
+      const [headingId, itemId] = el.dataset.deleteContent.split('|');
+      const h = featureNode(headingId);
+      if(!h) return;
+      h.contentItems = (h.contentItems||[]).filter(i=>i.id!==itemId);
+      persist(); render();
+    });
+  });
+}
+
+function openEditNodeModal(nodeId){
+  if(!isAdmin()) return;
+  const f = featureNode(nodeId);
+  if(!f) return;
+  const kindLabel = f.parentId===null ? 'Feature' : f.nodeType==='subfeature' ? 'Sub Feature' : f.nodeType==='heading' ? 'Heading' : f.nodeType==='subheading' ? 'Sub Heading' : 'Feature';
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Edit ${kindLabel}</h3>
+        <form id="editNodeForm">
+          <div class="field"><label>Name</label><input id="editNodeName" value="${(f.name||'').replace(/"/g,'&quot;')}" required></div>
+          <div class="field"><label>Description</label><textarea id="editNodeDesc" placeholder="What is this for?">${(f.description||'').replace(/</g,'&lt;')}</textarea></div>
+          ${f.parentId===null ? '<div class="hint">Shown on the Focus Area page under this feature\'s name.</div>' : ''}
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="editNodeSubmitBtn" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('editNodeForm','editNodeSubmitBtn', ()=>{
+    const nameEl = document.getElementById('editNodeName');
+    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    f.name = nameEl.value.trim();
+    f.description = document.getElementById('editNodeDesc').value.trim();
+    persist(); closeModal(); render();
+  });
+}
+
+function openAddNodeChoiceModal(parentId){
+  if(!isAdmin()) return;
+  const parent = featureNode(parentId);
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Add to ${parent?parent.name:'this feature'}</h3>
+        <div class="modal-sub">What would you like to create?</div>
+        <div class="modal-actions" style="justify-content:flex-start;gap:12px;">
+          <button type="button" class="btn btn-primary" id="chooseSubFeature">Create Sub Feature</button>
+          <button type="button" class="btn" id="chooseHeading">Create Heading</button>
+        </div>
+        <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button></div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.getElementById('chooseSubFeature').addEventListener('click', ()=> openNameNodeModal(parentId,'subfeature'));
+  document.getElementById('chooseHeading').addEventListener('click', ()=> openNameNodeModal(parentId,'heading'));
+}
+
+function openNameNodeModal(parentId, nodeType){
+  if(!isAdmin()) return;
+  const label = nodeType==='feature' ? 'Feature' : nodeType==='subfeature' ? 'Sub Feature' : nodeType==='heading' ? 'Heading' : 'Sub Heading';
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Create ${label}</h3>
+        <form id="nodeNameForm">
+          <div class="field"><label>Name</label><input id="nodeNameInput" required></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="nodeNameSubmitBtn" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('nodeNameForm','nodeNameSubmitBtn', ()=>{
+    const nameEl = document.getElementById('nodeNameInput');
+    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    const node = { id: uid('node'), name: nameEl.value.trim(), nodeType, parentId, order: nextOrderFor(parentId), contentItems: [], description:'' };
+    state.featureNodes.push(node);
+    persist(); closeModal(); render();
+  });
+}
+
+function openAddContentModal(headingId){
+  if(!isAdmin()) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Add content</h3>
+        <div class="modal-sub">Add as many items as you need — text, links, images, or documents, mixed freely.</div>
+        <form id="contentForm">
+          <div class="field"><label>Type</label>
+            <select id="ciType">
+              <option value="text">Text</option>
+              <option value="link">Link (URL)</option>
+              <option value="image">Image (link to an image)</option>
+              <option value="document">Document (link to a hosted file)</option>
+            </select>
+          </div>
+          <div class="field"><label>Title (optional)</label><input id="ciTitle" placeholder="A short label for this item"></div>
+          <div class="field" id="ciTextField"><label>Text</label><textarea id="ciText" placeholder="Write it here..."></textarea></div>
+          <div class="field" id="ciUrlField" style="display:none;"><label>URL</label><input id="ciUrl" placeholder="https://..."></div>
+          <div class="hint">Documents and images are stored as links (e.g. a Google Drive or SharePoint link) rather than direct uploads for now.</div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="ciSubmitBtn" class="btn btn-primary">Add content</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  const typeSel = document.getElementById('ciType');
+  const textField = document.getElementById('ciTextField');
+  const urlField = document.getElementById('ciUrlField');
+  const updateFields = ()=>{
+    const isText = typeSel.value==='text';
+    textField.style.display = isText ? '' : 'none';
+    urlField.style.display = isText ? 'none' : '';
+  };
+  typeSel.addEventListener('change', updateFields);
+  updateFields();
+  runOnClickAndEnter('contentForm','ciSubmitBtn', ()=>{
+    const type = typeSel.value;
+    const title = document.getElementById('ciTitle').value.trim();
+    const h = featureNode(headingId);
+    if(!h) return;
+    if(!Array.isArray(h.contentItems)) h.contentItems = [];
+    if(type==='text'){
+      const text = document.getElementById('ciText').value.trim();
+      if(!text) return;
+      h.contentItems.push({id:uid('ci'), type, title, text});
+    } else {
+      const url = document.getElementById('ciUrl').value.trim();
+      if(!url) return;
+      h.contentItems.push({id:uid('ci'), type, title, url});
+    }
+    persist(); closeModal(); render();
+  });
+}
+
+function openDeleteNodeConfirm(nodeId){
+  if(!isAdmin()) return;
+  const node = featureNode(nodeId);
+  if(!node) return;
+  const descendantCount = countDescendants(nodeId);
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Delete "${node.name}"?</h3>
+        <div class="modal-sub">This can't be undone.</div>
+        <p style="font-size:13px;color:var(--paper-dim);line-height:1.6;">This will permanently delete <b style="color:var(--paper);">${node.name}</b>${descendantCount ? ` and everything nested inside it (${descendantCount} item${descendantCount===1?'':'s'})` : ''}.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" class="btn btn-danger" id="confirmDeleteNodeBtn">Delete</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.getElementById('confirmDeleteNodeBtn').addEventListener('click', ()=>{
+    deleteNodeCascade(nodeId);
+    persist(); closeModal();
+    if(ui.featureNodeId === nodeId){ ui.view='home'; ui.featureNodeId=null; }
+    render();
+  });
 }
 
 /* ============================== PROJECT DASHBOARD ============================== */
@@ -1158,13 +1636,23 @@ function renderProject(){
   const gauges = entities.map(e=>{
     const pct = e.total ? Math.round(e.closed/e.total*100) : 0;
     const colorVar = e.red ? '--red' : '--green';
+    let fracText;
+    if(e.closed===0){
+      fracText = `${e.closed}/${e.total} closed`;
+    } else if(e.closedDelayed===0){
+      fracText = `${e.closed}/${e.total} closed on time`;
+    } else if(e.closedOnTime===0){
+      fracText = `${e.closed}/${e.total} closed ${e.delayDays}d delay`;
+    } else {
+      fracText = `${e.closedOnTime}/${e.total} closed on time & ${e.closedDelayed}/${e.total} closed ${e.delayDays}d delay`;
+    }
     return `
       <div class="gauge">
         <div class="gauge-ring" style="background:${donutGradient(pct, colorVar)}">
           <div class="hole">${pct}%</div>
         </div>
         <div class="gname">${e.name}</div>
-        <div class="gfrac">${e.closed}/${e.total} closed</div>
+        <div class="gfrac">${fracText}</div>
       </div>`;
   }).join('');
 
@@ -1176,9 +1664,9 @@ function renderProject(){
     <tr>
       <td class="mono" style="color:var(--paper);">${i+1}.</td>
       <td>
-        <div class="task-title">${t.title || '<span class="muted">Untitled task</span>'}</div>
+        <div class="task-title task-title-link" data-view-task="${t.id}">${t.title || '<span class="muted">Untitled task</span>'}</div>
         ${t.description ? `<div class="task-desc">${t.description}</div>` : '<div class="task-desc">No description yet</div>'}
-        ${blockedTeamName ? `<div style="margin-top:6px;">${pill('amber', 'Blocked by '+blockedTeamName)}</div>` : ''}
+        ${blockedTeamName ? `<div style="margin-top:6px;">${pill('amber', 'Blocked by '+blockedTeamName, entityName(t.assignedType,t.assignedId)+': '+(t.blockerReason||'no reason given'))}</div>` : ''}
         ${t.weekendWork ? `<div style="margin-top:6px;">${pill('amber', 'Includes weekend work')}</div>` : ''}
       </td>
       <td>${entityName(t.assignedType,t.assignedId)}</td>
@@ -1218,10 +1706,11 @@ function renderProject(){
         <h1 class="page-title">${p.name}</h1>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           ${pill(status, status==='red' ? `Delayed ${tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
-          ${blockingTeams.length ? `<span class="pill pill-amber pill-blink"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+          ${blockingTeams.length ? `<span class="pill pill-amber pill-blink" title="${blockedDetailForProject(p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
         </div>
       </div>
       <div class="hero-metrics">
+        <div class="metric"><div class="eyebrow">Start date</div><div class="val" style="font-size:20px;">${fmtDate(p.startDate)}</div></div>
         <div class="metric"><div class="eyebrow">Total days agreed</div><div class="val">${tl.originalTotal}</div><div class="sub">${tasks.length} tasks combined</div></div>
         <div class="metric"><div class="eyebrow">Deadline</div><div class="val" style="font-size:20px;">${fmtDate(deadline)}</div><div class="sub">${lastClosedDate ? 'Closed on '+fmtDate(lastClosedDate) : ''}</div></div>
         <div class="metric"><div class="eyebrow">Delay</div><div class="val ${tl.delay>0?'red':'green'}">${tl.delay>0 ? '-'+tl.delay : '0'}</div><div class="sub">days vs. original agreement</div></div>
@@ -1268,13 +1757,16 @@ function renderProject(){
 function bindProject(){
   const switcher = document.getElementById('workstreamSwitcher');
   if(switcher) switcher.addEventListener('change', ()=>{ ui.projectId = switcher.value; render(); });
-  document.querySelectorAll('[data-task-node],[data-edit-task]').forEach(el=>{
+  document.querySelectorAll('[data-edit-task]').forEach(el=>{
     el.addEventListener('click', ()=>{
-      const id = el.dataset.taskNode || el.dataset.editTask;
+      const id = el.dataset.editTask;
       const t = state.tasks.find(x=>x.id===id);
-      if(t && !canEditTask(t)) return; // closed tasks (or tasks not yours) can't be reopened from the rail either
+      if(t && !canEditTask(t)) return; // closed tasks (or tasks not yours) can't be reopened either
       openTaskModal(id);
     });
+  });
+  document.querySelectorAll('[data-task-node],[data-view-task]').forEach(el=>{
+    el.addEventListener('click', ()=>{ openTaskDetailsModal(el.dataset.taskNode || el.dataset.viewTask); });
   });
   document.querySelectorAll('[data-extend-task]').forEach(el=>{
     el.addEventListener('click', (e)=>{ e.stopPropagation(); openExtendModal(el.dataset.extendTask); });
@@ -1286,7 +1778,7 @@ function bindProject(){
     el.addEventListener('click', (e)=>{
       e.stopPropagation();
       const t = state.tasks.find(x=>x.id===el.dataset.clearBlocker);
-      if(t){ t.blockedByTeamId = null; touchTask(t); persist(); render(); }
+      if(t){ t.blockedByTeamId = null; t.blockerReason = null; touchTask(t); persist(); render(); }
     });
   });
   const addBtn = document.querySelector('[data-add-task]');
@@ -1307,7 +1799,8 @@ function openBlockerModal(taskId){
           <div class="field"><label>Blocked by team</label>
             <select id="bkTeam">${state.teams.map(tm=>`<option value="${tm.id}">${tm.name}</option>`).join('')}</select>
           </div>
-          <div class="hint">Everyone viewing this project will see a flashing "Blocked" indicator until this is cleared.</div>
+          <div class="field"><label>Why is it blocked?</label><textarea id="bkReason" placeholder="What's needed from them before this can move?" required></textarea></div>
+          <div class="hint">Everyone viewing this project will see a flashing "Blocked" indicator until this is cleared — hovering over it shows this reason.</div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="bkSubmitBtn" class="btn btn-danger">Mark as blocked</button>
@@ -1318,8 +1811,10 @@ function openBlockerModal(taskId){
   bindModalClose();
   runOnClickAndEnter('blockerForm', 'bkSubmitBtn', ()=>{
     const teamId = document.getElementById('bkTeam').value;
-    if(!teamId) return;
+    const reason = document.getElementById('bkReason').value.trim();
+    if(!teamId || !reason) return;
     t.blockedByTeamId = teamId;
+    t.blockerReason = reason;
     touchTask(t);
     persist(); closeModal(); render();
   });
@@ -1371,10 +1866,54 @@ function openBlankTaskModal(projectId){
       description:'', reason:'', assignedType:type, assignedId:id,
       predecessorId: document.getElementById('btPredecessor').value || null,
       startDate:'', endDate:'', originalEndDate:'', extended:false, blockedByTeamId:null, status:'open', closedDate:null,
-      datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[], lastUpdated:null
+      datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[], lastUpdated:null, blockerReason:null
     };
     state.tasks.push(t); persist(); closeModal(); render();
   });
+}
+
+// A plain, read-only view of everything on a task — anyone can open this via the
+// task title, regardless of whether they're allowed to edit it. Editing still goes
+// through openTaskModal via the Edit button, gated by canEditTask().
+function openTaskDetailsModal(taskId){
+  const t = state.tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  const proj = state.projects.find(p=>p.id===t.projectId);
+  const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>${t.title || 'Untitled task'}</h3>
+        <div class="modal-sub">${entityName(t.assignedType,t.assignedId)} · ${proj?proj.name:''}</div>
+
+        <div class="field"><label>Description</label><div class="hint">${t.description || 'No description yet.'}</div></div>
+        <div class="field"><label>Reason — why this much time?</label><div class="hint">${t.reason || 'No reason given yet.'}</div></div>
+
+        <div class="field-row">
+          <div class="field"><label>Agreed timeline</label><div class="hint">${t.startDate ? `${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}` : 'Not set yet'}</div></div>
+          ${t.extended ? `<div class="field"><label>Extended to</label><div class="hint" style="color:var(--red);">${fmtDate(t.endDate)}</div></div>` : ''}
+        </div>
+
+        ${t.extensionHistory && t.extensionHistory.length ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
+
+        <div class="field"><label>Status</label><div class="hint">${t.status==='closed' ? 'Closed on '+fmtDate(t.closedDate) : 'Open'}</div></div>
+
+        ${blockedTeamName ? `
+        <div class="field"><label>Blocked by</label><div class="hint" style="color:var(--amber);">${blockedTeamName} — ${t.blockerReason || 'no reason given'}</div></div>
+        ` : ''}
+
+        ${t.weekendWork ? `<div style="margin:6px 0;">${pill('amber','Includes weekend work')}</div>` : ''}
+
+        ${t.checklistRecord ? `<div class="field"><label>Checklist confirmed</label><div class="hint">Completed by ${t.checklistRecord.completedByName} on ${fmtDate(t.checklistRecord.completedAt)}${t.checklistRecord.items.map(i=>`<br>✓ ${i.text}`).join('')}</div></div>` : ''}
+
+        <div class="field"><label>Last updated</label><div class="hint">${t.lastUpdated ? `${t.lastUpdated.byName} at ${fmtDateTime(t.lastUpdated.at)}` : 'Not yet updated'}</div></div>
+
+        <div class="modal-actions">
+          <button class="btn btn-primary" data-close>Close</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
 }
 
 function openTaskModal(taskId){
@@ -1567,6 +2106,7 @@ function openExtendModal(taskId){
           <div class="field"><label>Reason for the extension</label><textarea id="exReason" placeholder="What pushed this back?" required></textarea></div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:10px 0 4px;"><input type="checkbox" id="exWeekendWork" ${t.weekendWork?'checked':''}> This includes weekend work</label>
           <div class="hint">The original date (${fmtDate(t.originalEndDate)}) stays on record. This task, its chain and the project dashboard will switch to red.</div>
+          <div class="login-error" id="exError"></div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="exSubmitBtn" class="btn btn-danger">Confirm extension</button>
@@ -1582,7 +2122,11 @@ function openExtendModal(taskId){
     const newDate = document.getElementById('exDate').value;
     const reason = document.getElementById('exReason').value.trim();
     const category = document.getElementById('exCategory').value;
-    if(!newDate || !reason) return;
+    const errEl = document.getElementById('exError');
+    if(!newDate){ errEl.textContent = 'Pick a new end date before confirming.'; return; }
+    if(newDate <= t.endDate){ errEl.textContent = `The new date must be after the current agreed date (${fmtDate(t.endDate)}).`; return; }
+    if(!reason){ errEl.textContent = 'Add a reason for the extension.'; return; }
+    errEl.textContent = '';
     t.extensionHistory = t.extensionHistory || [];
     t.extensionHistory.push({date: todayISO(), newEndDate:newDate, reason, category});
     t.lastDelayCategory = category;
@@ -1615,6 +2159,27 @@ function findOverlappingTasks(assignedType, assignedId, start, end, excludeTaskI
 // dates just entered overlap another open task for the same person. "Change dates"
 // simply dismisses this overlay so they can edit the form underneath; "Keep dates
 // anyway" runs the save that was already prepared.
+// Reverting a marked-worked weekend day back to a normal weekly off — a quick
+// confirmation so admins don't lose the record with a single accidental click.
+function openRevertWeekendConfirm(iso, onConfirm){
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Change back to weekly off?</h3>
+        <div class="modal-sub">${fmtDate(iso)} is currently marked as worked. Do you want to change it back to weekly off?</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="revertWeekendCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="revertWeekendConfirm">Yes, change back</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  const cleanup = ()=> div.remove();
+  div.querySelector('#revertWeekendCancel').addEventListener('click', cleanup);
+  div.querySelector('#revertWeekendConfirm').addEventListener('click', ()=>{ cleanup(); onConfirm(); });
+}
+
 function openOverlapConfirmModal(overlaps, onContinue){
   const div = document.createElement('div');
   div.innerHTML = `
@@ -1853,7 +2418,7 @@ function activeAssignmentsData(){
 function taskWorkloadStatus(t){
   if(t.blockedByTeamId){
     const teamName = (state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team';
-    return { color:'amber', label:'Blocked by '+teamName };
+    return { color:'amber', label:'Blocked by '+teamName, tooltip: t.blockerReason||'no reason given' };
   }
   if(isTaskDelayed(t)) return { color:'red', label: t.extended?'Extended':'Overdue' };
   return { color:'green', label:'In progress' };
@@ -1929,6 +2494,9 @@ function buildCalendarHtml(row, monthKey, currentTaskId){
   const startWeekday = new Date(y, m-1, 1).getDay();
   const dows = ['S','M','T','W','T','F','S'];
   const admin = isAdmin();
+  // Fallback for attributing marked-worked weekend days when no task's own date range
+  // covers that specific day — prefer the person's current task, else any task they have.
+  const fallbackAttribution = (row.current || row.allTasks[0] || null);
   let cells = dows.map(d=>`<div class="cal-dow">${d}</div>`).join('');
   for(let i=0;i<startWeekday;i++) cells += `<div class="cal-day blank"></div>`;
   for(let d=1; d<=daysInMonth; d++){
@@ -1937,15 +2505,17 @@ function buildCalendarHtml(row, monthKey, currentTaskId){
     const covering = findCoveringTask(row, iso, currentTaskId);
     let cat = null;
     let clickable = false;
+    let attributionTask = null;
     if(weekend){
-      const worked = covering && Array.isArray(covering.workedWeekendDates) && covering.workedWeekendDates.includes(iso);
-      if(worked) cat = taskCategory(covering, currentTaskId);
-      if(covering && admin) clickable = true;
+      attributionTask = covering || fallbackAttribution;
+      const worked = attributionTask && Array.isArray(attributionTask.workedWeekendDates) && attributionTask.workedWeekendDates.includes(iso);
+      if(worked) cat = taskCategory(attributionTask, currentTaskId);
+      if(attributionTask && admin) clickable = true;
     } else {
       cat = covering ? taskCategory(covering, currentTaskId) : 'free';
     }
     const cls = `cal-day ${cat||''}${weekend?' weekend':''}${clickable?' admin-toggle':''}`;
-    const toggleAttr = clickable ? ` data-cal-toggle="${iso}|${covering.id}"` : '';
+    const toggleAttr = clickable ? ` data-cal-toggle="${iso}|${attributionTask.id}"` : '';
     const titleAttr = weekend ? (cat ? 'Worked this weekend — click to unmark' : (clickable ? 'Weekly off — click to mark as worked' : 'Weekly off')) : '';
     cells += `<div class="${cls}"${toggleAttr} title="${titleAttr}">${d}</div>`;
   }
@@ -2015,7 +2585,7 @@ function renderAssignments(){
       const cat = taskCategory(t, r.current?r.current.id:null);
       const st = cat==='closed'
         ? pill(isTaskDelayed(t)?'red':'green', isTaskDelayed(t)?'Closed late':'Closed on time')
-        : pill(taskWorkloadStatus(t).color, taskWorkloadStatus(t).label);
+        : pill(taskWorkloadStatus(t).color, taskWorkloadStatus(t).label, taskWorkloadStatus(t).tooltip);
       const range = taskEffectiveRange(t);
       return `<tr data-open-project-row="${tp?tp.id:''}" style="cursor:pointer;">
         <td style="border-left:3px solid ${CATEGORY_COLOR[cat]};">
@@ -2122,8 +2692,18 @@ function bindAssignments(){
       if(!t) return;
       if(!Array.isArray(t.workedWeekendDates)) t.workedWeekendDates = [];
       const idx = t.workedWeekendDates.indexOf(iso);
-      if(idx>=0) t.workedWeekendDates.splice(idx,1); else t.workedWeekendDates.push(iso);
-      persist(); render();
+      if(idx>=0){
+        // reverting a worked weekend day back to weekly off — confirm first
+        openRevertWeekendConfirm(iso, ()=>{
+          const i2 = t.workedWeekendDates.indexOf(iso);
+          if(i2>=0) t.workedWeekendDates.splice(i2,1);
+          persist(); render();
+        });
+      } else {
+        // marking a weekly off as worked is immediate, no confirmation needed
+        t.workedWeekendDates.push(iso);
+        persist(); render();
+      }
     });
   });
   document.querySelectorAll('[data-person-filter]').forEach(chip=>{

@@ -344,6 +344,17 @@
   .ci-text{font-size:13px;color:var(--paper-dim);line-height:1.6;}
   .ci-link{font-size:13px;color:var(--amber);text-decoration:none;}
   .ci-link:hover{text-decoration:underline;}
+  .att-wrap{overflow-x:auto;border:1px solid var(--line-soft);border-radius:10px;}
+  .att-table{border-collapse:collapse;font-family:var(--f-mono);font-size:11px;}
+  .att-table th, .att-table td{border:1px solid var(--line-soft);padding:0;text-align:center;}
+  .att-name-col{position:sticky;left:0;z-index:2;background:var(--panel-raised);text-align:left !important;padding:8px 12px !important;min-width:140px;font-size:11px;color:var(--paper-dim);}
+  .att-daycol{padding:6px 0;color:var(--paper-faint);font-weight:400;min-width:30px;}
+  .att-weekend-col{background:rgba(255,255,255,.02);}
+  .att-name{position:sticky;left:0;z-index:1;background:var(--panel);text-align:left;padding:7px 12px;white-space:nowrap;font-family:var(--f-body);font-size:12px;color:var(--paper);border-right:1px solid var(--line-soft);}
+  .att-cell{width:30px;height:28px;color:var(--paper-faint);}
+  .att-cell.att-weekend{background:rgba(255,255,255,.02);color:var(--paper-faint);}
+  .att-cell.att-clickable{cursor:pointer;}
+  .att-cell.att-clickable:hover{outline:1px solid var(--paper-faint);outline-offset:-1px;}
 </style>
 </head>
 <body>
@@ -426,7 +437,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, attendanceMonth:null };
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -612,7 +623,7 @@ function seedState(){
     {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
   ];
 
-  return { teams, users, projects, tasks, featureNodes };
+  return { teams, users, projects, tasks, featureNodes, attendance: {} };
 }
 
 function withTimeout(promise, ms){
@@ -651,8 +662,14 @@ function normalizeState(s){
     s.featureNodes.forEach(n=>{
       if(typeof n.description !== 'string') n.description = '';
       if(n.id==='feat_kr' && n.name==='Knowledge Repository') n.name = 'Repository'; // rename, but only if never customized
+      // Any Heading literally named "Attendance" automatically becomes the attendance
+      // sheet view when opened — no extra setup step needed.
+      if(n.nodeType==='heading' && (n.name||'').trim().toLowerCase()==='attendance' && !n.specialView){
+        n.specialView = 'attendance';
+      }
     });
   }
+  if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
   return s;
 }
 
@@ -1178,7 +1195,7 @@ function renderFocusAreaHome(){
     </div>
 
     ${featureBoxes}
-    ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="addNewFeatureBtn" style="margin-top:4px;">+ Add new Feature</button>` : ''}
+    ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="addNewFeatureBtn" style="margin-top:4px;">+ Add new Module</button>` : ''}
   `;
 }
 
@@ -1326,6 +1343,145 @@ function deleteNodeCascade(nodeId){
   state.featureNodes = state.featureNodes.filter(n=>n.id!==nodeId);
 }
 
+/* ============================== ATTENDANCE SHEET (special Heading view) ============================== */
+
+const ATT_STATUS = { P:{label:'Present',color:'#33A85C'}, L:{label:'Leave',color:'#E0AC3F'}, WFH:{label:'Work from home',color:'#7EB6E0'}, NS:{label:'No show',color:'#D9534F'} };
+
+function attendanceKey(userId, date){ return userId+'|'+date; }
+function getAttendance(userId, date){ return state.attendance[attendanceKey(userId,date)] || null; }
+function setAttendanceValue(userId, date, status){
+  const key = attendanceKey(userId,date);
+  if(status) state.attendance[key] = status; else delete state.attendance[key];
+}
+// Always the current month plus the two before it — a rolling window, not dependent
+// on whether data actually exists for those months yet.
+function last3Months(){
+  const [y,m] = todayISO().split('-').map(Number);
+  const months = [];
+  for(let i=0;i<3;i++){
+    let mm=m-i, yy=y;
+    while(mm<1){ mm+=12; yy--; }
+    months.push(`${yy}-${String(mm).padStart(2,'0')}`);
+  }
+  return months;
+}
+function monthLabelLong(monthKey){
+  const [y,m] = monthKey.split('-').map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString('en-US',{month:'long', year:'numeric'});
+}
+
+function renderAttendanceSheet(node){
+  const months = last3Months();
+  const monthKey = (ui.attendanceMonth && months.includes(ui.attendanceMonth)) ? ui.attendanceMonth : months[0];
+  const [y,m] = monthKey.split('-').map(Number);
+  const daysInMonth = new Date(y,m,0).getDate();
+  const admin = isAdmin();
+  // Who shows up as a row — everyone but Viewers for now; which specific users belong
+  // here will become configurable once role-based access to this heading is designed.
+  const rows = state.users.filter(u=>u.role!=='viewer');
+
+  const dayHeaders = Array.from({length:daysInMonth},(_,i)=>{
+    const day=i+1;
+    const dateISO = `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    return `<th class="att-daycol${isWeekendISO(dateISO)?' att-weekend-col':''}">${day}</th>`;
+  }).join('');
+
+  const bodyRows = rows.map(u=>{
+    const cells = Array.from({length:daysInMonth},(_,i)=>{
+      const day=i+1;
+      const dateISO = `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      const weekend = isWeekendISO(dateISO);
+      const rec = getAttendance(u.id, dateISO);
+      let label, style='';
+      if(weekend){
+        label = rec==='P' ? 'P' : 'WO';
+        if(rec==='P') style = `background:${ATT_STATUS.P.color}22;color:${ATT_STATUS.P.color};border-color:${ATT_STATUS.P.color};`;
+      } else {
+        label = rec || '';
+        if(rec && ATT_STATUS[rec]) style = `background:${ATT_STATUS[rec].color}22;color:${ATT_STATUS[rec].color};border-color:${ATT_STATUS[rec].color};`;
+      }
+      const clickAttr = admin ? (weekend ? ` data-att-weekend="${u.id}|${dateISO}"` : ` data-att-weekday="${u.id}|${dateISO}"`) : '';
+      const cls = `att-cell${weekend?' att-weekend':''}${admin?' att-clickable':''}`;
+      return `<td class="${cls}" style="${style}"${clickAttr}>${label}</td>`;
+    }).join('');
+    return `<tr><td class="att-name">${u.name}</td>${cells}</tr>`;
+  }).join('');
+
+  const legend = Object.entries(ATT_STATUS).map(([code,v])=>
+    `<span style="font-size:11px;color:var(--paper-dim);margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${v.color};margin-right:5px;"></span>${code} = ${v.label}</span>`
+  ).join('') + `<span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--panel-raised);border:1px dashed var(--paper-faint);margin-right:5px;"></span>WO = Weekly off${admin?' — click to mark Present, click again to revert':''}</span>`;
+
+  return `
+    <div class="eyebrow">Heading</div>
+    <h1 class="page-title" style="margin-bottom:4px;">${node.name}</h1>
+    <div class="muted" style="font-size:15px;font-family:var(--f-display);margin-bottom:16px;">${monthLabelLong(monthKey)}</div>
+
+    <div class="filters" style="margin-bottom:14px;">
+      <select id="attMonthSelect">
+        ${months.map(mk=>`<option value="${mk}" ${mk===monthKey?'selected':''}>${monthLabelLong(mk)}</option>`).join('')}
+      </select>
+    </div>
+
+    <div style="margin-bottom:14px;">${legend}</div>
+
+    <div class="att-wrap">
+      <table class="att-table">
+        <thead><tr><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
+        <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+1}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+    ${!admin ? '<div class="footnote">Only admins can enter attendance.</div>' : ''}
+  `;
+}
+
+function bindAttendanceSheet(){
+  const sel = document.getElementById('attMonthSelect');
+  if(sel) sel.addEventListener('change', ()=>{ ui.attendanceMonth = sel.value; render(); });
+
+  document.querySelectorAll('[data-att-weekday]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [userId,date] = el.dataset.attWeekday.split('|');
+      const cur = getAttendance(userId,date);
+      const cycle = ['','P','L','WFH','NS'];
+      const next = cycle[(cycle.indexOf(cur||'')+1) % cycle.length];
+      setAttendanceValue(userId,date, next || null);
+      persist(); render();
+    });
+  });
+
+  document.querySelectorAll('[data-att-weekend]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [userId,date] = el.dataset.attWeekend.split('|');
+      const cur = getAttendance(userId,date);
+      if(cur==='P'){
+        openRevertAttendanceConfirm(date, ()=>{ setAttendanceValue(userId,date,null); persist(); render(); });
+      } else {
+        setAttendanceValue(userId,date,'P');
+        persist(); render();
+      }
+    });
+  });
+}
+
+function openRevertAttendanceConfirm(iso, onConfirm){
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Change back to weekly off?</h3>
+        <div class="modal-sub">${fmtDate(iso)} is currently marked Present. Do you want to change it back to weekly off?</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="revertAttCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="revertAttConfirm">Yes, change back</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  const cleanup = ()=> div.remove();
+  div.querySelector('#revertAttCancel').addEventListener('click', cleanup);
+  div.querySelector('#revertAttConfirm').addEventListener('click', ()=>{ cleanup(); onConfirm(); });
+}
+
 function renderContentItem(it){
   if(it.type==='text') return `<div class="content-item"><div class="ci-title">${it.title||''}</div><div class="ci-text">${(it.text||'').replace(/\n/g,'<br>')}</div></div>`;
   if(it.type==='link') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">🔗 ${it.title||it.url}</a></div>`;
@@ -1337,6 +1493,22 @@ function renderContentItem(it){
 // Renders a Heading (or Sub Heading) and everything nested inside it — its own content
 // items, plus any Sub Headings underneath, recursively.
 function renderHeadingCard(h, depth){
+  if(h.specialView){
+    const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : 'Click to open';
+    return `
+    <div class="heading-card" style="margin-left:${depth*20}px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;">
+          <div class="heading-name">${h.name}</div>
+          <div class="muted" style="font-size:12px;margin-top:2px;">${h.description || label}</div>
+        </div>
+        ${isAdmin() ? `<div class="row-actions">
+          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${h.id}" title="Rename or add a description">✎</button>
+          <button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }
   const items = h.contentItems || [];
   const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading');
   const itemsHtml = items.map(it=>`
@@ -1363,6 +1535,10 @@ function renderHeadingCard(h, depth){
 function renderFeatureNode(){
   const node = featureNode(ui.featureNodeId);
   if(!node) return `<div class="empty-state"><div class="et">Not found</div></div>`;
+
+  if(node.nodeType==='heading' && node.specialView==='attendance'){
+    return renderAttendanceSheet(node);
+  }
 
   if(node.nodeType==='heading' || node.nodeType==='subheading'){
     return `
@@ -1397,16 +1573,21 @@ function renderFeatureNode(){
   const headingCards = headings.map(h=>`<div class="card" style="margin-bottom:14px;">${renderHeadingCard(h,0)}</div>`).join('');
 
   return `
-    <div class="eyebrow">${node.parentId ? 'Sub Feature' : 'Feature'}</div>
+    <div class="eyebrow">${node.parentId ? 'Feature' : 'Module'}</div>
     <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
-    ${isAdmin() ? `<button class="btn btn-primary btn-sm" style="margin-bottom:20px;" data-add-node="${node.id}">+ Add Sub Feature or Heading</button>` : ''}
+    ${isAdmin() ? `<button class="btn btn-primary btn-sm" style="margin-bottom:20px;" data-add-node="${node.id}">+ Add Feature or Heading</button>` : ''}
     ${subFeatureBoxes}
     ${headingCards}
-    ${(!subFeatures.length && !headings.length) ? `<div class="empty-state"><div class="et">Nothing here yet</div>${isAdmin() ? 'Use the button above to add a Sub Feature or Heading.' : ''}</div>` : ''}
+    ${(!subFeatures.length && !headings.length) ? `<div class="empty-state"><div class="et">Nothing here yet</div>${isAdmin() ? 'Use the button above to add a Feature or Heading.' : ''}</div>` : ''}
   `;
 }
 
 function bindFeatureNode(){
+  const node = featureNode(ui.featureNodeId);
+  if(node && node.nodeType==='heading' && node.specialView==='attendance'){
+    bindAttendanceSheet();
+    return;
+  }
   document.querySelectorAll('[data-open-feature]').forEach(el=>{
     el.addEventListener('click', ()=>{ ui.featureNodeId = el.dataset.openFeature; render(); });
   });
@@ -1440,7 +1621,7 @@ function openEditNodeModal(nodeId){
   if(!isAdmin()) return;
   const f = featureNode(nodeId);
   if(!f) return;
-  const kindLabel = f.parentId===null ? 'Feature' : f.nodeType==='subfeature' ? 'Sub Feature' : f.nodeType==='heading' ? 'Heading' : f.nodeType==='subheading' ? 'Sub Heading' : 'Feature';
+  const kindLabel = f.parentId===null ? 'Module' : f.nodeType==='subfeature' ? 'Feature' : f.nodeType==='heading' ? 'Heading' : f.nodeType==='subheading' ? 'Sub Heading' : 'Module';
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1448,7 +1629,7 @@ function openEditNodeModal(nodeId){
         <form id="editNodeForm">
           <div class="field"><label>Name</label><input id="editNodeName" value="${(f.name||'').replace(/"/g,'&quot;')}" required></div>
           <div class="field"><label>Description</label><textarea id="editNodeDesc" placeholder="What is this for?">${(f.description||'').replace(/</g,'&lt;')}</textarea></div>
-          ${f.parentId===null ? '<div class="hint">Shown on the Focus Area page under this feature\'s name.</div>' : ''}
+          ${f.parentId===null ? '<div class="hint">Shown on the Focus Area page under this module\'s name.</div>' : ''}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="editNodeSubmitBtn" class="btn btn-primary">Save</button>
@@ -1462,6 +1643,7 @@ function openEditNodeModal(nodeId){
     if(!nameEl.value.trim()){ nameEl.focus(); return; }
     f.name = nameEl.value.trim();
     f.description = document.getElementById('editNodeDesc').value.trim();
+    if(f.nodeType==='heading' && f.name.toLowerCase()==='attendance' && !f.specialView) f.specialView = 'attendance';
     persist(); closeModal(); render();
   });
 }
@@ -1472,10 +1654,10 @@ function openAddNodeChoiceModal(parentId){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
-        <h3>Add to ${parent?parent.name:'this feature'}</h3>
+        <h3>Add to ${parent?parent.name:'this module'}</h3>
         <div class="modal-sub">What would you like to create?</div>
         <div class="modal-actions" style="justify-content:flex-start;gap:12px;">
-          <button type="button" class="btn btn-primary" id="chooseSubFeature">Create Sub Feature</button>
+          <button type="button" class="btn btn-primary" id="chooseSubFeature">Create Feature</button>
           <button type="button" class="btn" id="chooseHeading">Create Heading</button>
         </div>
         <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button></div>
@@ -1488,7 +1670,7 @@ function openAddNodeChoiceModal(parentId){
 
 function openNameNodeModal(parentId, nodeType){
   if(!isAdmin()) return;
-  const label = nodeType==='feature' ? 'Feature' : nodeType==='subfeature' ? 'Sub Feature' : nodeType==='heading' ? 'Heading' : 'Sub Heading';
+  const label = nodeType==='feature' ? 'Module' : nodeType==='subfeature' ? 'Feature' : nodeType==='heading' ? 'Heading' : 'Sub Heading';
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -1506,7 +1688,9 @@ function openNameNodeModal(parentId, nodeType){
   runOnClickAndEnter('nodeNameForm','nodeNameSubmitBtn', ()=>{
     const nameEl = document.getElementById('nodeNameInput');
     if(!nameEl.value.trim()){ nameEl.focus(); return; }
-    const node = { id: uid('node'), name: nameEl.value.trim(), nodeType, parentId, order: nextOrderFor(parentId), contentItems: [], description:'' };
+    const trimmedName = nameEl.value.trim();
+    const node = { id: uid('node'), name: trimmedName, nodeType, parentId, order: nextOrderFor(parentId), contentItems: [], description:'',
+      specialView: (nodeType==='heading' && trimmedName.toLowerCase()==='attendance') ? 'attendance' : null };
     state.featureNodes.push(node);
     persist(); closeModal(); render();
   });

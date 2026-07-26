@@ -629,7 +629,7 @@ function seedState(){
     {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
   ];
 
-  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {} };
+  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 } };
 }
 
 function withTimeout(promise, ms){
@@ -726,6 +726,8 @@ function normalizeState(s){
   }
   if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
   if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
+  if(!s.settings || typeof s.settings !== 'object') s.settings = {};
+  if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
   return s;
 }
 
@@ -1286,7 +1288,6 @@ function renderFocusAreaHome(){
     </div>
 
     ${featureBoxes}
-    ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="addNewFeatureBtn" style="margin-top:4px;">+ Add new Module</button>` : ''}
   `;
 }
 
@@ -1306,8 +1307,6 @@ function bindFocusAreaHome(){
   document.querySelectorAll('[data-edit-feature-desc]').forEach(el=>{
     el.addEventListener('click', (e)=>{ e.stopPropagation(); openEditNodeModal(el.dataset.editFeatureDesc); });
   });
-  const addFeatureBtn = document.getElementById('addNewFeatureBtn');
-  if(addFeatureBtn) addFeatureBtn.addEventListener('click', ()=> openNameNodeModal(null, 'feature'));
 }
 
 function renderPortfolio(){
@@ -1697,12 +1696,11 @@ function openAppraisalEditModal(userId){
   });
 }
 
-function renderContentItem(it){
-  if(it.type==='text') return `<div class="content-item"><div class="ci-title">${it.title||''}</div><div class="ci-text">${(it.text||'').replace(/\n/g,'<br>')}</div></div>`;
+function renderContentItem(it, headingId){
   if(it.type==='link') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">🔗 ${it.title||it.url}</a></div>`;
-  if(it.type==='image') return `<div class="content-item">${it.title?`<div class="ci-title">${it.title}</div>`:''}<img src="${it.url}" style="max-width:100%;border-radius:8px;margin-top:4px;" alt="${it.title||''}"></div>`;
-  if(it.type==='document') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">📄 ${it.title||'Document'}</a></div>`;
-  return '';
+  const icon = it.type==='text' ? '📝' : it.type==='image' ? '🖼️' : it.type==='video' ? '🎬' : '📄';
+  const name = it.title || it.fileName || (it.type==='text' ? 'Text note' : 'Untitled');
+  return `<div class="content-item"><span class="ci-link" data-open-content-item="${headingId}|${it.id}" style="cursor:pointer;">${icon} ${name}</span></div>`;
 }
 
 // Renders a Heading (or Sub Heading) and everything nested inside it — its own content
@@ -1728,7 +1726,7 @@ function renderHeadingCard(h, depth){
   const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading');
   const itemsHtml = items.map(it=>`
     <div style="position:relative;">
-      ${renderContentItem(it)}
+      ${renderContentItem(it, h.id)}
       ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
     </div>`).join('');
   return `
@@ -1834,6 +1832,12 @@ function bindFeatureNode(){
       persist(); render();
     });
   });
+  document.querySelectorAll('[data-open-content-item]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [headingId, itemId] = el.dataset.openContentItem.split('|');
+      openContentItemPreviewModal(headingId, itemId);
+    });
+  });
 }
 
 function openEditNodeModal(nodeId){
@@ -1915,26 +1919,45 @@ function openNameNodeModal(parentId, nodeType){
   });
 }
 
+// Uploads a File object to Supabase Storage and returns its public URL. Throws if
+// Supabase isn't connected — file uploads have nowhere to go without it.
+async function uploadFileToStorage(file){
+  if(!supaClient) throw new Error('File uploads need Supabase to be connected.');
+  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+  const path = `${uid('file')}.${ext}`;
+  const { error: upErr } = await supaClient.storage.from('content-uploads').upload(path, file, { cacheControl:'3600', upsert:false });
+  if(upErr) throw upErr;
+  const { data } = supaClient.storage.from('content-uploads').getPublicUrl(path);
+  return { url: data.publicUrl, storagePath: path, fileName: file.name, mimeType: file.type, sizeBytes: file.size };
+}
+
 function openAddContentModal(headingId){
   if(!isAdmin()) return;
+  const maxMB = (state.settings && state.settings.maxUploadMB) || 250;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
         <h3>Add content</h3>
-        <div class="modal-sub">Add as many items as you need — text, links, images, or documents, mixed freely.</div>
+        <div class="modal-sub">Add as many items as you need — text, links, images, documents, or videos, mixed freely.</div>
         <form id="contentForm">
           <div class="field"><label>Type</label>
             <select id="ciType">
               <option value="text">Text</option>
               <option value="link">Link (URL)</option>
-              <option value="image">Image (link to an image)</option>
-              <option value="document">Document (link to a hosted file)</option>
+              <option value="image">Image (upload)</option>
+              <option value="document">Document — PDF, Word, or Excel (upload)</option>
+              <option value="video">Video (upload)</option>
             </select>
           </div>
           <div class="field"><label>Title (optional)</label><input id="ciTitle" placeholder="A short label for this item"></div>
           <div class="field" id="ciTextField"><label>Text</label><textarea id="ciText" placeholder="Write it here..."></textarea></div>
           <div class="field" id="ciUrlField" style="display:none;"><label>URL</label><input id="ciUrl" placeholder="https://..."></div>
-          <div class="hint">Documents and images are stored as links (e.g. a Google Drive or SharePoint link) rather than direct uploads for now.</div>
+          <div class="field" id="ciFileField" style="display:none;">
+            <label>File</label>
+            <input type="file" id="ciFile">
+            <div class="hint" id="ciFileHint">Max ${maxMB} MB.</div>
+          </div>
+          <div class="login-error" id="ciError"></div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="ciSubmitBtn" class="btn btn-primary">Add content</button>
@@ -1946,30 +1969,98 @@ function openAddContentModal(headingId){
   const typeSel = document.getElementById('ciType');
   const textField = document.getElementById('ciTextField');
   const urlField = document.getElementById('ciUrlField');
+  const fileField = document.getElementById('ciFileField');
+  const fileInput = document.getElementById('ciFile');
+  const ACCEPT = { image:'image/*', document:'.pdf,.doc,.docx,.xls,.xlsx', video:'video/*' };
   const updateFields = ()=>{
-    const isText = typeSel.value==='text';
-    textField.style.display = isText ? '' : 'none';
-    urlField.style.display = isText ? 'none' : '';
+    const t = typeSel.value;
+    textField.style.display = t==='text' ? '' : 'none';
+    urlField.style.display = t==='link' ? '' : 'none';
+    fileField.style.display = (t==='image'||t==='document'||t==='video') ? '' : 'none';
+    if(ACCEPT[t]) fileInput.setAttribute('accept', ACCEPT[t]);
   };
   typeSel.addEventListener('change', updateFields);
   updateFields();
-  runOnClickAndEnter('contentForm','ciSubmitBtn', ()=>{
+
+  const submitBtn = document.getElementById('ciSubmitBtn');
+  submitBtn.addEventListener('click', async ()=>{
     const type = typeSel.value;
     const title = document.getElementById('ciTitle').value.trim();
     const h = featureNode(headingId);
+    const errEl = document.getElementById('ciError');
+    errEl.textContent = '';
     if(!h) return;
     if(!Array.isArray(h.contentItems)) h.contentItems = [];
+
     if(type==='text'){
       const text = document.getElementById('ciText').value.trim();
-      if(!text) return;
+      if(!text){ errEl.textContent = 'Add some text first.'; return; }
       h.contentItems.push({id:uid('ci'), type, title, text});
-    } else {
-      const url = document.getElementById('ciUrl').value.trim();
-      if(!url) return;
-      h.contentItems.push({id:uid('ci'), type, title, url});
+      persist(); closeModal(); render();
+      return;
     }
-    persist(); closeModal(); render();
+    if(type==='link'){
+      const url = document.getElementById('ciUrl').value.trim();
+      if(!url){ errEl.textContent = 'Add a URL first.'; return; }
+      h.contentItems.push({id:uid('ci'), type, title, url});
+      persist(); closeModal(); render();
+      return;
+    }
+    // image / document / video — all go through upload
+    const file = fileInput.files[0];
+    if(!file){ errEl.textContent = 'Choose a file first.'; return; }
+    const limitMB = (state.settings && state.settings.maxUploadMB) || 250;
+    if(file.size > limitMB*1024*1024){ errEl.textContent = `That file is too large — the limit is ${limitMB} MB.`; return; }
+    if(type==='document'){
+      const okExt = /\.(pdf|doc|docx|xls|xlsx)$/i.test(file.name);
+      if(!okExt){ errEl.textContent = 'Documents must be a PDF, Word, or Excel file.'; return; }
+    }
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Uploading…';
+    try{
+      const uploaded = await uploadFileToStorage(file);
+      h.contentItems.push({id:uid('ci'), type, title, ...uploaded});
+      persist(); closeModal(); render();
+    }catch(e){
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Add content';
+      errEl.textContent = describeError(e);
+    }
   });
+}
+
+function openContentItemPreviewModal(headingId, itemId){
+  const h = featureNode(headingId);
+  if(!h) return;
+  const it = (h.contentItems||[]).find(i=>i.id===itemId);
+  if(!it) return;
+  let body;
+  if(it.type==='text'){
+    body = `<div class="hint" style="white-space:pre-wrap;font-size:13px;">${(it.text||'').replace(/</g,'&lt;')}</div>`;
+  } else if(it.type==='image'){
+    body = `<img src="${it.url}" style="max-width:100%;border-radius:8px;display:block;" alt="${it.title||''}">`;
+  } else if(it.type==='video'){
+    body = `<video controls style="max-width:100%;border-radius:8px;display:block;" src="${it.url}"></video>`;
+  } else if(it.type==='document'){
+    const isPdf = (it.mimeType||'').includes('pdf') || /\.pdf$/i.test(it.fileName||'');
+    if(isPdf){
+      body = `<iframe src="${it.url}" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>`;
+    } else {
+      body = `<iframe src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(it.url)}" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>
+        <div class="hint" style="margin-top:8px;">If the preview doesn't load, <a href="${it.url}" target="_blank" rel="noopener" class="ci-link">open the file directly</a>.</div>`;
+    }
+  } else {
+    body = '';
+  }
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal" style="max-width:800px;">
+        <h3>${it.title || it.fileName || 'Content'}</h3>
+        ${body}
+        <div class="modal-actions"><button class="btn btn-primary" data-close>Close</button></div>
+      </div>
+    </div>`;
+  bindModalClose();
 }
 
 function openDeleteNodeConfirm(nodeId){
@@ -3184,6 +3275,19 @@ function renderAdminUsers(){
         <button class="btn btn-sm" id="recoverLegacyBtn">Check for legacy data</button>
       </div>
     </div>` : ''}
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">
+        <div>
+          <div class="section-title" style="margin-bottom:2px;">Content upload limit</div>
+          <div class="muted" style="font-size:12px;">The largest file size allowed for images, documents, and videos added to any Module.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="number" id="maxUploadInput" value="${(state.settings&&state.settings.maxUploadMB)||250}" min="1" style="width:80px;">
+          <span class="muted" style="font-size:12px;">MB</span>
+          <button class="btn btn-sm" id="saveMaxUploadBtn">Save</button>
+        </div>
+      </div>
+    </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div class="section-title" style="margin-bottom:0;">Users</div>
@@ -3261,6 +3365,14 @@ function bindAdmin(){
   }));
   const recoverBtn = document.getElementById('recoverLegacyBtn');
   if(recoverBtn) recoverBtn.addEventListener('click', checkForLegacyData);
+  const saveMaxUploadBtn = document.getElementById('saveMaxUploadBtn');
+  if(saveMaxUploadBtn) saveMaxUploadBtn.addEventListener('click', ()=>{
+    const v = Number(document.getElementById('maxUploadInput').value);
+    if(!v || v<1) return;
+    if(!state.settings) state.settings = {};
+    state.settings.maxUploadMB = v;
+    persist(); render();
+  });
 
   const addTeam = document.querySelector('[data-add-team]');
   if(addTeam) addTeam.addEventListener('click', openAddTeamModal);

@@ -339,6 +339,10 @@
   .heading-card{border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px;}
   .heading-card:first-child{border-top:none;padding-top:0;margin-top:0;}
   .heading-name{font-family:var(--f-display);font-size:16px;font-weight:600;}
+  .drag-handle{cursor:grab;color:var(--paper-faint);font-size:16px;line-height:1;user-select:none;}
+  .drag-handle:active{cursor:grabbing;}
+  .drag-node.dragging{opacity:.4;}
+  .drag-node.drag-over{outline:2px dashed var(--amber);outline-offset:2px;}
   .content-item{background:var(--panel-raised);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-top:8px;}
   .ci-title{font-size:12px;font-weight:600;color:var(--paper);margin-bottom:3px;}
   .ci-text{font-size:13px;color:var(--paper-dim);line-height:1.6;}
@@ -1168,7 +1172,7 @@ function renderLogin(){
     <div class="login-card">
       <div class="login-mark"></div>
       <div class="login-title">ImproveID Workspace</div>
-      <div class="muted" style="font-size:13px;">Sign in to track project timelines and handoffs.</div>
+      <div class="muted" style="font-size:13px;">Everything for your focus, in one place.</div>
       <div class="mono" id="loginDateTime" style="font-size:11px;color:var(--paper-faint);margin-top:6px;">${fmtDate(todayISO())} · ${nowTimeIST()} IST</div>
       <form id="loginForm" style="margin-top:22px;">
         <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
@@ -1273,18 +1277,12 @@ function renderFocusAreaHome(){
 
     <div class="card" style="margin-bottom:22px;">
       <div class="section-title" style="margin-bottom:10px;">Today — ${fmtDate(today)}</div>
+      <div style="font-size:14px;color:var(--paper-dim);margin-bottom:10px;">Workstream Snapshot</div>
       <div style="display:flex;gap:20px;flex-wrap:wrap;">
         <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--paper);">${dueTodayTasks.length}</b> <span class="muted">due today</span></span>
         <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--red);">${delayedOpenTasks.length}</b> <span class="muted">currently delayed</span></span>
         <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--amber);">${blockedOpenTasks.length}</b> <span class="muted">blocked</span></span>
       </div>
-    </div>
-
-    <div class="stat-strip" style="margin-bottom:26px;">
-      <div class="stat-chip"><div class="n">${summaries.length}</div><div class="l">Workstreams</div></div>
-      <div class="stat-chip"><div class="n" style="color:var(--green);">${onTrack}</div><div class="l">On agreed timeline</div></div>
-      <div class="stat-chip"><div class="n" style="color:var(--red);">${delayed}</div><div class="l">Delayed</div></div>
-      <div class="stat-chip"><div class="n">${tasksTracked}</div><div class="l">Tasks tracked</div></div>
     </div>
 
     ${featureBoxes}
@@ -1550,6 +1548,28 @@ function bindAttendanceSheet(){
   });
 }
 
+// A single, reusable "are you sure?" popup — used for every delete action across the
+// app (content items, tasks, users, teams, checklist items, and the node-tree deletes
+// that already had their own version). Stacks above whatever modal is already open.
+function openConfirmDelete(title, message, onConfirm, confirmLabel){
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>${title}</h3>
+        <div class="modal-sub">${message}</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="genConfirmCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="genConfirmOk">${confirmLabel||'Delete'}</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  const cleanup = ()=> div.remove();
+  div.querySelector('#genConfirmCancel').addEventListener('click', cleanup);
+  div.querySelector('#genConfirmOk').addEventListener('click', ()=>{ cleanup(); onConfirm(); });
+}
+
 function openRevertAttendanceConfirm(iso, onConfirm){
   const div = document.createElement('div');
   div.innerHTML = `
@@ -1705,15 +1725,19 @@ function renderContentItem(it, headingId){
 
 // Renders a Heading (or Sub Heading) and everything nested inside it — its own content
 // items, plus any Sub Headings underneath, recursively.
-function renderHeadingCard(h, depth){
+function renderHeadingCard(h, depth, showHandle){
+  const handle = (showHandle && isAdmin()) ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : '';
   if(h.specialView){
     const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : h.specialView==='appraisal' ? 'Appraisal sheet — click to open' : 'Click to open';
     return `
     <div class="heading-card" style="margin-left:${depth*20}px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;">
-          <div class="heading-name">${h.name}</div>
-          <div class="muted" style="font-size:12px;margin-top:2px;">${h.description || label}</div>
+        <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
+          ${handle}
+          <div>
+            <div class="heading-name">${h.name}</div>
+            <div class="muted" style="font-size:12px;margin-top:2px;">${h.description || label}</div>
+          </div>
         </div>
         ${isAdmin() ? `<div class="row-actions">
           <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${h.id}" title="Rename or add a description">✎</button>
@@ -1732,7 +1756,7 @@ function renderHeadingCard(h, depth){
   return `
     <div class="heading-card" style="margin-left:${depth*20}px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <div class="heading-name">${h.name}</div>
+        <div style="display:flex;align-items:center;gap:8px;">${handle}<div class="heading-name">${h.name}</div></div>
         ${isAdmin() ? `<div class="row-actions">
           <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
           <button class="btn btn-sm btn-ghost" data-add-subheading="${h.id}">+ Add sub heading</button>
@@ -1741,7 +1765,7 @@ function renderHeadingCard(h, depth){
         </div>` : ''}
       </div>
       <div style="margin-top:8px;">${itemsHtml || '<div class="muted" style="font-size:12px;">No content yet.</div>'}</div>
-      ${subHeadings.map(sh=>renderHeadingCard(sh, depth+1)).join('')}
+      ${subHeadings.map(sh=>renderHeadingCard(sh, depth+1, false)).join('')}
     </div>`;
 }
 
@@ -1772,11 +1796,14 @@ function renderFeatureNode(){
     const cnt = featureChildren(sf.id).length;
     const subtitle = sf.description ? sf.description : (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet');
     return `
-    <div class="card" style="margin-bottom:14px;">
+    <div class="card drag-node" style="margin-bottom:14px;" ${isAdmin()?`draggable="true" data-drag-node="${sf.id}"`:''}>
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div data-open-feature="${sf.id}" style="cursor:pointer;flex:1;">
-          <div style="font-family:var(--f-display);font-size:18px;font-weight:600;">${sf.name}</div>
-          <div class="muted" style="font-size:12px;">${subtitle}</div>
+        <div data-open-feature="${sf.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
+          ${isAdmin() ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : ''}
+          <div>
+            <div style="font-family:var(--f-display);font-size:18px;font-weight:600;">${sf.name}</div>
+            <div class="muted" style="font-size:12px;">${subtitle}</div>
+          </div>
         </div>
         ${isAdmin() ? `<div style="display:flex;gap:8px;">
           <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${sf.id}" title="Rename or add a description">✎</button>
@@ -1786,7 +1813,7 @@ function renderFeatureNode(){
     </div>`;
   }).join('');
 
-  const headingCards = headings.map(h=>`<div class="card" style="margin-bottom:14px;">${renderHeadingCard(h,0)}</div>`).join('');
+  const headingCards = headings.map(h=>`<div class="card drag-node" style="margin-bottom:14px;" ${isAdmin()?`draggable="true" data-drag-node="${h.id}"`:''}>${renderHeadingCard(h,0,true)}</div>`).join('');
 
   return `
     <div class="eyebrow">${node.parentId ? 'Feature' : 'Module'}</div>
@@ -1828,8 +1855,12 @@ function bindFeatureNode(){
       const [headingId, itemId] = el.dataset.deleteContent.split('|');
       const h = featureNode(headingId);
       if(!h) return;
-      h.contentItems = (h.contentItems||[]).filter(i=>i.id!==itemId);
-      persist(); render();
+      const item = (h.contentItems||[]).find(i=>i.id===itemId);
+      const name = item ? (item.title || item.fileName || 'this item') : 'this item';
+      openConfirmDelete('Delete this content?', `This will permanently delete "${name}". This can't be undone.`, ()=>{
+        h.contentItems = (h.contentItems||[]).filter(i=>i.id!==itemId);
+        persist(); render();
+      });
     });
   });
   document.querySelectorAll('[data-open-content-item]').forEach(el=>{
@@ -1838,6 +1869,44 @@ function bindFeatureNode(){
       openContentItemPreviewModal(headingId, itemId);
     });
   });
+  bindDragReorder();
+}
+
+let dragSourceNodeId = null;
+function bindDragReorder(){
+  document.querySelectorAll('[data-drag-node]').forEach(el=>{
+    el.addEventListener('dragstart', (e)=>{
+      dragSourceNodeId = el.dataset.dragNode;
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); });
+    el.addEventListener('dragover', (e)=>{ e.preventDefault(); el.classList.add('drag-over'); });
+    el.addEventListener('dragleave', ()=>{ el.classList.remove('drag-over'); });
+    el.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      el.classList.remove('drag-over');
+      const targetId = el.dataset.dragNode;
+      if(dragSourceNodeId && dragSourceNodeId!==targetId){
+        const node = featureNode(dragSourceNodeId);
+        if(node) reorderSiblings(node.parentId, dragSourceNodeId, targetId);
+      }
+      dragSourceNodeId = null;
+    });
+  });
+}
+// Moves draggedId to sit where targetId currently is among its siblings, then
+// renumbers everyone's order sequentially. Only ever reorders within the same
+// parent — Headings reorder among Headings, Features reorder among Features.
+function reorderSiblings(parentId, draggedId, targetId){
+  const siblings = featureChildren(parentId);
+  const draggedIdx = siblings.findIndex(s=>s.id===draggedId);
+  const targetIdx = siblings.findIndex(s=>s.id===targetId);
+  if(draggedIdx===-1 || targetIdx===-1 || draggedIdx===targetIdx) return;
+  const [moved] = siblings.splice(draggedIdx,1);
+  siblings.splice(targetIdx,0,moved);
+  siblings.forEach((s,i)=>{ s.order = i+1; });
+  persist(); render();
 }
 
 function openEditNodeModal(nodeId){
@@ -2197,7 +2266,8 @@ function renderProject(){
     <div class="hero status-${status}">
       <div>
         <div class="eyebrow">Workstream</div>
-        <h1 class="page-title">${p.name}</h1>
+        <h1 class="page-title" data-open-workstream-info="${p.id}" style="cursor:pointer;">${p.name}</h1>
+        ${p.description ? `<div class="muted" style="font-size:13px;margin-top:4px;max-width:640px;">${p.description}</div>` : ''}
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           ${pill(status, status==='red' ? `Delayed ${tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
           ${blockingTeams.length ? `<span class="pill pill-amber pill-blink" title="${blockedDetailForProject(p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
@@ -2210,6 +2280,21 @@ function renderProject(){
         <div class="metric"><div class="eyebrow">Delay</div><div class="val ${tl.delay>0?'red':'green'}">${tl.delay>0 ? '-'+tl.delay : '0'}</div><div class="sub">days vs. original agreement</div></div>
       </div>
     </div>
+
+    ${(()=>{
+      const cu = currentUser();
+      const myTeam = cu && cu.teamId ? state.teams.find(t=>t.id===cu.teamId) : null;
+      const points = (myTeam && Array.isArray(myTeam.checklist)) ? myTeam.checklist : [];
+      if(!myTeam || points.length===0) return '';
+      return `
+    <div class="card" style="margin-top:20px;">
+      <div class="section-title" style="margin-bottom:4px;font-size:20px;font-weight:800;">${myTeam.name} Checklist</div>
+      <div class="muted" style="font-size:12px;margin-bottom:12px;">Keep these in mind while working on tasks in this workstream — built from lessons learned before.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+        ${points.map(pt=>`<div style="font-size:15px;font-weight:600;color:var(--paper);display:flex;gap:8px;align-items:flex-start;"><span style="color:var(--amber);">✓</span><span>${pt.text}</span></div>`).join('')}
+      </div>
+    </div>`;
+    })()}
 
     <div class="card" style="margin-top:20px;display:flex;gap:20px;align-items:center;">
       <div class="donut-big" style="background:${donutGradient(overallPct,'--green')}">
@@ -2251,6 +2336,8 @@ function renderProject(){
 function bindProject(){
   const switcher = document.getElementById('workstreamSwitcher');
   if(switcher) switcher.addEventListener('change', ()=>{ ui.projectId = switcher.value; render(); });
+  const wsInfo = document.querySelector('[data-open-workstream-info]');
+  if(wsInfo) wsInfo.addEventListener('click', ()=> openWorkstreamInfoModal(wsInfo.dataset.openWorkstreamInfo));
   document.querySelectorAll('[data-edit-task]').forEach(el=>{
     el.addEventListener('click', ()=>{
       const id = el.dataset.editTask;
@@ -2369,6 +2456,45 @@ function openBlankTaskModal(projectId){
 // A plain, read-only view of everything on a task — anyone can open this via the
 // task title, regardless of whether they're allowed to edit it. Editing still goes
 // through openTaskModal via the Edit button, gated by canEditTask().
+// Read-only, whole-workstream view — click the workstream title to see its purpose
+// and every task's story in one place, without opening each task individually.
+function openWorkstreamInfoModal(projectId){
+  const p = state.projects.find(x=>x.id===projectId);
+  if(!p) return;
+  const tasks = projectTasks(projectId);
+  const taskBlocks = tasks.map((t,i)=>{
+    const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
+    const extensionHtml = (t.extensionHistory && t.extensionHistory.length)
+      ? `<div class="hint" style="margin-top:4px;"><b style="color:var(--paper-dim);">Extension history:</b>${t.extensionHistory.map(h=>`<br>→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}`).join('')}</div>`
+      : '';
+    const blockerHtml = blockedTeamName
+      ? `<div class="hint" style="margin-top:4px;color:var(--amber);"><b>Blocked by ${blockedTeamName}:</b> ${t.blockerReason || 'no reason given'}</div>`
+      : '';
+    return `
+      <div style="padding:12px 0;${i>0?'border-top:1px solid var(--line-soft);':''}">
+        <div style="font-weight:600;font-size:14px;color:var(--paper);">${i+1}. ${t.title || 'Untitled task'} <span class="muted" style="font-weight:400;font-size:12px;">— ${entityName(t.assignedType,t.assignedId)}</span></div>
+        <div class="hint" style="margin-top:4px;">${t.description || 'No description yet.'}</div>
+        ${t.reason ? `<div class="hint" style="margin-top:4px;"><b style="color:var(--paper-dim);">Why this much time:</b> ${t.reason}</div>` : ''}
+        <div class="hint" style="margin-top:4px;">${t.startDate ? `${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}` : 'Timeline not set yet'}${t.extended ? ` <span style="color:var(--red);">extended to ${fmtDate(t.endDate)}</span>` : ''}</div>
+        ${extensionHtml}
+        ${blockerHtml}
+        <div class="hint" style="margin-top:4px;">${t.status==='closed' ? 'Closed on '+fmtDate(t.closedDate) : 'Open'}</div>
+      </div>`;
+  }).join('');
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal" style="max-width:640px;">
+        <h3>${p.name}</h3>
+        <div class="modal-sub">${p.description || 'No description added for this workstream yet.'}</div>
+        <div style="margin-top:10px;max-height:60vh;overflow-y:auto;">
+          ${taskBlocks || '<div class="empty-state">No tasks in this workstream yet.</div>'}
+        </div>
+        <div class="modal-actions"><button class="btn btn-primary" data-close>Close</button></div>
+      </div>
+    </div>`;
+  bindModalClose();
+}
+
 function openTaskDetailsModal(taskId){
   const t = state.tasks.find(x=>x.id===taskId);
   if(!t) return;
@@ -2527,9 +2653,11 @@ function openTaskModal(taskId){
   if(amendBtn) amendBtn.addEventListener('click', ()=> openAmendTimelineModal(t.id));
   const delBtn = document.querySelector('[data-delete-task]');
   if(delBtn) delBtn.addEventListener('click', ()=>{
-    state.tasks = state.tasks.filter(x=>x.id!==t.id);
-    state.tasks.forEach(x=>{ if(x.predecessorId===t.id) x.predecessorId=null; });
-    persist(); closeModal(); render();
+    openConfirmDelete('Delete this task?', `This will permanently delete "${t.title||'this task'}" — its timeline, extension history, everything. This can't be undone.`, ()=>{
+      state.tasks = state.tasks.filter(x=>x.id!==t.id);
+      state.tasks.forEach(x=>{ if(x.predecessorId===t.id) x.predecessorId=null; });
+      persist(); closeModal(); render();
+    });
   });
 }
 
@@ -2704,12 +2832,15 @@ function openChecklistGateModal(t, team, items, onComplete){
   div.innerHTML = `
     <div class="modal-backdrop" style="z-index:60;">
       <div class="modal">
-        <h3>Checklist required to close</h3>
-        <div class="modal-sub">${team.name} team checklist for "${t.title||'this task'}" — tick every point before it can close.</div>
-        <div style="display:flex;flex-direction:column;gap:10px;margin:14px 0;">
-          ${items.map(it=>`<label style="display:flex;align-items:flex-start;gap:10px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;"><input type="checkbox" class="clGateCheck" value="${it.id}" style="margin-top:2px;"> <span>${it.text}</span></label>`).join('')}
+        <h3>Before closing this task</h3>
+        <div class="modal-sub">${team.name}'s checklist for "${t.title||'this task'}" — keep these in mind:</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin:14px 0;">
+          ${items.map(it=>`<div style="font-size:13px;color:var(--paper-dim);display:flex;gap:8px;align-items:flex-start;"><span style="color:var(--amber);">✓</span><span>${it.text}</span></div>`).join('')}
         </div>
-        <div class="hint" id="clGateHint">0 of ${items.length} checked</div>
+        <label style="display:flex;align-items:flex-start;gap:10px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-top:6px;">
+          <input type="checkbox" id="clGateSingleCheck" style="margin-top:2px;">
+          <span>I confirm this task was completed keeping the above in mind.</span>
+        </label>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="clGateCancel">Cancel</button>
           <button type="button" class="btn btn-primary" id="clGateConfirm" disabled>Confirm &amp; close task</button>
@@ -2717,16 +2848,9 @@ function openChecklistGateModal(t, team, items, onComplete){
       </div>
     </div>`;
   document.body.appendChild(div);
-  const checks = div.querySelectorAll('.clGateCheck');
-  const hint = div.querySelector('#clGateHint');
+  const singleCheck = div.querySelector('#clGateSingleCheck');
   const confirmBtn = div.querySelector('#clGateConfirm');
-  const updateState = ()=>{
-    const checkedCount = Array.from(checks).filter(c=>c.checked).length;
-    hint.textContent = `${checkedCount} of ${items.length} checked`;
-    confirmBtn.disabled = checkedCount !== items.length;
-  };
-  checks.forEach(c=>c.addEventListener('change', updateState));
-  updateState();
+  singleCheck.addEventListener('change', ()=>{ confirmBtn.disabled = !singleCheck.checked; });
   div.querySelector('#clGateCancel').addEventListener('click', ()=> div.remove());
   confirmBtn.addEventListener('click', ()=>{
     if(confirmBtn.disabled) return;
@@ -3325,7 +3449,7 @@ function renderAdminProjects(){
       <td class="mono" style="font-size:12px;">${fmtDate(p.startDate)}</td>
       <td class="mono" style="font-size:12px;">${projectTasks(p.id).length} tasks</td>
       <td>${pill(tl.isRed?'red':'green', tl.isRed?'Delayed':'On track')}</td>
-      <td><div class="row-actions"><button class="btn btn-sm" data-open-project="${p.id}">Open</button><button class="btn btn-sm btn-danger" data-del-project="${p.id}" data-project-name="${p.name.replace(/"/g,'&quot;')}" data-task-count="${projectTasks(p.id).length}">Delete</button></div></td>
+      <td><div class="row-actions"><button class="btn btn-sm" data-open-project="${p.id}">Open</button><button class="btn btn-sm btn-ghost" data-edit-project="${p.id}">Edit</button><button class="btn btn-sm btn-danger" data-del-project="${p.id}" data-project-name="${p.name.replace(/"/g,'&quot;')}" data-task-count="${projectTasks(p.id).length}">Delete</button></div></td>
     </tr>`;
   }).join('');
   return `
@@ -3351,7 +3475,12 @@ function bindAdmin(){
     });
   });
   document.querySelectorAll('[data-del-user]').forEach(b=>b.addEventListener('click', ()=>{
-    state.users = state.users.filter(u=>u.id!==b.dataset.delUser); persist(); render();
+    const u = state.users.find(x=>x.id===b.dataset.delUser);
+    const name = u ? u.name : 'this user';
+    openConfirmDelete('Remove this user?', `This will permanently remove "${name}"'s account. They will no longer be able to log in. This can't be undone.`, ()=>{
+      state.users = state.users.filter(x=>x.id!==b.dataset.delUser);
+      persist(); render();
+    }, 'Remove');
   }));
   document.querySelectorAll('[data-view-creds]').forEach(b=>b.addEventListener('click', ()=>{
     const u = state.users.find(x=>x.id===b.dataset.viewCreds);
@@ -3377,9 +3506,13 @@ function bindAdmin(){
   const addTeam = document.querySelector('[data-add-team]');
   if(addTeam) addTeam.addEventListener('click', openAddTeamModal);
   document.querySelectorAll('[data-del-team]').forEach(b=>b.addEventListener('click', ()=>{
-    state.teams = state.teams.filter(t=>t.id!==b.dataset.delTeam);
-    state.users.forEach(u=>{ if(u.teamId===b.dataset.delTeam) u.teamId=null; });
-    persist(); render();
+    const tm = state.teams.find(x=>x.id===b.dataset.delTeam);
+    const name = tm ? tm.name : 'this team';
+    openConfirmDelete('Remove this team?', `This will permanently remove "${name}". Members assigned to it will become unassigned. This can't be undone.`, ()=>{
+      state.teams = state.teams.filter(x=>x.id!==b.dataset.delTeam);
+      state.users.forEach(u=>{ if(u.teamId===b.dataset.delTeam) u.teamId=null; });
+      persist(); render();
+    }, 'Remove');
   }));
   document.querySelectorAll('[data-manage-checklist]').forEach(b=>b.addEventListener('click', ()=>{
     openManageChecklistModal(b.dataset.manageChecklist);
@@ -3387,9 +3520,40 @@ function bindAdmin(){
 
   const addProject = document.querySelector('[data-add-project]');
   if(addProject) addProject.addEventListener('click', openAddProjectModal);
+  document.querySelectorAll('[data-edit-project]').forEach(b=>b.addEventListener('click', ()=>{
+    openEditProjectModal(b.dataset.editProject);
+  }));
   document.querySelectorAll('[data-del-project]').forEach(b=>b.addEventListener('click', ()=>{
     openDeleteProjectModal(b.dataset.delProject, b.dataset.projectName, b.dataset.taskCount);
   }));
+}
+
+function openEditProjectModal(projectId){
+  if(!isAdmin()) return;
+  const p = state.projects.find(x=>x.id===projectId);
+  if(!p) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Edit workstream</h3>
+        <form id="editProjForm">
+          <div class="field"><label>Workstream name</label><input id="epName" value="${p.name.replace(/"/g,'&quot;')}" required></div>
+          <div class="field"><label>Description</label><textarea id="epDescription" placeholder="Why this workstream exists, what it's for...">${(p.description||'').replace(/</g,'&lt;')}</textarea></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="epSubmitBtn" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('editProjForm', 'epSubmitBtn', ()=>{
+    const nameEl = document.getElementById('epName');
+    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    p.name = nameEl.value.trim();
+    p.description = document.getElementById('epDescription').value.trim();
+    persist(); closeModal(); render();
+  });
 }
 
 function openDeleteProjectModal(projectId, projectName, taskCount){
@@ -3629,8 +3793,12 @@ function openManageChecklistModal(teamId){
   const rerender = ()=>{ closeModal(); openManageChecklistModal(teamId); };
   document.querySelectorAll('[data-remove-cl-item]').forEach(b=>{
     b.addEventListener('click', ()=>{
-      t.checklist = t.checklist.filter(i=>i.id!==b.dataset.removeClItem);
-      rerender();
+      const item = t.checklist.find(i=>i.id===b.dataset.removeClItem);
+      const label = item ? item.text : 'this item';
+      openConfirmDelete('Remove this checklist item?', `This will permanently remove "${label}" from ${t.name}'s checklist. This can't be undone.`, ()=>{
+        t.checklist = t.checklist.filter(i=>i.id!==b.dataset.removeClItem);
+        rerender();
+      }, 'Remove');
     });
   });
   document.getElementById('clAddBtn').addEventListener('click', ()=>{
@@ -3659,6 +3827,7 @@ function openAddProjectModal(){
         <form id="projForm">
           <div class="field"><label>Workstream name</label><input id="pName" required></div>
           <div class="field"><label>Start date</label><input type="date" id="pStart" value="${todayISO()}" required></div>
+          <div class="field"><label>Description (optional)</label><textarea id="pDescription" placeholder="Why this workstream exists, what it's for..."></textarea></div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:6px 0;"><input type="checkbox" id="pRequireChecklist"> Require each team's checklist before tasks can be closed</label>
           <div class="hint">If on, anyone closing a task here has to tick their team's checklist points first (set those up under Admin → Teams). Leave off for workstreams that don't need it.</div>
           <div class="modal-actions">
@@ -3673,7 +3842,7 @@ function openAddProjectModal(){
     const nameEl = document.getElementById('pName');
     const startEl = document.getElementById('pStart');
     if(!nameEl.value.trim() || !startEl.value){ (nameEl.value.trim()?startEl:nameEl).focus(); return; }
-    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked };
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim() };
     state.projects.push(p); persist(); closeModal();
     ui.projectId = p.id; ui.view='project'; render();
   });

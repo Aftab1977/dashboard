@@ -339,6 +339,8 @@
   .heading-card{border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px;}
   .heading-card:first-child{border-top:none;padding-top:0;margin-top:0;}
   .heading-name{font-family:var(--f-display);font-size:16px;font-weight:600;}
+  .hcontent.collapsed{display:none;}
+  .collapse-arrow{display:inline-block;color:var(--paper-faint);font-size:11px;width:10px;transition:transform .15s;}
   .drag-handle{cursor:grab;color:var(--paper-faint);font-size:16px;line-height:1;user-select:none;}
   .drag-handle:active{cursor:grabbing;}
   .drag-node.dragging{opacity:.4;}
@@ -1725,27 +1727,35 @@ function renderContentItem(it, headingId){
 
 // Renders a Heading (or Sub Heading) and everything nested inside it — its own content
 // items, plus any Sub Headings underneath, recursively.
-function renderHeadingCard(h, depth, showHandle){
+// A Heading shown on its parent Module/Feature page — always a simple clickable box
+// that navigates to the Heading's own dedicated page (or its special sheet, if it has
+// one). Never expands inline here.
+function renderHeadingBox(h, showHandle){
+  const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : h.specialView==='appraisal' ? 'Appraisal sheet — click to open' : null;
+  const cnt = (h.contentItems||[]).length + featureChildren(h.id).length;
+  const subtitle = h.description ? h.description : (label || (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet'));
   const handle = (showHandle && isAdmin()) ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : '';
-  if(h.specialView){
-    const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : h.specialView==='appraisal' ? 'Appraisal sheet — click to open' : 'Click to open';
-    return `
-    <div class="heading-card" style="margin-left:${depth*20}px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+  return `
+    <div class="card drag-node" style="margin-bottom:14px;" ${isAdmin()?`draggable="true" data-drag-node="${h.id}"`:''}>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
         <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
           ${handle}
           <div>
             <div class="heading-name">${h.name}</div>
-            <div class="muted" style="font-size:12px;margin-top:2px;">${h.description || label}</div>
+            <div class="muted" style="font-size:12px;margin-top:2px;">${subtitle}</div>
           </div>
         </div>
-        ${isAdmin() ? `<div class="row-actions">
+        ${isAdmin() ? `<div style="display:flex;gap:8px;">
           <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${h.id}" title="Rename or add a description">✎</button>
           <button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>
         </div>` : ''}
       </div>
     </div>`;
-  }
+}
+
+// A Sub Heading, rendered inline within its ancestor Heading's own page — always
+// collapsible, recursively, however deep it goes.
+function renderSubHeadingCollapsible(h, depth){
   const items = h.contentItems || [];
   const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading');
   const itemsHtml = items.map(it=>`
@@ -1756,7 +1766,10 @@ function renderHeadingCard(h, depth, showHandle){
   return `
     <div class="heading-card" style="margin-left:${depth*20}px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <div style="display:flex;align-items:center;gap:8px;">${handle}<div class="heading-name">${h.name}</div></div>
+        <div data-toggle-heading="${h.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
+          <span id="harrow-${h.id}" class="collapse-arrow">▸</span>
+          <div class="heading-name">${h.name}</div>
+        </div>
         ${isAdmin() ? `<div class="row-actions">
           <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
           <button class="btn btn-sm btn-ghost" data-add-subheading="${h.id}">+ Add sub heading</button>
@@ -1764,9 +1777,40 @@ function renderHeadingCard(h, depth, showHandle){
           <button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>
         </div>` : ''}
       </div>
-      <div style="margin-top:8px;">${itemsHtml || '<div class="muted" style="font-size:12px;">No content yet.</div>'}</div>
-      ${subHeadings.map(sh=>renderHeadingCard(sh, depth+1, false)).join('')}
+      <div id="hcontent-${h.id}" class="hcontent collapsed" style="margin-top:8px;">
+        ${itemsHtml || '<div class="muted" style="font-size:12px;">No content yet.</div>'}
+        ${subHeadings.map(sh=>renderSubHeadingCollapsible(sh, depth+1)).join('')}
+      </div>
     </div>`;
+}
+
+// The body of a Heading's own dedicated page — its own direct content is collapsible
+// too (consistent with Sub Headings), followed by each Sub Heading, also collapsible.
+function renderHeadingPageBody(h){
+  const items = h.contentItems || [];
+  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading');
+  const itemsHtml = items.map(it=>`
+    <div style="position:relative;">
+      ${renderContentItem(it, h.id)}
+      ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
+    </div>`).join('');
+  return `
+    ${isAdmin() ? `<div class="row-actions" style="margin-bottom:16px;">
+      <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
+      <button class="btn btn-sm btn-ghost" data-add-subheading="${h.id}">+ Add sub heading</button>
+    </div>` : ''}
+    ${items.length ? `
+    <div class="heading-card" style="margin-left:0;">
+      <div data-toggle-heading="${h.id}_own" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
+        <span id="harrow-${h.id}_own" class="collapse-arrow">▸</span>
+        <div class="heading-name">Content</div>
+      </div>
+      <div id="hcontent-${h.id}_own" class="hcontent collapsed" style="margin-top:8px;">
+        ${itemsHtml}
+      </div>
+    </div>` : ''}
+    ${subHeadings.map(sh=>renderSubHeadingCollapsible(sh, 0)).join('')}
+  `;
 }
 
 function renderFeatureNode(){
@@ -1784,7 +1828,7 @@ function renderFeatureNode(){
     return `
       <div class="eyebrow">${node.nodeType==='heading'?'Heading':'Sub Heading'}</div>
       <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
-      <div class="card">${renderHeadingCard(node, 0)}</div>
+      <div class="card">${renderHeadingPageBody(node)}</div>
     `;
   }
 
@@ -1813,11 +1857,12 @@ function renderFeatureNode(){
     </div>`;
   }).join('');
 
-  const headingCards = headings.map(h=>`<div class="card drag-node" style="margin-bottom:14px;" ${isAdmin()?`draggable="true" data-drag-node="${h.id}"`:''}>${renderHeadingCard(h,0,true)}</div>`).join('');
+  const headingCards = headings.map(h=>renderHeadingBox(h, true)).join('');
 
   return `
     <div class="eyebrow">${node.parentId ? 'Feature' : 'Module'}</div>
     <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
+    ${(isAdmin() && ['feat_kr','feat_fai','feat_hr'].includes(node.id)) ? `<button class="btn btn-primary btn-sm" style="margin-bottom:20px;" data-add-heading-only="${node.id}">+ Add Heading</button>` : ''}
     ${subFeatureBoxes}
     ${headingCards}
     ${(!subFeatures.length && !headings.length) ? `<div class="empty-state"><div class="et">Nothing here yet</div></div>` : ''}
@@ -1836,6 +1881,9 @@ function bindFeatureNode(){
   }
   document.querySelectorAll('[data-open-feature]').forEach(el=>{
     el.addEventListener('click', ()=>{ ui.featureNodeId = el.dataset.openFeature; render(); });
+  });
+  document.querySelectorAll('[data-add-heading-only]').forEach(el=>{
+    el.addEventListener('click', ()=> openNameNodeModal(el.dataset.addHeadingOnly, 'heading'));
   });
   document.querySelectorAll('[data-add-content]').forEach(el=>{
     el.addEventListener('click', ()=> openAddContentModal(el.dataset.addContent));
@@ -1867,6 +1915,16 @@ function bindFeatureNode(){
     el.addEventListener('click', ()=>{
       const [headingId, itemId] = el.dataset.openContentItem.split('|');
       openContentItemPreviewModal(headingId, itemId);
+    });
+  });
+  document.querySelectorAll('[data-toggle-heading]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const id = el.dataset.toggleHeading;
+      const content = document.getElementById('hcontent-'+id);
+      const arrow = document.getElementById('harrow-'+id);
+      if(!content) return;
+      const nowCollapsed = content.classList.toggle('collapsed');
+      if(arrow) arrow.textContent = nowCollapsed ? '▸' : '▾';
     });
   });
   bindDragReorder();
@@ -1969,6 +2027,7 @@ function openNameNodeModal(parentId, nodeType){
         <h3>Create ${label}</h3>
         <form id="nodeNameForm">
           <div class="field"><label>Name</label><input id="nodeNameInput" required></div>
+          <div class="field"><label>Description (optional)</label><textarea id="nodeDescInput" placeholder="What is this for?"></textarea></div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="nodeNameSubmitBtn" class="btn btn-primary">Create</button>
@@ -1981,7 +2040,7 @@ function openNameNodeModal(parentId, nodeType){
     const nameEl = document.getElementById('nodeNameInput');
     if(!nameEl.value.trim()){ nameEl.focus(); return; }
     const trimmedName = nameEl.value.trim();
-    const node = { id: uid('node'), name: trimmedName, nodeType, parentId, order: nextOrderFor(parentId), contentItems: [], description:'',
+    const node = { id: uid('node'), name: trimmedName, nodeType, parentId, order: nextOrderFor(parentId), contentItems: [], description: document.getElementById('nodeDescInput').value.trim(),
       specialView: (nodeType==='heading' && trimmedName.toLowerCase()==='attendance') ? 'attendance' : null };
     state.featureNodes.push(node);
     persist(); closeModal(); render();

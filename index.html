@@ -345,6 +345,16 @@
   .drag-handle:active{cursor:grabbing;}
   .drag-node.dragging{opacity:.4;}
   .drag-node.drag-over{outline:2px dashed var(--amber);outline-offset:2px;}
+  .ms-dropdown{position:relative;width:100%;}
+  .ms-toggle{width:100%;display:flex;justify-content:space-between;align-items:center;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;font-family:var(--f-body);cursor:pointer;}
+  .ms-toggle:hover{border-color:var(--paper-faint);}
+  .ms-caret{color:var(--paper-faint);font-size:11px;}
+  .ms-panel{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);padding:8px;}
+  .ms-search{width:100%;box-sizing:border-box;background:var(--panel-raised);border:1px solid var(--line-soft);border-radius:6px;padding:7px 10px;color:var(--paper);font-size:12px;margin-bottom:6px;}
+  .ms-options{max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .ms-option{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;padding:6px 8px;border-radius:6px;cursor:pointer;}
+  .ms-option:hover{background:var(--panel-hi);}
+  .access-tree-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;padding:4px 0;cursor:pointer;}
   .content-item{background:var(--panel-raised);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-top:8px;}
   .ci-title{font-size:12px;font-weight:600;color:var(--paper);margin-bottom:3px;}
   .ci-text{font-size:13px;color:var(--paper-dim);line-height:1.6;}
@@ -546,6 +556,7 @@ function initials(name){ return name.split(' ').map(w=>w[0]).join('').slice(0,2)
 //     this is live, no button needed, and once it's happened it stays true even
 //     after the task later closes (admins can always amend the record via "Amend timeline").
 function isTaskDelayed(t){
+  if(t.deadlineDisabled) return false;
   if(t.extended) return true;
   if(t.status==='closed'){
     return !!(t.closedDate && t.originalEndDate && t.closedDate > t.originalEndDate);
@@ -622,6 +633,10 @@ function seedState(){
     {id:'t6', projectId:p2, title:'Vendor Docs Checklist', description:'Collect W-9s, insurance certs and banking details.', reason:'Two days to chase paperwork from three vendors.', assignedType:'user', assignedId:'u_meera', predecessorId:null, startDate:addDays(todayISO(),-5), endDate:addDays(todayISO(),-3), originalEndDate:addDays(todayISO(),-3), extended:false, blockedByTeamId:null, status:'closed', closedDate:addDays(todayISO(),-4), datesLocked:true, extensionHistory:[]},
     {id:'t7', projectId:p2, title:'Portal Access Setup', description:'Provision vendor logins to the procurement portal.', reason:'', assignedType:'user', assignedId:'u_arjun', predecessorId:'t6', startDate:addDays(todayISO(),-3), endDate:addDays(todayISO(),2), originalEndDate:addDays(todayISO(),2), extended:false, blockedByTeamId:null, status:'open', closedDate:null, datesLocked:true, extensionHistory:[]},
   ];
+  tasks.forEach(t=>{
+    const proj = projects.find(p=>p.id===t.projectId);
+    t.checklistRequired = !!(proj && proj.requireChecklist);
+  });
 
   const featureNodes = [
     {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
@@ -635,7 +650,7 @@ function seedState(){
     {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
   ];
 
-  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 } };
+  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 }, userAccess: {} };
 }
 
 function withTimeout(promise, ms){
@@ -734,6 +749,18 @@ function normalizeState(s){
   if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
+  if(!s.userAccess || typeof s.userAccess !== 'object' || Array.isArray(s.userAccess)) s.userAccess = {};
+  // Tasks saved before the per-task checklist toggle existed relied entirely on the
+  // workstream's own setting — carry that over as their starting value so closing
+  // behavior doesn't silently change for anything already in progress.
+  if(Array.isArray(s.tasks) && Array.isArray(s.projects)){
+    s.tasks.forEach(t=>{
+      if(typeof t.checklistRequired !== 'boolean'){
+        const proj = s.projects.find(p=>p.id===t.projectId);
+        t.checklistRequired = !!(proj && proj.requireChecklist);
+      }
+    });
+  }
   return s;
 }
 
@@ -900,6 +927,9 @@ function accessibleProjectIds(){
       ids.add(t.projectId);
     }
   });
+  state.projects.forEach(p=>{
+    if(Array.isArray(p.taggedUserIds) && p.taggedUserIds.includes(u.id)) ids.add(p.id);
+  });
   return Array.from(ids);
 }
 function visibleProjects(){
@@ -909,6 +939,12 @@ function visibleProjects(){
 function canAccessProject(projectId){
   const ids = accessibleProjectIds();
   return ids===null || ids.includes(projectId);
+}
+function isTaggedToProject(projectId){
+  const u = currentUser();
+  const p = state.projects.find(x=>x.id===projectId);
+  if(!u || !p) return false;
+  return Array.isArray(p.taggedUserIds) && p.taggedUserIds.includes(u.id);
 }
 // Admins and members can always see Active Assignments (members are limited to their
 // own row there — see renderAssignments). Viewers only get it if an admin switched it on.
@@ -1131,11 +1167,11 @@ function breadcrumb(){
 
 function renderView(){
   if(ui.view==='home') return renderFocusAreaHome();
-  if(ui.view==='portfolio') return renderPortfolio();
+  if(ui.view==='portfolio') return canSeeNode('feat_workstream') ? renderPortfolio() : renderFocusAreaHome();
   if(ui.view==='project') return renderProject();
-  if(ui.view==='assignments') return canSeeAssignmentsPage() ? renderAssignments() : renderFocusAreaHome();
-  if(ui.view==='reports') return renderReports();
-  if(ui.view==='feature') return renderFeatureNode();
+  if(ui.view==='assignments') return (canSeeAssignmentsPage() && canSeeNode('feat_assignments')) ? renderAssignments() : renderFocusAreaHome();
+  if(ui.view==='reports') return canSeeNode('feat_reports') ? renderReports() : renderFocusAreaHome();
+  if(ui.view==='feature') return canSeeNode(ui.featureNodeId) ? renderFeatureNode() : renderFocusAreaHome();
   if(ui.view==='admin') return isAdmin() ? renderAdmin() : renderFocusAreaHome();
   return '';
 }
@@ -1411,10 +1447,30 @@ function featureNodePath(id){
   while(cur){ path.unshift(cur); cur = cur.parentId ? featureNode(cur.parentId) : null; }
   return path;
 }
-// Access control for the tree is deferred (per plan) — everyone logged in sees all
-// root Features for now. This is the one place that will change once access rules exist.
+// A node is explicitly granted if it's in this user's own access list.
+function hasDirectNodeAccess(userId, nodeId){
+  const arr = (state.userAccess && state.userAccess[userId]) || [];
+  return arr.includes(nodeId);
+}
+// A node should be visible if it's directly granted, OR if something granted lives
+// underneath it — otherwise a granted Sub Heading would be unreachable because its
+// parent Module/Feature/Heading was never itself ticked.
+function hasNodeAccessOrDescendant(userId, nodeId){
+  if(hasDirectNodeAccess(userId, nodeId)) return true;
+  return featureChildren(nodeId).some(child => hasNodeAccessOrDescendant(userId, child.id));
+}
+// The single check to use anywhere a node's visibility matters — admins always pass.
+function canSeeNode(nodeId){
+  if(isAdmin()) return true;
+  const cu = currentUser();
+  if(!cu) return false;
+  return hasNodeAccessOrDescendant(cu.id, nodeId);
+}
+// Root Modules a non-admin can see at all — new Modules are invisible to everyone
+// until explicitly granted, by construction (they simply won't be in anyone's list yet).
 function rootFeatureNodesVisible(){
-  return state.featureNodes.filter(n=>n.parentId===null).sort((a,b)=>(a.order||0)-(b.order||0));
+  const roots = state.featureNodes.filter(n=>n.parentId===null).sort((a,b)=>(a.order||0)-(b.order||0));
+  return roots.filter(n=>canSeeNode(n.id));
 }
 function nextOrderFor(parentId){
   const sibs = featureChildren(parentId);
@@ -1432,7 +1488,7 @@ function deleteNodeCascade(nodeId){
 
 /* ============================== ATTENDANCE SHEET (special Heading view) ============================== */
 
-const ATT_STATUS = { P:{label:'Present',color:'#33A85C'}, L:{label:'Leave',color:'#E0AC3F'}, WFH:{label:'Work from home',color:'#7EB6E0'}, NS:{label:'No show',color:'#D9534F'} };
+const ATT_STATUS = { P:{label:'Present',color:'#33A85C'}, L:{label:'Leave',color:'#E0AC3F'}, WFH:{label:'Work from home',color:'#7EB6E0'}, NS:{label:'No show',color:'#D9534F'}, H:{label:'Holiday',color:'#B58FD6'} };
 
 function attendanceKey(userId, date){ return userId+'|'+date; }
 function getAttendance(userId, date){ return state.attendance[attendanceKey(userId,date)] || null; }
@@ -1529,7 +1585,7 @@ function bindAttendanceSheet(){
     el.addEventListener('click', ()=>{
       const [userId,date] = el.dataset.attWeekday.split('|');
       const cur = getAttendance(userId,date);
-      const cycle = ['','P','L','WFH','NS'];
+      const cycle = ['','P','L','WFH','NS','H'];
       const next = cycle[(cycle.indexOf(cur||'')+1) % cycle.length];
       setAttendanceValue(userId,date, next || null);
       persist(); render();
@@ -1628,7 +1684,7 @@ function renderAppraisalSheet(node){
     `;
   }
   const rows = state.users.filter(u=>u.role!=='viewer');
-  const cols = ['Designation','DOJ','Tenure','Current Salary','Last Appraisal Date','Last Increase %','Comments','Current Recommendations','New Salary'];
+  const cols = ['Designation','DOJ','Tenure','Current Salary','Last Appraisal Date','Last Increase %','Current Recommendations','New Salary','Comments'];
 
   const bodyRows = rows.map(u=>{
     const rec = state.appraisal[u.id] || {};
@@ -1645,9 +1701,9 @@ function renderAppraisalSheet(node){
         <td class="appraisal-cell mono">${rec.currentSalary!=null?fmtMoney(rec.currentSalary):''}</td>
         <td class="appraisal-cell mono${overdue?' appraisal-overdue':''}">${lastDateCell}</td>
         <td class="appraisal-cell mono">${rec.lastIncreasePct!=null?rec.lastIncreasePct+'%':''}</td>
-        <td class="appraisal-cell">${rec.comments||''}</td>
         <td class="appraisal-cell">${rec.recommendations||''}</td>
         <td class="appraisal-cell mono">${rec.newSalary!=null?fmtMoney(rec.newSalary):''}</td>
+        <td class="appraisal-cell">${rec.comments||''}</td>
       </tr>`;
   }).join('');
 
@@ -1757,7 +1813,7 @@ function renderHeadingBox(h, showHandle){
 // collapsible, recursively, however deep it goes.
 function renderSubHeadingCollapsible(h, depth){
   const items = h.contentItems || [];
-  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading');
+  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading' && canSeeNode(c.id));
   const itemsHtml = items.map(it=>`
     <div style="position:relative;">
       ${renderContentItem(it, h.id)}
@@ -1788,7 +1844,7 @@ function renderSubHeadingCollapsible(h, depth){
 // too (consistent with Sub Headings), followed by each Sub Heading, also collapsible.
 function renderHeadingPageBody(h){
   const items = h.contentItems || [];
-  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading');
+  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading' && canSeeNode(c.id));
   const itemsHtml = items.map(it=>`
     <div style="position:relative;">
       ${renderContentItem(it, h.id)}
@@ -1833,8 +1889,8 @@ function renderFeatureNode(){
   }
 
   const children = featureChildren(node.id);
-  const subFeatures = children.filter(c=>c.nodeType==='feature'||c.nodeType==='subfeature');
-  const headings = children.filter(c=>c.nodeType==='heading');
+  const subFeatures = children.filter(c=>(c.nodeType==='feature'||c.nodeType==='subfeature') && canSeeNode(c.id));
+  const headings = children.filter(c=>c.nodeType==='heading' && canSeeNode(c.id));
 
   const subFeatureBoxes = subFeatures.map(sf=>{
     const cnt = featureChildren(sf.id).length;
@@ -2236,13 +2292,14 @@ function renderProject(){
     const nodes = chain.map((t,i)=>{
       const color = t.status==='closed' ? 'green' : 'red';
       const dur = taskDuration(t, true);
+      const durLabel = t.deadlineDisabled ? 'no deadline' : `${dur}d`;
       const lu = t.lastUpdated;
       const luText = lu ? `Updated by ${lu.byName} at ${fmtDateTime(lu.at)}` : 'Not yet updated';
       return `
         ${i>0 ? '<div class="rail-connector"></div>' : ''}
         <div class="rail-node ${color}" data-task-node="${t.id}" style="cursor:pointer;">
           <span class="nt">${t.title || 'Untitled task'}</span>
-          <span class="nd">${entityName(t.assignedType,t.assignedId)} · ${dur}d</span>
+          <span class="nd">${entityName(t.assignedType,t.assignedId)} · ${durLabel}</span>
           <span class="nu">${luText}</span>
         </div>`;
     }).join('');
@@ -2293,17 +2350,19 @@ function renderProject(){
       </td>
       <td>${entityName(t.assignedType,t.assignedId)}</td>
       <td class="date-pair">
-        ${fmtDate(t.startDate)} →
+        ${t.deadlineDisabled
+          ? `${fmtDate(t.startDate)} <span class="muted" style="font-size:11px;">— no deadline</span>`
+          : `${fmtDate(t.startDate)} →
         ${t.extended
           ? `<span class="strike">${fmtDate(t.originalEndDate)}</span> <span class="ext">${fmtDate(t.endDate)}</span>`
-          : (isTaskDelayed(t) ? `<span class="ext">${fmtDate(t.endDate)}</span>` : fmtDate(t.endDate))}
+          : (isTaskDelayed(t) ? `<span class="ext">${fmtDate(t.endDate)}</span>` : fmtDate(t.endDate))}`}
         ${t.status==='closed' && t.closedDate ? `<div class="orig" style="margin-top:4px;">Closed ${fmtDate(t.closedDate)}</div>` : ''}
       </td>
       <td>${pill(color, color==='green' ? (t.status==='closed'?'Closed on time':'On track') : color==='red' ? (t.extended?'Extended':(t.status==='closed'?'Closed late':'Overdue')) : 'Open')}</td>
       <td>
         <div class="row-actions">
           ${canEdit ? `<button class="btn btn-sm" data-edit-task="${t.id}">Edit</button>` : ''}
-          ${canEdit && t.status!=='closed' ? `<button class="btn btn-sm btn-danger" data-extend-task="${t.id}">Extend date</button>` : ''}
+          ${canEdit && t.status!=='closed' && !t.deadlineDisabled ? `<button class="btn btn-sm btn-danger" data-extend-task="${t.id}">Extend date</button>` : ''}
           ${canEdit && t.status!=='closed' ? (blockedTeamName
               ? `<button class="btn btn-sm" data-clear-blocker="${t.id}" style="background:var(--amber-soft);color:var(--amber);border-color:rgba(224,172,63,.35);">Clear blocker</button>`
               : `<button class="btn btn-sm" data-set-blocker="${t.id}">Blocker</button>`) : ''}
@@ -2380,7 +2439,7 @@ function renderProject(){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div class="section-title" style="margin-bottom:0;">Tasks</div>
         <div style="display:flex;gap:8px;">
-          ${isAdmin() ? `<button class="btn btn-sm" data-add-task>+ Add blank task</button>` : ''}
+          ${(isAdmin() || isTaggedToProject(p.id)) ? `<button class="btn btn-sm" data-add-task>+ Add blank task</button>` : ''}
           <button class="btn btn-sm btn-ghost" data-view-report>Open in reports</button>
         </div>
       </div>
@@ -2479,15 +2538,17 @@ function predecessorOptions(projectId, excludeId, selected){
 function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
 function openBlankTaskModal(projectId){
-  if(!isAdmin()) return;
+  const admin = isAdmin();
+  const cu = currentUser();
+  if(!admin && !isTaggedToProject(projectId)) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
         <h3>New task</h3>
-        <div class="modal-sub">Create a blank slot and assign it — the team fills in the rest.</div>
+        <div class="modal-sub">${admin ? 'Create a blank slot and assign it — the team fills in the rest.' : 'This task will be assigned to you — fill in the rest once it is created.'}</div>
         <form id="blankTaskForm">
           <div class="field"><label>Title</label><input id="btTitle" required placeholder="e.g. Payment gateway integration"></div>
-          <div class="field"><label>Assign to</label><select id="btAssignee">${assigneeOptions()}</select></div>
+          ${admin ? `<div class="field"><label>Assign to</label><select id="btAssignee">${assigneeOptions()}</select></div>` : ''}
           <div class="field"><label>Depends on</label><select id="btPredecessor">${predecessorOptions(projectId,null,null)}</select><div class="hint">If this task can't start until another finishes, pick it here — durations chain together.</div></div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
@@ -2500,13 +2561,15 @@ function openBlankTaskModal(projectId){
   runOnClickAndEnter('blankTaskForm', 'btSubmitBtn', ()=>{
     const titleEl = document.getElementById('btTitle');
     if(!titleEl.value.trim()){ titleEl.focus(); return; }
-    const [type,id] = document.getElementById('btAssignee').value.split(':');
+    const [type,id] = admin ? document.getElementById('btAssignee').value.split(':') : ['user', cu.id];
+    const proj = state.projects.find(p=>p.id===projectId);
     const t = {
       id: uid('t'), projectId, title: titleEl.value.trim(),
       description:'', reason:'', assignedType:type, assignedId:id,
       predecessorId: document.getElementById('btPredecessor').value || null,
       startDate:'', endDate:'', originalEndDate:'', extended:false, blockedByTeamId:null, status:'open', closedDate:null,
-      datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[], lastUpdated:null, blockerReason:null
+      datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[], lastUpdated:null, blockerReason:null, deadlineDisabled:false,
+      checklistRequired: !!(proj && proj.requireChecklist)
     };
     state.tasks.push(t); persist(); closeModal(); render();
   });
@@ -2534,7 +2597,7 @@ function openWorkstreamInfoModal(projectId){
         <div style="font-weight:600;font-size:14px;color:var(--paper);">${i+1}. ${t.title || 'Untitled task'} <span class="muted" style="font-weight:400;font-size:12px;">— ${entityName(t.assignedType,t.assignedId)}</span></div>
         <div class="hint" style="margin-top:4px;">${t.description || 'No description yet.'}</div>
         ${t.reason ? `<div class="hint" style="margin-top:4px;"><b style="color:var(--paper-dim);">Why this much time:</b> ${t.reason}</div>` : ''}
-        <div class="hint" style="margin-top:4px;">${t.startDate ? `${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}` : 'Timeline not set yet'}${t.extended ? ` <span style="color:var(--red);">extended to ${fmtDate(t.endDate)}</span>` : ''}</div>
+        <div class="hint" style="margin-top:4px;">${t.deadlineDisabled ? (t.startDate ? fmtDate(t.startDate)+' — no deadline' : 'Timeline not set yet') : `${t.startDate ? `${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}` : 'Timeline not set yet'}${t.extended ? ` <span style="color:var(--red);">extended to ${fmtDate(t.endDate)}</span>` : ''}`}</div>
         ${extensionHtml}
         ${blockerHtml}
         <div class="hint" style="margin-top:4px;">${t.status==='closed' ? 'Closed on '+fmtDate(t.closedDate) : 'Open'}</div>
@@ -2569,11 +2632,11 @@ function openTaskDetailsModal(taskId){
         <div class="field"><label>Reason — why this much time?</label><div class="hint">${t.reason || 'No reason given yet.'}</div></div>
 
         <div class="field-row">
-          <div class="field"><label>Agreed timeline</label><div class="hint">${t.startDate ? `${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}` : 'Not set yet'}</div></div>
-          ${t.extended ? `<div class="field"><label>Extended to</label><div class="hint" style="color:var(--red);">${fmtDate(t.endDate)}</div></div>` : ''}
+          <div class="field"><label>${t.deadlineDisabled ? 'Start date' : 'Agreed timeline'}</label><div class="hint">${t.startDate ? (t.deadlineDisabled ? fmtDate(t.startDate) : `${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}`) : 'Not set yet'}</div></div>
+          ${(t.extended && !t.deadlineDisabled) ? `<div class="field"><label>Extended to</label><div class="hint" style="color:var(--red);">${fmtDate(t.endDate)}</div></div>` : ''}
         </div>
 
-        ${t.extensionHistory && t.extensionHistory.length ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
+        ${(t.extensionHistory && t.extensionHistory.length && !t.deadlineDisabled) ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
 
         <div class="field"><label>Status</label><div class="hint">${t.status==='closed' ? 'Closed on '+fmtDate(t.closedDate) : 'Open'}</div></div>
 
@@ -2612,20 +2675,20 @@ function openTaskModal(taskId){
           ${firstTimeSave ? `
           <div class="field-row">
             <div class="field"><label>Start date</label><input type="date" id="tfStart" value="${t.startDate}" required></div>
-            <div class="field"><label>End date (agreed)</label><input type="date" id="tfEnd" value="${t.endDate}" required></div>
+            <div class="field" id="tfEndField" style="${t.deadlineDisabled?'display:none;':''}"><label>End date (agreed)</label><input type="date" id="tfEnd" value="${t.endDate}" ${t.deadlineDisabled?'disabled':'required'}></div>
           </div>
-          <div class="hint" id="tfDateHint">${dateRangeHint(t.startDate,t.endDate)}</div>
+          <div class="hint" id="tfDateHint" style="${t.deadlineDisabled?'display:none;':''}">${dateRangeHint(t.startDate,t.endDate)}</div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:10px 0 4px;"><input type="checkbox" id="tfWeekendWork" ${t.weekendWork?'checked':''}> This timeline includes weekend work</label>
           <div class="hint">Once saved, this becomes the permanent agreed timeline — it can't be changed here again. Use "Extend date" later for delays, or an admin can amend it directly if needed.</div>
           ` : `
           <div class="field-row">
-            <div class="field"><label>Agreed timeline</label><input value="${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}" disabled></div>
-            ${t.extended ? `<div class="field"><label>Extended to</label><input value="${fmtDate(t.endDate)}" disabled></div>` : ''}
+            <div class="field"><label>${t.deadlineDisabled?'Start date':'Agreed timeline'}</label><input value="${t.deadlineDisabled?fmtDate(t.startDate):`${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}`}" disabled></div>
+            ${(t.extended && !t.deadlineDisabled) ? `<div class="field"><label>Extended to</label><input value="${fmtDate(t.endDate)}" disabled></div>` : ''}
             ${t.status==='closed' ? `<div class="field"><label>Closed on</label><input value="${fmtDate(t.closedDate)}" disabled></div>` : ''}
           </div>
           ${t.weekendWork ? `<div style="margin:6px 0;">${pill('amber','Includes weekend work')}</div>` : ''}
           ${t.checklistRecord ? `<div class="field"><label>Checklist confirmed</label><div class="hint">Completed by ${t.checklistRecord.completedByName} on ${fmtDate(t.checklistRecord.completedAt)}${t.checklistRecord.items.map(i=>`<br>✓ ${i.text}`).join('')}</div></div>` : ''}
-          ${admin ? `<div class="hint">To correct these dates, use "Amend timeline" below — it's kept separate from Save so closing or editing a task never silently changes the permanent record.</div>` : ''}
+          ${admin && !t.deadlineDisabled ? `<div class="hint">To correct these dates, use "Amend timeline" below — it's kept separate from Save so closing or editing a task never silently changes the permanent record.</div>` : ''}
           `}
           <div class="field"><label>Reason — why this much time?</label><textarea id="tfReason" placeholder="Explain the estimate...">${t.reason||''}</textarea></div>
           <div class="field"><label>Assign to</label><select id="tfAssignee" ${admin?'':'disabled'}>${assigneeOptions(t.assignedType,t.assignedId)}</select></div>
@@ -2637,6 +2700,10 @@ function openTaskModal(taskId){
               <option value="closed" ${t.status==='closed'?'selected':''}>Closed</option>
             </select>
           </div>
+          ${admin ? `<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:10px 0 4px;"><input type="checkbox" id="tfDeadlineDisabled" ${t.deadlineDisabled?'checked':''}> This task has no deadline — don't track delays for it</label>
+          <div class="hint">For ongoing or monitoring-only tasks. It stays visible here and on the Handoff Rail, but won't ever show as delayed, can't be extended, and is left out of the workstream's delay totals and reports.</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:10px 0 4px;"><input type="checkbox" id="tfChecklistRequired" ${t.checklistRequired?'checked':''}> Require a checklist confirmation before this task can close</label>
+          <div class="hint">Set per task — turn it off to skip the checklist step even if this workstream generally requires one, or on to require it even if the workstream doesn't.</div>` : ''}
           ${t.extensionHistory && t.extensionHistory.length ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
@@ -2654,14 +2721,28 @@ function openTaskModal(taskId){
     document.getElementById('tfStart').addEventListener('input', updateHint);
     document.getElementById('tfEnd').addEventListener('input', updateHint);
   }
+  const deadlineToggleEl = document.getElementById('tfDeadlineDisabled');
+  if(deadlineToggleEl && firstTimeSave){
+    deadlineToggleEl.addEventListener('change', ()=>{
+      const endField = document.getElementById('tfEndField');
+      const endInput = document.getElementById('tfEnd');
+      const hintEl = document.getElementById('tfDateHint');
+      const on = deadlineToggleEl.checked;
+      endField.style.display = on ? 'none' : '';
+      hintEl.style.display = on ? 'none' : '';
+      endInput.disabled = on;
+      if(on) endInput.removeAttribute('required'); else endInput.setAttribute('required','required');
+    });
+  }
   runOnClickAndEnter('taskForm', 'tfSubmitBtn', ()=>{
     const titleEl = document.getElementById('tfTitle');
     if(!titleEl.value.trim()){ titleEl.focus(); return; }
+    const noDeadline = admin && document.getElementById('tfDeadlineDisabled') && document.getElementById('tfDeadlineDisabled').checked;
     let sVal, eVal;
     if(firstTimeSave){
       sVal = document.getElementById('tfStart').value;
-      eVal = document.getElementById('tfEnd').value;
-      if(!sVal || !eVal){ return; }
+      eVal = noDeadline ? sVal : document.getElementById('tfEnd').value;
+      if(!sVal || (!noDeadline && !eVal)){ return; }
     }
     const commit = ()=>{
       t.title = titleEl.value.trim();
@@ -2681,6 +2762,10 @@ function openTaskModal(taskId){
         const [type,id] = document.getElementById('tfAssignee').value.split(':');
         t.assignedType = type; t.assignedId = id;
         t.predecessorId = document.getElementById('tfPredecessor').value || null;
+        const deadlineToggle = document.getElementById('tfDeadlineDisabled');
+        if(deadlineToggle) t.deadlineDisabled = deadlineToggle.checked;
+        const checklistToggle = document.getElementById('tfChecklistRequired');
+        if(checklistToggle) t.checklistRequired = checklistToggle.checked;
       }
       touchTask(t);
       persist(); closeModal(); render();
@@ -2701,7 +2786,7 @@ function openTaskModal(taskId){
       const teamId = t.assignedType==='team' ? t.assignedId : (state.users.find(u=>u.id===t.assignedId)||{}).teamId;
       const team = teamId ? state.teams.find(tm=>tm.id===teamId) : null;
       const items = (team && Array.isArray(team.checklist)) ? team.checklist : [];
-      if(proj && proj.requireChecklist && items.length){
+      if(t.checklistRequired && items.length){
         openChecklistGateModal(t, team, items, (record)=>{ t.checklistRecord = record; overlapThenCommit(); });
         return;
       }
@@ -3430,6 +3515,7 @@ function renderAdminUsers(){
           ${state.teams.map(t=>`<option value="${t.id}" ${u.teamId===t.id?'selected':''}>${t.name}</option>`).join('')}
         </select>`}
       </td>
+      <td><button class="btn btn-sm" data-manage-node-access="${u.id}">Access</button></td>
       <td><div class="row-actions">
         ${isViewer ? `<button class="btn btn-sm" data-edit-access="${u.id}">Edit access</button>` : ''}
         <button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button>
@@ -3477,8 +3563,8 @@ function renderAdminUsers(){
         <button class="btn btn-primary btn-sm" data-add-user>+ Create user</button>
       </div>
       <table>
-        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team / Access</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5" class="empty-state">No users yet.</td></tr>`}</tbody>
+        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team</th><th>Access</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty-state">No users yet.</td></tr>`}</tbody>
       </table>
     </div>`;
 }
@@ -3548,6 +3634,9 @@ function bindAdmin(){
   document.querySelectorAll('[data-edit-access]').forEach(b=>b.addEventListener('click', ()=>{
     openEditAccessModal(b.dataset.editAccess);
   }));
+  document.querySelectorAll('[data-manage-node-access]').forEach(b=>b.addEventListener('click', ()=>{
+    openNodeAccessModal(b.dataset.manageNodeAccess);
+  }));
   document.querySelectorAll('[data-change-password]').forEach(b=>b.addEventListener('click', ()=>{
     if(b.dataset.changePassword) openChangePasswordModal(b.dataset.changePassword);
   }));
@@ -3587,6 +3676,60 @@ function bindAdmin(){
   }));
 }
 
+// A reusable "select multiple from a list" dropdown — a single button that opens a
+// searchable, checkbox-driven panel, instead of a plain list of checkboxes that gets
+// unwieldy once there are more than a handful of options.
+function buildMultiSelect(idPrefix, options, preselectedIds){
+  const selected = new Set(preselectedIds||[]);
+  const rows = options.map(o=>`
+    <label class="ms-option" data-ms-label="${idPrefix}">
+      <input type="checkbox" class="ms-check" data-ms-prefix="${idPrefix}" value="${o.id}" ${selected.has(o.id)?'checked':''}> ${o.label}
+    </label>`).join('');
+  return `
+    <div class="ms-dropdown" id="ms-${idPrefix}">
+      <button type="button" class="ms-toggle" id="ms-toggle-${idPrefix}">
+        <span id="ms-summary-${idPrefix}">${selected.size ? selected.size+' selected' : 'Select users'}</span>
+        <span class="ms-caret">▾</span>
+      </button>
+      <div class="ms-panel" id="ms-panel-${idPrefix}" style="display:none;">
+        <input type="text" class="ms-search" id="ms-search-${idPrefix}" placeholder="Filter...">
+        <div class="ms-options" id="ms-options-${idPrefix}">${rows}</div>
+      </div>
+    </div>`;
+}
+function bindMultiSelect(idPrefix){
+  const toggleBtn = document.getElementById(`ms-toggle-${idPrefix}`);
+  const panel = document.getElementById(`ms-panel-${idPrefix}`);
+  const search = document.getElementById(`ms-search-${idPrefix}`);
+  const summary = document.getElementById(`ms-summary-${idPrefix}`);
+  if(!toggleBtn || !panel) return;
+  panel.addEventListener('click', (e)=> e.stopPropagation());
+  toggleBtn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : '';
+    if(!isOpen){
+      const closeOnOutside = ()=>{ panel.style.display = 'none'; document.removeEventListener('click', closeOnOutside); };
+      setTimeout(()=> document.addEventListener('click', closeOnOutside), 0);
+    }
+  });
+  if(search) search.addEventListener('input', ()=>{
+    const q = search.value.trim().toLowerCase();
+    document.querySelectorAll(`[data-ms-label="${idPrefix}"]`).forEach(row=>{
+      row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+  document.querySelectorAll(`.ms-check[data-ms-prefix="${idPrefix}"]`).forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const count = document.querySelectorAll(`.ms-check[data-ms-prefix="${idPrefix}"]:checked`).length;
+      summary.textContent = count ? `${count} selected` : 'Select users';
+    });
+  });
+}
+function getMultiSelectValues(idPrefix){
+  return Array.from(document.querySelectorAll(`.ms-check[data-ms-prefix="${idPrefix}"]:checked`)).map(el=>el.value);
+}
+
 function openEditProjectModal(projectId){
   if(!isAdmin()) return;
   const p = state.projects.find(x=>x.id===projectId);
@@ -3598,6 +3741,10 @@ function openEditProjectModal(projectId){
         <form id="editProjForm">
           <div class="field"><label>Workstream name</label><input id="epName" value="${p.name.replace(/"/g,'&quot;')}" required></div>
           <div class="field"><label>Description</label><textarea id="epDescription" placeholder="Why this workstream exists, what it's for...">${(p.description||'').replace(/</g,'&lt;')}</textarea></div>
+          <div class="field"><label>Tag users</label>
+            <div class="hint" style="margin-bottom:6px;">Tagged users can see this workstream right away and create their own tasks in it.</div>
+            ${buildMultiSelect('epTag', state.users.filter(u=>u.role!=='viewer').map(u=>({id:u.id,label:entityName('user',u.id)})), p.taggedUserIds||[])}
+          </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="epSubmitBtn" class="btn btn-primary">Save</button>
@@ -3606,11 +3753,13 @@ function openEditProjectModal(projectId){
       </div>
     </div>`;
   bindModalClose();
+  bindMultiSelect('epTag');
   runOnClickAndEnter('editProjForm', 'epSubmitBtn', ()=>{
     const nameEl = document.getElementById('epName');
     if(!nameEl.value.trim()){ nameEl.focus(); return; }
     p.name = nameEl.value.trim();
     p.description = document.getElementById('epDescription').value.trim();
+    p.taggedUserIds = getMultiSelectValues('epTag');
     persist(); closeModal(); render();
   });
 }
@@ -3707,6 +3856,48 @@ function openAddUserModal(){
     }
     state.users.push(u); persist();
     showCredentialsModal(u);
+  });
+}
+
+// Recursively builds the whole tree as checkboxes — every Module, and everything
+// nested under it, at whatever depth.
+function buildAccessTree(userId, parentId, depth){
+  const kids = state.featureNodes.filter(n=>n.parentId===parentId).sort((a,b)=>(a.order||0)-(b.order||0));
+  return kids.map(n=>{
+    const checked = hasDirectNodeAccess(userId, n.id);
+    const childrenHtml = buildAccessTree(userId, n.id, depth+1);
+    return `
+      <label class="access-tree-row" style="margin-left:${depth*20}px;">
+        <input type="checkbox" class="access-node-check" value="${n.id}" ${checked?'checked':''}> ${n.name}
+      </label>
+      ${childrenHtml}`;
+  }).join('');
+}
+function openNodeAccessModal(userId){
+  if(!isAdmin()) return;
+  const u = state.users.find(x=>x.id===userId);
+  if(!u) return;
+  const treeHtml = buildAccessTree(userId, null, 0);
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal" style="max-width:520px;">
+        <h3>${u.name} — Access</h3>
+        <div class="modal-sub">Tick every Module, Feature, Heading, or Sub Heading this person should be able to see. Anything left unticked stays hidden from them — including anything new you add later, until you come back and tick it here.</div>
+        <div style="max-height:50vh;overflow-y:auto;margin:12px 0;display:flex;flex-direction:column;gap:6px;">
+          ${treeHtml || '<div class="muted" style="font-size:12px;">Nothing to show yet.</div>'}
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" id="accessSaveBtn" class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.getElementById('accessSaveBtn').addEventListener('click', ()=>{
+    const checked = Array.from(document.querySelectorAll('.access-node-check:checked')).map(el=>el.value);
+    if(!state.userAccess) state.userAccess = {};
+    state.userAccess[userId] = checked;
+    persist(); closeModal(); render();
   });
 }
 
@@ -3887,6 +4078,10 @@ function openAddProjectModal(){
           <div class="field"><label>Workstream name</label><input id="pName" required></div>
           <div class="field"><label>Start date</label><input type="date" id="pStart" value="${todayISO()}" required></div>
           <div class="field"><label>Description (optional)</label><textarea id="pDescription" placeholder="Why this workstream exists, what it's for..."></textarea></div>
+          <div class="field"><label>Tag users</label>
+            <div class="hint" style="margin-bottom:6px;">Tagged users can see this workstream right away and create their own tasks in it.</div>
+            ${buildMultiSelect('pTag', state.users.filter(u=>u.role!=='viewer').map(u=>({id:u.id,label:entityName('user',u.id)})), [])}
+          </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:6px 0;"><input type="checkbox" id="pRequireChecklist"> Require each team's checklist before tasks can be closed</label>
           <div class="hint">If on, anyone closing a task here has to tick their team's checklist points first (set those up under Admin → Teams). Leave off for workstreams that don't need it.</div>
           <div class="modal-actions">
@@ -3897,11 +4092,13 @@ function openAddProjectModal(){
       </div>
     </div>`;
   bindModalClose();
+  bindMultiSelect('pTag');
   runOnClickAndEnter('projForm', 'projSubmitBtn', ()=>{
     const nameEl = document.getElementById('pName');
     const startEl = document.getElementById('pStart');
     if(!nameEl.value.trim() || !startEl.value){ (nameEl.value.trim()?startEl:nameEl).focus(); return; }
-    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim() };
+    const taggedUserIds = getMultiSelectValues('pTag');
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds };
     state.projects.push(p); persist(); closeModal();
     ui.projectId = p.id; ui.view='project'; render();
   });

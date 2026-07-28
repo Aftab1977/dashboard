@@ -650,7 +650,10 @@ function seedState(){
     {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
   ];
 
-  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 }, userAccess: {} };
+  const allNodeIds = featureNodes.map(n=>n.id);
+  const userAccess = {};
+  users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
+  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 }, userAccess, _userAccessGrandfathered: true };
 }
 
 function withTimeout(promise, ms){
@@ -750,6 +753,17 @@ function normalizeState(s){
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
   if(!s.userAccess || typeof s.userAccess !== 'object' || Array.isArray(s.userAccess)) s.userAccess = {};
+  // One-time only: the Access feature didn't exist before, so nobody had any grants yet.
+  // Give every current non-admin user access to everything that exists right now, so
+  // their visibility doesn't collapse to nothing the moment this ships. Anything
+  // created after this point still defaults to hidden for everyone, as intended.
+  if(!s._userAccessGrandfathered && Array.isArray(s.users) && Array.isArray(s.featureNodes)){
+    const allNodeIds = s.featureNodes.map(n=>n.id);
+    s.users.forEach(u=>{
+      if(u.role!=='admin' && !s.userAccess[u.id]) s.userAccess[u.id] = allNodeIds.slice();
+    });
+    s._userAccessGrandfathered = true;
+  }
   // Tasks saved before the per-task checklist toggle existed relied entirely on the
   // workstream's own setting — carry that over as their starting value so closing
   // behavior doesn't silently change for anything already in progress.
@@ -1547,7 +1561,7 @@ function renderAttendanceSheet(node){
       const cls = `att-cell${weekend?' att-weekend':''}${admin?' att-clickable':''}`;
       return `<td class="${cls}" style="${style}"${clickAttr}>${label}</td>`;
     }).join('');
-    return `<tr><td class="att-name">${u.name}</td>${cells}</tr>`;
+    return `<tr><td style="padding:7px 12px;white-space:nowrap;color:var(--paper-dim);font-family:var(--f-mono);font-size:12px;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
   }).join('');
 
   const legend = Object.entries(ATT_STATUS).map(([code,v])=>
@@ -1569,8 +1583,8 @@ function renderAttendanceSheet(node){
 
     <div class="att-wrap">
       <table class="att-table">
-        <thead><tr><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
-        <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+1}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
+        <thead><tr><th style="text-align:left;padding:8px 12px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
+        <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
     ${!admin ? '<div class="footnote">Only admins can enter attendance.</div>' : ''}
@@ -1694,6 +1708,7 @@ function renderAppraisalSheet(node){
       : '';
     return `
       <tr data-appraisal-row="${u.id}" style="cursor:pointer;">
+        <td style="padding:7px 12px;white-space:nowrap;color:var(--paper-dim);font-family:var(--f-mono);font-size:12px;">${u.employeeId||''}</td>
         <td class="att-name">${u.name}</td>
         <td class="appraisal-cell">${rec.designation||''}</td>
         <td class="appraisal-cell mono">${rec.doj?fmtDate(rec.doj):''}</td>
@@ -1713,8 +1728,8 @@ function renderAppraisalSheet(node){
     <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>
     <div class="att-wrap">
       <table class="att-table" style="font-size:12px;">
-        <thead><tr><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="text-align:left;font-weight:600;">${c}</th>`).join('')}</tr></thead>
-        <tbody>${bodyRows || `<tr><td colspan="${cols.length+1}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
+        <thead><tr><th style="text-align:left;padding:8px 12px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="text-align:left;font-weight:600;">${c}</th>`).join('')}</tr></thead>
+        <tbody>${bodyRows || `<tr><td colspan="${cols.length+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -2247,6 +2262,117 @@ function openContentItemPreviewModal(headingId, itemId){
   bindModalClose();
 }
 
+// Shared by both Module content previews and task attachment previews — same four
+// content types, same rendering either way.
+function renderPreviewBody(it){
+  if(it.type==='text'){
+    return `<div class="hint" style="white-space:pre-wrap;font-size:13px;">${(it.text||'').replace(/</g,'&lt;')}</div>`;
+  } else if(it.type==='image'){
+    return `<img src="${it.url}" style="max-width:100%;border-radius:8px;display:block;" alt="${it.title||''}">`;
+  } else if(it.type==='video'){
+    return `<video controls style="max-width:100%;border-radius:8px;display:block;" src="${it.url}"></video>`;
+  } else if(it.type==='document'){
+    const isPdf = (it.mimeType||'').includes('pdf') || /\.pdf$/i.test(it.fileName||'');
+    if(isPdf){
+      return `<iframe src="${it.url}" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>`;
+    }
+    return `<iframe src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(it.url)}" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>
+      <div class="hint" style="margin-top:8px;">If the preview doesn't load, <a href="${it.url}" target="_blank" rel="noopener" class="ci-link">open the file directly</a>.</div>`;
+  }
+  return '';
+}
+
+function renderTaskAttachmentItem(it, taskId, canEdit){
+  const icon = it.type==='image' ? '🖼️' : it.type==='video' ? '🎬' : '📄';
+  const name = it.title || it.fileName || 'Untitled';
+  return `<div class="content-item" style="position:relative;">
+    <span class="ci-link" data-open-task-attachment="${taskId}|${it.id}" style="cursor:pointer;">${icon} ${name}</span>
+    ${canEdit ? `<button class="icon-btn" data-delete-task-attachment="${taskId}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
+  </div>`;
+}
+
+function openTaskAttachmentPreviewModal(taskId, attId){
+  const t = state.tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  const it = (t.attachments||[]).find(a=>a.id===attId);
+  if(!it) return;
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal" style="max-width:800px;">
+        <h3>${it.title || it.fileName || 'Attachment'}</h3>
+        ${renderPreviewBody(it)}
+        <div class="modal-actions"><button class="btn btn-primary" id="taAttachPreviewClose">Close</button></div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  div.querySelector('#taAttachPreviewClose').addEventListener('click', ()=> div.remove());
+}
+
+// Stacks on top of the still-open task modal, exactly like the delete-confirmation
+// popups do — uploads via the same Supabase Storage path Module content uses.
+function openAddTaskAttachmentModal(taskId){
+  const t = state.tasks.find(x=>x.id===taskId);
+  if(!t || !canEditTask(t)) return;
+  const maxMB = (state.settings && state.settings.maxUploadMB) || 250;
+  const ACCEPT = { image:'image/*', document:'.pdf,.doc,.docx,.xls,.xlsx', video:'video/*' };
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Add attachment</h3>
+        <div class="modal-sub">Attach proof, a screenshot, or a supporting doc — add as many as you need.</div>
+        <form id="taskAttachForm">
+          <div class="field"><label>Type</label>
+            <select id="taAttachType">
+              <option value="image">Image</option>
+              <option value="document">Document — PDF, Word, or Excel</option>
+              <option value="video">Video</option>
+            </select>
+          </div>
+          <div class="field"><label>Title (optional)</label><input id="taAttachTitle" placeholder="A short label"></div>
+          <div class="field"><label>File</label><input type="file" id="taAttachFile" accept="${ACCEPT.image}"><div class="hint">Max ${maxMB} MB.</div></div>
+          <div class="login-error" id="taAttachError"></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="taAttachCancel">Cancel</button>
+            <button type="button" id="taAttachSubmitBtn" class="btn btn-primary">Add attachment</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  const typeSel = div.querySelector('#taAttachType');
+  const fileInput = div.querySelector('#taAttachFile');
+  typeSel.addEventListener('change', ()=> fileInput.setAttribute('accept', ACCEPT[typeSel.value]));
+  const cleanup = ()=> div.remove();
+  div.querySelector('#taAttachCancel').addEventListener('click', cleanup);
+  div.querySelector('#taAttachSubmitBtn').addEventListener('click', async ()=>{
+    const errEl = div.querySelector('#taAttachError');
+    errEl.textContent = '';
+    const file = fileInput.files[0];
+    if(!file){ errEl.textContent = 'Choose a file first.'; return; }
+    const limitMB = (state.settings && state.settings.maxUploadMB) || 250;
+    if(file.size > limitMB*1024*1024){ errEl.textContent = `That file is too large — the limit is ${limitMB} MB.`; return; }
+    const type = typeSel.value;
+    if(type==='document' && !/\.(pdf|doc|docx|xls|xlsx)$/i.test(file.name)){ errEl.textContent = 'Documents must be a PDF, Word, or Excel file.'; return; }
+    const submitBtn = div.querySelector('#taAttachSubmitBtn');
+    submitBtn.disabled = true; submitBtn.textContent = 'Uploading…';
+    try{
+      const uploaded = await uploadFileToStorage(file);
+      if(!Array.isArray(t.attachments)) t.attachments = [];
+      const title = div.querySelector('#taAttachTitle').value.trim();
+      t.attachments.push({id:uid('att'), type, title, ...uploaded});
+      touchTask(t);
+      persist();
+      cleanup();
+      openTaskModal(taskId); // refresh the underlying task modal to show the new attachment
+    }catch(e){
+      submitBtn.disabled = false; submitBtn.textContent = 'Add attachment';
+      errEl.textContent = describeError(e);
+    }
+  });
+}
+
 function openDeleteNodeConfirm(nodeId){
   if(!isAdmin()) return;
   const node = featureNode(nodeId);
@@ -2569,7 +2695,7 @@ function openBlankTaskModal(projectId){
       predecessorId: document.getElementById('btPredecessor').value || null,
       startDate:'', endDate:'', originalEndDate:'', extended:false, blockedByTeamId:null, status:'open', closedDate:null,
       datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[], lastUpdated:null, blockerReason:null, deadlineDisabled:false,
-      checklistRequired: !!(proj && proj.requireChecklist)
+      checklistRequired: !!(proj && proj.requireChecklist), attachments: []
     };
     state.tasks.push(t); persist(); closeModal(); render();
   });
@@ -2650,12 +2776,20 @@ function openTaskDetailsModal(taskId){
 
         <div class="field"><label>Last updated</label><div class="hint">${t.lastUpdated ? `${t.lastUpdated.byName} at ${fmtDateTime(t.lastUpdated.at)}` : 'Not yet updated'}</div></div>
 
+        ${(t.attachments && t.attachments.length) ? `<div class="field"><label>Attachments</label>${t.attachments.map(it=>renderTaskAttachmentItem(it,t.id,false)).join('')}</div>` : ''}
+
         <div class="modal-actions">
           <button class="btn btn-primary" data-close>Close</button>
         </div>
       </div>
     </div>`;
   bindModalClose();
+  document.querySelectorAll('[data-open-task-attachment]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [tid, attId] = el.dataset.openTaskAttachment.split('|');
+      openTaskAttachmentPreviewModal(tid, attId);
+    });
+  });
 }
 
 function openTaskModal(taskId){
@@ -2663,6 +2797,7 @@ function openTaskModal(taskId){
   if(!t) return;
   if(!canEditTask(t)) return; // closed tasks are admin-only from here on
   const admin = isAdmin();
+  const canEdit = true; // guaranteed by the check above — kept as a named constant for clarity in the template
   const firstTimeSave = !t.datesLocked; // dates are only part of THIS form before they're ever locked
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
@@ -2691,6 +2826,11 @@ function openTaskModal(taskId){
           ${admin && !t.deadlineDisabled ? `<div class="hint">To correct these dates, use "Amend timeline" below — it's kept separate from Save so closing or editing a task never silently changes the permanent record.</div>` : ''}
           `}
           <div class="field"><label>Reason — why this much time?</label><textarea id="tfReason" placeholder="Explain the estimate...">${t.reason||''}</textarea></div>
+          <div class="field">
+            <label>Attachments</label>
+            <div id="taskAttachList" style="margin-bottom:8px;">${(t.attachments||[]).length ? (t.attachments||[]).map(it=>renderTaskAttachmentItem(it,t.id,canEdit)).join('') : '<div class="muted" style="font-size:12px;">No attachments yet.</div>'}</div>
+            ${canEdit ? `<button type="button" class="btn btn-sm" id="taskAttachAddBtn">+ Add attachment</button>` : ''}
+          </div>
           <div class="field"><label>Assign to</label><select id="tfAssignee" ${admin?'':'disabled'}>${assigneeOptions(t.assignedType,t.assignedId)}</select></div>
           ${admin ? `<div class="field"><label>Depends on</label><select id="tfPredecessor">${predecessorOptions(t.projectId,t.id,t.predecessorId)}</select></div>` : ''}
           <div class="field">
@@ -2715,6 +2855,27 @@ function openTaskModal(taskId){
       </div>
     </div>`;
   bindModalClose();
+  const attachAddBtn = document.getElementById('taskAttachAddBtn');
+  if(attachAddBtn) attachAddBtn.addEventListener('click', ()=> openAddTaskAttachmentModal(t.id));
+  document.querySelectorAll('[data-open-task-attachment]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [tid, attId] = el.dataset.openTaskAttachment.split('|');
+      openTaskAttachmentPreviewModal(tid, attId);
+    });
+  });
+  document.querySelectorAll('[data-delete-task-attachment]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [tid, attId] = el.dataset.deleteTaskAttachment.split('|');
+      const task = state.tasks.find(x=>x.id===tid);
+      const att = task ? (task.attachments||[]).find(a=>a.id===attId) : null;
+      const name = att ? (att.title || att.fileName || 'this attachment') : 'this attachment';
+      openConfirmDelete('Delete this attachment?', `This will permanently delete "${name}". This can't be undone.`, ()=>{
+        task.attachments = (task.attachments||[]).filter(a=>a.id!==attId);
+        touchTask(task); persist();
+        openTaskModal(tid); // refresh the modal so the removed attachment disappears
+      });
+    });
+  });
   if(firstTimeSave){
     const hintEl = document.getElementById('tfDateHint');
     const updateHint = ()=>{ hintEl.textContent = dateRangeHint(document.getElementById('tfStart').value, document.getElementById('tfEnd').value); };
@@ -3804,6 +3965,7 @@ function openAddUserModal(){
         <div class="modal-sub">Generates a login the person can use right away.</div>
         <form id="userForm">
           <div class="field"><label>Full name</label><input id="uName" required></div>
+          <div class="field"><label>Employee ID (optional)</label><input id="uEmployeeId" placeholder="e.g. EMP-1042"></div>
           <div class="field"><label>Username</label><input id="uUsername" required></div>
           <div class="field"><label>Role</label>
             <select id="uRole">
@@ -3849,7 +4011,7 @@ function openAddUserModal(){
     const userEl = document.getElementById('uUsername');
     if(!nameEl.value.trim() || !userEl.value.trim()){ (nameEl.value.trim()?userEl:nameEl).focus(); return; }
     const isViewer = roleSel.value==='viewer';
-    const u = { id: uid('u'), name: nameEl.value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null) };
+    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null) };
     if(isViewer){
       u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
       u.viewerCanSeeAssignments = document.getElementById('uCanSeeAssignments').checked;

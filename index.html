@@ -1031,6 +1031,13 @@ function taskStatusColor(t){
   return 'amber';
 }
 
+// A WhatsApp click-to-chat link — opens WhatsApp with a pre-filled message. If no
+// phone is given, still opens WhatsApp letting the person pick who to send it to.
+function waLink(phone, text){
+  const digits = (phone||'').replace(/[^0-9]/g,'');
+  const encodedText = text ? 'text='+encodeURIComponent(text) : '';
+  return digits ? `https://wa.me/${digits}${encodedText?'?'+encodedText:''}` : `https://wa.me/${encodedText?'?'+encodedText:''}`;
+}
 function entityName(assignedType, assignedId){
   if(assignedType==='team'){ const tm = state.teams.find(x=>x.id===assignedId); return tm ? tm.name : 'Unassigned'; }
   const u = state.users.find(x=>x.id===assignedId);
@@ -2847,6 +2854,12 @@ function openTaskModal(taskId){
           ${t.extensionHistory && t.extensionHistory.length ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            ${(()=>{
+              const proj = state.projects.find(p=>p.id===t.projectId);
+              const assigneeUser = t.assignedType==='user' ? state.users.find(u=>u.id===t.assignedId) : null;
+              const lines = [`Task: ${t.title||'Untitled task'}`, proj?`Workstream: ${proj.name}`:'', t.description?`Details: ${t.description}`:'', (t.startDate && !t.deadlineDisabled)?`Timeline: ${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}`:''].filter(Boolean);
+              return `<a class="btn" href="${waLink(assigneeUser?assigneeUser.phone:'', lines.join(String.fromCharCode(10)))}" target="_blank" rel="noopener">Share via WhatsApp</a>`;
+            })()}
             ${admin ? `<button type="button" class="btn btn-danger" data-delete-task="${t.id}">Delete</button>` : ''}
             ${admin && !firstTimeSave ? `<button type="button" class="btn" id="amendTimelineBtn">Amend timeline</button>` : ''}
             <button type="button" id="tfSubmitBtn" class="btn btn-primary">Save</button>
@@ -3679,6 +3692,7 @@ function renderAdminUsers(){
       <td><button class="btn btn-sm" data-manage-node-access="${u.id}">Access</button></td>
       <td><div class="row-actions">
         ${isViewer ? `<button class="btn btn-sm" data-edit-access="${u.id}">Edit access</button>` : ''}
+        ${u.phone ? `<a class="btn btn-sm" href="${waLink(u.phone, `Hi ${u.name.split(' ')[0]},`)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
         <button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button>
         <button class="btn btn-sm" data-change-password="${u.id}">Change password</button>
         <button class="btn btn-sm btn-danger" data-del-user="${u.id}">Remove</button>
@@ -3966,6 +3980,7 @@ function openAddUserModal(){
         <form id="userForm">
           <div class="field"><label>Full name</label><input id="uName" required></div>
           <div class="field"><label>Employee ID (optional)</label><input id="uEmployeeId" placeholder="e.g. EMP-1042"></div>
+          <div class="field"><label>WhatsApp number (optional)</label><input id="uPhone" placeholder="e.g. +1 555 123 4567"><div class="hint">Include the country code. Used only for a "Message on WhatsApp" link — nothing is sent automatically.</div></div>
           <div class="field"><label>Username</label><input id="uUsername" required></div>
           <div class="field"><label>Role</label>
             <select id="uRole">
@@ -4011,7 +4026,7 @@ function openAddUserModal(){
     const userEl = document.getElementById('uUsername');
     if(!nameEl.value.trim() || !userEl.value.trim()){ (nameEl.value.trim()?userEl:nameEl).focus(); return; }
     const isViewer = roleSel.value==='viewer';
-    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null) };
+    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null) };
     if(isViewer){
       u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
       u.viewerCanSeeAssignments = document.getElementById('uCanSeeAssignments').checked;

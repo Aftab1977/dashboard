@@ -2744,7 +2744,10 @@ function openWorkstreamInfoModal(projectId){
         <div style="margin-top:10px;max-height:60vh;overflow-y:auto;">
           ${taskBlocks || '<div class="empty-state">No tasks in this workstream yet.</div>'}
         </div>
-        <div class="modal-actions"><button class="btn btn-primary" data-close>Close</button></div>
+        <div class="modal-actions">
+          <button class="btn btn-primary" data-close>Close</button>
+          <a class="btn" href="${waLink('', [`Workstream: ${p.name}`, p.description?`About: ${p.description}`:''].filter(Boolean).join(String.fromCharCode(10)))}" target="_blank" rel="noopener">Share via WhatsApp</a>
+        </div>
       </div>
     </div>`;
   bindModalClose();
@@ -2787,6 +2790,11 @@ function openTaskDetailsModal(taskId){
 
         <div class="modal-actions">
           <button class="btn btn-primary" data-close>Close</button>
+          ${(()=>{
+            const assigneeUser = t.assignedType==='user' ? state.users.find(u=>u.id===t.assignedId) : null;
+            const lines = [`Task: ${t.title||'Untitled task'}`, proj?`Workstream: ${proj.name}`:'', t.description?`Details: ${t.description}`:'', (t.startDate && !t.deadlineDisabled)?`Timeline: ${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}`:''].filter(Boolean);
+            return `<a class="btn" href="${waLink(assigneeUser?assigneeUser.phone:'', lines.join(String.fromCharCode(10)))}" target="_blank" rel="noopener">Share via WhatsApp</a>`;
+          })()}
         </div>
       </div>
     </div>`;
@@ -2854,12 +2862,6 @@ function openTaskModal(taskId){
           ${t.extensionHistory && t.extensionHistory.length ? `<div class="field"><label>Extension history</label>${t.extensionHistory.map(h=>`<div class="hint">→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}</div>`).join('')}</div>` : ''}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
-            ${(()=>{
-              const proj = state.projects.find(p=>p.id===t.projectId);
-              const assigneeUser = t.assignedType==='user' ? state.users.find(u=>u.id===t.assignedId) : null;
-              const lines = [`Task: ${t.title||'Untitled task'}`, proj?`Workstream: ${proj.name}`:'', t.description?`Details: ${t.description}`:'', (t.startDate && !t.deadlineDisabled)?`Timeline: ${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}`:''].filter(Boolean);
-              return `<a class="btn" href="${waLink(assigneeUser?assigneeUser.phone:'', lines.join(String.fromCharCode(10)))}" target="_blank" rel="noopener">Share via WhatsApp</a>`;
-            })()}
             ${admin ? `<button type="button" class="btn btn-danger" data-delete-task="${t.id}">Delete</button>` : ''}
             ${admin && !firstTimeSave ? `<button type="button" class="btn" id="amendTimelineBtn">Amend timeline</button>` : ''}
             <button type="button" id="tfSubmitBtn" class="btn btn-primary">Save</button>

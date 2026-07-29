@@ -753,6 +753,7 @@ function normalizeState(s){
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
   if(!s.userAccess || typeof s.userAccess !== 'object' || Array.isArray(s.userAccess)) s.userAccess = {};
+  if(Array.isArray(s.projects)) s.projects.forEach(p=>{ if(!Array.isArray(p.contentItems)) p.contentItems = []; });
   // One-time only: the Access feature didn't exist before, so nobody had any grants yet.
   // Give every current non-admin user access to everything that exists right now, so
   // their visibility doesn't collapse to nothing the moment this ships. Anything
@@ -1509,7 +1510,7 @@ function deleteNodeCascade(nodeId){
 
 /* ============================== ATTENDANCE SHEET (special Heading view) ============================== */
 
-const ATT_STATUS = { P:{label:'Present',color:'#33A85C'}, L:{label:'Leave',color:'#E0AC3F'}, WFH:{label:'Work from home',color:'#7EB6E0'}, NS:{label:'No show',color:'#D9534F'}, H:{label:'Holiday',color:'#B58FD6'} };
+const ATT_STATUS = { P:{label:'Present',color:'#33A85C'}, L:{label:'Leave',color:'#E0AC3F'}, WFH:{label:'Work from home',color:'#7EB6E0'}, NS:{label:'No show',color:'#D9534F'}, H:{label:'Holiday',color:'#B58FD6'}, CO:{label:'Comp off',color:'#5FB8B0'} };
 
 function attendanceKey(userId, date){ return userId+'|'+date; }
 function getAttendance(userId, date){ return state.attendance[attendanceKey(userId,date)] || null; }
@@ -1558,8 +1559,8 @@ function renderAttendanceSheet(node){
       const rec = getAttendance(u.id, dateISO);
       let label, style='';
       if(weekend){
-        label = rec==='P' ? 'P' : 'WO';
-        if(rec==='P') style = `background:${ATT_STATUS.P.color}22;color:${ATT_STATUS.P.color};border-color:${ATT_STATUS.P.color};`;
+        label = (rec && ATT_STATUS[rec]) ? rec : 'WO';
+        if(rec && ATT_STATUS[rec]) style = `background:${ATT_STATUS[rec].color}22;color:${ATT_STATUS[rec].color};border-color:${ATT_STATUS[rec].color};`;
       } else {
         label = rec || '';
         if(rec && ATT_STATUS[rec]) style = `background:${ATT_STATUS[rec].color}22;color:${ATT_STATUS[rec].color};border-color:${ATT_STATUS[rec].color};`;
@@ -1617,8 +1618,8 @@ function bindAttendanceSheet(){
     el.addEventListener('click', ()=>{
       const [userId,date] = el.dataset.attWeekend.split('|');
       const cur = getAttendance(userId,date);
-      if(cur==='P'){
-        openRevertAttendanceConfirm(date, ()=>{ setAttendanceValue(userId,date,null); persist(); render(); });
+      if(cur){
+        openRevertAttendanceConfirm(date, ()=>{ setAttendanceValue(userId,date,null); persist(); render(); }, ATT_STATUS[cur]?ATT_STATUS[cur].label:cur);
       } else {
         setAttendanceValue(userId,date,'P');
         persist(); render();
@@ -1649,13 +1650,13 @@ function openConfirmDelete(title, message, onConfirm, confirmLabel){
   div.querySelector('#genConfirmOk').addEventListener('click', ()=>{ cleanup(); onConfirm(); });
 }
 
-function openRevertAttendanceConfirm(iso, onConfirm){
+function openRevertAttendanceConfirm(iso, onConfirm, currentLabel){
   const div = document.createElement('div');
   div.innerHTML = `
     <div class="modal-backdrop" style="z-index:60;">
       <div class="modal">
         <h3>Change back to weekly off?</h3>
-        <div class="modal-sub">${fmtDate(iso)} is currently marked Present. Do you want to change it back to weekly off?</div>
+        <div class="modal-sub">${fmtDate(iso)} is currently marked ${currentLabel || 'Present'}. Do you want to change it back to weekly off?</div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="revertAttCancel">Cancel</button>
           <button type="button" class="btn btn-danger" id="revertAttConfirm">Yes, change back</button>
@@ -2289,6 +2290,115 @@ function renderPreviewBody(it){
   return '';
 }
 
+function renderProjectContentItem(it, projectId, canEdit){
+  const icon = it.type==='text' ? '📝' : it.type==='image' ? '🖼️' : it.type==='video' ? '🎬' : '📄';
+  const name = it.title || it.fileName || (it.type==='text' ? 'Text note' : 'Untitled');
+  return `<div class="content-item" style="position:relative;">
+    <span class="ci-link" data-open-project-content="${projectId}|${it.id}" style="cursor:pointer;">${icon} ${name}</span>
+    ${canEdit ? `<button class="icon-btn" data-delete-project-content="${projectId}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
+  </div>`;
+}
+function openProjectContentPreviewModal(projectId, itemId){
+  const p = state.projects.find(x=>x.id===projectId);
+  if(!p) return;
+  const it = (p.contentItems||[]).find(a=>a.id===itemId);
+  if(!it) return;
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal" style="max-width:800px;">
+        <h3>${it.title || it.fileName || 'Content'}</h3>
+        ${renderPreviewBody(it)}
+        <div class="modal-actions"><button class="btn btn-primary" id="pContentPreviewClose">Close</button></div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  div.querySelector('#pContentPreviewClose').addEventListener('click', ()=> div.remove());
+}
+// Stacks on top of the still-open Edit workstream modal — same upload path as Module
+// content and task attachments, plus a Text option since a workstream note doesn't
+// always need to be a file.
+function openAddProjectContentModal(projectId){
+  if(!isAdmin()) return;
+  const maxMB = (state.settings && state.settings.maxUploadMB) || 250;
+  const ACCEPT = { image:'image/*', document:'.pdf,.doc,.docx,.xls,.xlsx', video:'video/*' };
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Add content</h3>
+        <div class="modal-sub">Any extra context for this workstream — add as many as you need.</div>
+        <form id="pContentForm">
+          <div class="field"><label>Type</label>
+            <select id="pContentType">
+              <option value="text">Text</option>
+              <option value="image">Image</option>
+              <option value="document">Document — PDF, Word, or Excel</option>
+              <option value="video">Video</option>
+            </select>
+          </div>
+          <div class="field"><label>Title (optional)</label><input id="pContentTitle" placeholder="A short label"></div>
+          <div class="field" id="pContentTextField"><label>Text</label><textarea id="pContentText" placeholder="Write it here..."></textarea></div>
+          <div class="field" id="pContentFileField" style="display:none;"><label>File</label><input type="file" id="pContentFile" accept="${ACCEPT.image}"><div class="hint">Max ${maxMB} MB.</div></div>
+          <div class="login-error" id="pContentError"></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="pContentCancel">Cancel</button>
+            <button type="button" id="pContentSubmitBtn" class="btn btn-primary">Add content</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  const typeSel = div.querySelector('#pContentType');
+  const textField = div.querySelector('#pContentTextField');
+  const fileField = div.querySelector('#pContentFileField');
+  const fileInput = div.querySelector('#pContentFile');
+  const updateFields = ()=>{
+    const isText = typeSel.value==='text';
+    textField.style.display = isText ? '' : 'none';
+    fileField.style.display = isText ? 'none' : '';
+    if(!isText) fileInput.setAttribute('accept', ACCEPT[typeSel.value]);
+  };
+  typeSel.addEventListener('change', updateFields);
+  updateFields();
+  const cleanup = ()=> div.remove();
+  div.querySelector('#pContentCancel').addEventListener('click', cleanup);
+  div.querySelector('#pContentSubmitBtn').addEventListener('click', async ()=>{
+    const errEl = div.querySelector('#pContentError');
+    errEl.textContent = '';
+    const p = state.projects.find(x=>x.id===projectId);
+    if(!p) return;
+    if(!Array.isArray(p.contentItems)) p.contentItems = [];
+    const type = typeSel.value;
+    const title = div.querySelector('#pContentTitle').value.trim();
+    if(type==='text'){
+      const text = div.querySelector('#pContentText').value.trim();
+      if(!text){ errEl.textContent = 'Add some text first.'; return; }
+      p.contentItems.push({id:uid('pc'), type, title, text});
+      persist(); cleanup();
+      openEditProjectModal(projectId);
+      return;
+    }
+    const file = fileInput.files[0];
+    if(!file){ errEl.textContent = 'Choose a file first.'; return; }
+    const limitMB = (state.settings && state.settings.maxUploadMB) || 250;
+    if(file.size > limitMB*1024*1024){ errEl.textContent = `That file is too large — the limit is ${limitMB} MB.`; return; }
+    if(type==='document' && !/\.(pdf|doc|docx|xls|xlsx)$/i.test(file.name)){ errEl.textContent = 'Documents must be a PDF, Word, or Excel file.'; return; }
+    const submitBtn = div.querySelector('#pContentSubmitBtn');
+    submitBtn.disabled = true; submitBtn.textContent = 'Uploading…';
+    try{
+      const uploaded = await uploadFileToStorage(file);
+      p.contentItems.push({id:uid('pc'), type, title, ...uploaded});
+      persist();
+      cleanup();
+      openEditProjectModal(projectId); // refresh so the new item shows
+    }catch(e){
+      submitBtn.disabled = false; submitBtn.textContent = 'Add content';
+      errEl.textContent = describeError(e);
+    }
+  });
+}
+
 function renderTaskAttachmentItem(it, taskId, canEdit){
   const icon = it.type==='image' ? '🖼️' : it.type==='video' ? '🎬' : '📄';
   const name = it.title || it.fileName || 'Untitled';
@@ -2717,6 +2827,7 @@ function openWorkstreamInfoModal(projectId){
   const p = state.projects.find(x=>x.id===projectId);
   if(!p) return;
   const tasks = projectTasks(projectId);
+  const taskTextBlocks = [];
   const taskBlocks = tasks.map((t,i)=>{
     const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
     const extensionHtml = (t.extensionHistory && t.extensionHistory.length)
@@ -2725,6 +2836,18 @@ function openWorkstreamInfoModal(projectId){
     const blockerHtml = blockedTeamName
       ? `<div class="hint" style="margin-top:4px;color:var(--amber);"><b>Blocked by ${blockedTeamName}:</b> ${t.blockerReason || 'no reason given'}</div>`
       : '';
+    const timelineText = t.deadlineDisabled
+      ? (t.startDate ? fmtDate(t.startDate)+' — no deadline' : 'Timeline not set yet')
+      : `${t.startDate ? `${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}` : 'Timeline not set yet'}${t.extended ? ` (extended to ${fmtDate(t.endDate)})` : ''}`;
+    taskTextBlocks.push([
+      `${i+1}. ${t.title || 'Untitled task'} — ${entityName(t.assignedType,t.assignedId)}`,
+      `   ${t.description || 'No description yet.'}`,
+      t.reason ? `   Why this much time: ${t.reason}` : '',
+      `   ${timelineText}`,
+      (t.extensionHistory && t.extensionHistory.length) ? `   Extension history:` + t.extensionHistory.map(h=>`\n     → moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}`).join('') : '',
+      blockedTeamName ? `   Blocked by ${blockedTeamName}: ${t.blockerReason || 'no reason given'}` : '',
+      `   ${t.status==='closed' ? 'Closed on '+fmtDate(t.closedDate) : 'Open'}`
+    ].filter(Boolean).join(String.fromCharCode(10)));
     return `
       <div style="padding:12px 0;${i>0?'border-top:1px solid var(--line-soft);':''}">
         <div style="font-weight:600;font-size:14px;color:var(--paper);">${i+1}. ${t.title || 'Untitled task'} <span class="muted" style="font-weight:400;font-size:12px;">— ${entityName(t.assignedType,t.assignedId)}</span></div>
@@ -2736,21 +2859,35 @@ function openWorkstreamInfoModal(projectId){
         <div class="hint" style="margin-top:4px;">${t.status==='closed' ? 'Closed on '+fmtDate(t.closedDate) : 'Open'}</div>
       </div>`;
   }).join('');
+  const shareText = [
+    `Workstream: ${p.name}`,
+    p.description ? `About: ${p.description}` : '',
+    (p.contentItems && p.contentItems.length) ? `Content: ${p.contentItems.map(it=>it.title||it.fileName||'Untitled').join(', ')}` : '',
+    '',
+    ...taskTextBlocks
+  ].filter(Boolean).join(String.fromCharCode(10));
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal" style="max-width:640px;">
         <h3>${p.name}</h3>
         <div class="modal-sub">${p.description || 'No description added for this workstream yet.'}</div>
+        ${(p.contentItems && p.contentItems.length) ? `<div class="field"><label>Content</label>${p.contentItems.map(it=>renderProjectContentItem(it,p.id,false)).join('')}</div>` : ''}
         <div style="margin-top:10px;max-height:60vh;overflow-y:auto;">
           ${taskBlocks || '<div class="empty-state">No tasks in this workstream yet.</div>'}
         </div>
         <div class="modal-actions">
           <button class="btn btn-primary" data-close>Close</button>
-          <a class="btn" href="${waLink('', [`Workstream: ${p.name}`, p.description?`About: ${p.description}`:''].filter(Boolean).join(String.fromCharCode(10)))}" target="_blank" rel="noopener">Share via WhatsApp</a>
+          <a class="btn" href="${waLink('', shareText)}" target="_blank" rel="noopener">Share via WhatsApp</a>
         </div>
       </div>
     </div>`;
   bindModalClose();
+  document.querySelectorAll('[data-open-project-content]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [pid, itemId] = el.dataset.openProjectContent.split('|');
+      openProjectContentPreviewModal(pid, itemId);
+    });
+  });
 }
 
 function openTaskDetailsModal(taskId){
@@ -2792,7 +2929,26 @@ function openTaskDetailsModal(taskId){
           <button class="btn btn-primary" data-close>Close</button>
           ${(()=>{
             const assigneeUser = t.assignedType==='user' ? state.users.find(u=>u.id===t.assignedId) : null;
-            const lines = [`Task: ${t.title||'Untitled task'}`, proj?`Workstream: ${proj.name}`:'', t.description?`Details: ${t.description}`:'', (t.startDate && !t.deadlineDisabled)?`Timeline: ${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}`:''].filter(Boolean);
+            const lines = [
+              `Task: ${t.title||'Untitled task'}`,
+              proj ? `Workstream: ${proj.name}` : '',
+              `Assigned to: ${entityName(t.assignedType,t.assignedId)}`,
+              `Description: ${t.description || 'No description yet.'}`,
+              `Reason — why this much time: ${t.reason || 'No reason given yet.'}`,
+              t.deadlineDisabled
+                ? `Start date: ${t.startDate ? fmtDate(t.startDate) : 'Not set yet'} (no deadline)`
+                : `Agreed timeline: ${t.startDate ? `${fmtDate(t.startDate)} → ${fmtDate(t.originalEndDate)}` : 'Not set yet'}`,
+              (t.extended && !t.deadlineDisabled) ? `Extended to: ${fmtDate(t.endDate)}` : '',
+              (t.extensionHistory && t.extensionHistory.length && !t.deadlineDisabled)
+                ? `Extension history:` + t.extensionHistory.map(h=>`\n  → moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}`).join('')
+                : '',
+              `Status: ${t.status==='closed' ? 'Closed on '+fmtDate(t.closedDate) : 'Open'}`,
+              blockedTeamName ? `Blocked by: ${blockedTeamName} — ${t.blockerReason || 'no reason given'}` : '',
+              t.weekendWork ? `Includes weekend work` : '',
+              t.checklistRecord ? `Checklist confirmed: completed by ${t.checklistRecord.completedByName} on ${fmtDate(t.checklistRecord.completedAt)}` + t.checklistRecord.items.map(i=>`\n  ✓ ${i.text}`).join('') : '',
+              `Last updated: ${t.lastUpdated ? `${t.lastUpdated.byName} at ${fmtDateTime(t.lastUpdated.at)}` : 'Not yet updated'}`,
+              (t.attachments && t.attachments.length) ? `Attachments: ${t.attachments.map(a=>a.title||a.fileName||'Untitled').join(', ')}` : ''
+            ].filter(Boolean);
             return `<a class="btn" href="${waLink(assigneeUser?assigneeUser.phone:'', lines.join(String.fromCharCode(10)))}" target="_blank" rel="noopener">Share via WhatsApp</a>`;
           })()}
         </div>
@@ -3109,7 +3265,7 @@ function openRevertWeekendConfirm(iso, onConfirm){
     <div class="modal-backdrop" style="z-index:60;">
       <div class="modal">
         <h3>Change back to weekly off?</h3>
-        <div class="modal-sub">${fmtDate(iso)} is currently marked as worked. Do you want to change it back to weekly off?</div>
+        <div class="modal-sub">${fmtDate(iso)} is currently marked as worked. Do you want to change it back to weekly off? This will also clear the Comp Off record for it in Attendance.</div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="revertWeekendCancel">Cancel</button>
           <button type="button" class="btn btn-danger" id="revertWeekendConfirm">Yes, change back</button>
@@ -3120,6 +3276,25 @@ function openRevertWeekendConfirm(iso, onConfirm){
   const cleanup = ()=> div.remove();
   div.querySelector('#revertWeekendCancel').addEventListener('click', cleanup);
   div.querySelector('#revertWeekendConfirm').addEventListener('click', ()=>{ cleanup(); onConfirm(); });
+}
+
+function openMarkWeekendWorkedConfirm(iso, onConfirm){
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Change to a work day?</h3>
+        <div class="modal-sub">${fmtDate(iso)} is currently a weekly off. Marking it as worked will also record it as Comp Off (CO) for this person in Attendance, under HR.</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="markWorkedCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="markWorkedConfirm">Yes, mark as worked</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  const cleanup = ()=> div.remove();
+  div.querySelector('#markWorkedCancel').addEventListener('click', cleanup);
+  div.querySelector('#markWorkedConfirm').addEventListener('click', ()=>{ cleanup(); onConfirm(); });
 }
 
 function openOverlapConfirmModal(overlaps, onContinue){
@@ -3453,7 +3628,7 @@ function buildCalendarHtml(row, monthKey, currentTaskId){
       cat = covering ? taskCategory(covering, currentTaskId) : 'free';
     }
     const cls = `cal-day ${cat||''}${weekend?' weekend':''}${clickable?' admin-toggle':''}`;
-    const toggleAttr = clickable ? ` data-cal-toggle="${iso}|${attributionTask.id}"` : '';
+    const toggleAttr = clickable ? ` data-cal-toggle="${iso}|${attributionTask.id}|${row.user.id}"` : '';
     const titleAttr = weekend ? (cat ? 'Worked this weekend — click to unmark' : (clickable ? 'Weekly off — click to mark as worked' : 'Weekly off')) : '';
     cells += `<div class="${cls}"${toggleAttr} title="${titleAttr}">${d}</div>`;
   }
@@ -3625,22 +3800,28 @@ function bindAssignments(){
     cell.addEventListener('click', (e)=>{
       e.stopPropagation();
       if(!isAdmin()) return;
-      const [iso, taskId] = cell.dataset.calToggle.split('|');
+      const [iso, taskId, userId] = cell.dataset.calToggle.split('|');
       const t = state.tasks.find(x=>x.id===taskId);
       if(!t) return;
       if(!Array.isArray(t.workedWeekendDates)) t.workedWeekendDates = [];
       const idx = t.workedWeekendDates.indexOf(iso);
       if(idx>=0){
-        // reverting a worked weekend day back to weekly off — confirm first
+        // reverting a worked weekend day back to weekly off — confirm first, and
+        // clear the Comp Off record that was set for it in Attendance
         openRevertWeekendConfirm(iso, ()=>{
           const i2 = t.workedWeekendDates.indexOf(iso);
           if(i2>=0) t.workedWeekendDates.splice(i2,1);
+          if(userId && getAttendance(userId, iso)==='CO') setAttendanceValue(userId, iso, null);
           persist(); render();
         });
       } else {
-        // marking a weekly off as worked is immediate, no confirmation needed
-        t.workedWeekendDates.push(iso);
-        persist(); render();
+        // marking a weekly off as worked now also confirms first, and records a
+        // Comp Off (CO) day in Attendance for the same person and date
+        openMarkWeekendWorkedConfirm(iso, ()=>{
+          t.workedWeekendDates.push(iso);
+          if(userId) setAttendanceValue(userId, iso, 'CO');
+          persist(); render();
+        });
       }
     });
   });
@@ -3922,6 +4103,13 @@ function openEditProjectModal(projectId){
             <div class="hint" style="margin-bottom:6px;">Tagged users can see this workstream right away and create their own tasks in it.</div>
             ${buildMultiSelect('epTag', state.users.filter(u=>u.role!=='viewer').map(u=>({id:u.id,label:entityName('user',u.id)})), p.taggedUserIds||[])}
           </div>
+          <div class="field"><label>Content</label>
+            <div class="hint" style="margin-bottom:6px;">Any extra text, images, documents, or videos about this workstream. Shows when someone clicks its name.</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
+              ${(p.contentItems||[]).length ? p.contentItems.map(it=>renderProjectContentItem(it,p.id,true)).join('') : '<div class="muted" style="font-size:12px;">Nothing added yet.</div>'}
+            </div>
+            <button type="button" class="btn btn-sm" id="epAddContentBtn">+ Add content</button>
+          </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="epSubmitBtn" class="btn btn-primary">Save</button>
@@ -3931,6 +4119,26 @@ function openEditProjectModal(projectId){
     </div>`;
   bindModalClose();
   bindMultiSelect('epTag');
+  document.getElementById('epAddContentBtn').addEventListener('click', ()=> openAddProjectContentModal(p.id));
+  document.querySelectorAll('[data-open-project-content]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [pid, itemId] = el.dataset.openProjectContent.split('|');
+      openProjectContentPreviewModal(pid, itemId);
+    });
+  });
+  document.querySelectorAll('[data-delete-project-content]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [pid, itemId] = el.dataset.deleteProjectContent.split('|');
+      const proj = state.projects.find(x=>x.id===pid);
+      const item = proj ? (proj.contentItems||[]).find(i=>i.id===itemId) : null;
+      const name = item ? (item.title || item.fileName || 'this item') : 'this item';
+      openConfirmDelete('Delete this content?', `This will permanently delete "${name}". This can't be undone.`, ()=>{
+        proj.contentItems = (proj.contentItems||[]).filter(i=>i.id!==itemId);
+        persist();
+        openEditProjectModal(pid);
+      });
+    });
+  });
   runOnClickAndEnter('editProjForm', 'epSubmitBtn', ()=>{
     const nameEl = document.getElementById('epName');
     if(!nameEl.value.trim()){ nameEl.focus(); return; }
@@ -4263,6 +4471,20 @@ function openAddProjectModal(){
           </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin:6px 0;"><input type="checkbox" id="pRequireChecklist"> Require each team's checklist before tasks can be closed</label>
           <div class="hint">If on, anyone closing a task here has to tick their team's checklist points first (set those up under Admin → Teams). Leave off for workstreams that don't need it.</div>
+          <div class="field"><label>Content (optional)</label>
+            <div class="hint" style="margin-bottom:6px;">Any extra text, image, document, or video about this workstream — you can add more later too.</div>
+            <select id="pContentType">
+              <option value="">None for now</option>
+              <option value="text">Text</option>
+              <option value="image">Image</option>
+              <option value="document">Document — PDF, Word, or Excel</option>
+              <option value="video">Video</option>
+            </select>
+            <div class="field" id="pContentTitleField" style="display:none;margin-top:8px;"><label>Title (optional)</label><input id="pContentTitle" placeholder="A short label"></div>
+            <div class="field" id="pContentTextField" style="display:none;margin-top:8px;"><label>Text</label><textarea id="pContentText" placeholder="Write it here..."></textarea></div>
+            <div class="field" id="pContentFileField" style="display:none;margin-top:8px;"><label>File</label><input type="file" id="pContentFile"><div class="hint" id="pContentSizeHint"></div></div>
+            <div class="login-error" id="pContentError"></div>
+          </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="projSubmitBtn" class="btn btn-primary">Create</button>
@@ -4272,12 +4494,53 @@ function openAddProjectModal(){
     </div>`;
   bindModalClose();
   bindMultiSelect('pTag');
-  runOnClickAndEnter('projForm', 'projSubmitBtn', ()=>{
+  const ACCEPT = { image:'image/*', document:'.pdf,.doc,.docx,.xls,.xlsx', video:'video/*' };
+  const pContentType = document.getElementById('pContentType');
+  const pContentTitleField = document.getElementById('pContentTitleField');
+  const pContentTextField = document.getElementById('pContentTextField');
+  const pContentFileField = document.getElementById('pContentFileField');
+  const pContentFile = document.getElementById('pContentFile');
+  pContentType.addEventListener('change', ()=>{
+    const v = pContentType.value;
+    pContentTitleField.style.display = v ? '' : 'none';
+    pContentTextField.style.display = v==='text' ? '' : 'none';
+    pContentFileField.style.display = (v && v!=='text') ? '' : 'none';
+    if(v && v!=='text'){
+      pContentFile.setAttribute('accept', ACCEPT[v]);
+      document.getElementById('pContentSizeHint').textContent = `Max ${(state.settings&&state.settings.maxUploadMB)||250} MB.`;
+    }
+  });
+  runOnClickAndEnter('projForm', 'projSubmitBtn', async ()=>{
     const nameEl = document.getElementById('pName');
     const startEl = document.getElementById('pStart');
     if(!nameEl.value.trim() || !startEl.value){ (nameEl.value.trim()?startEl:nameEl).focus(); return; }
+    const errEl = document.getElementById('pContentError');
+    errEl.textContent = '';
+    const contentType = pContentType.value;
+    let contentItem = null;
+    if(contentType==='text'){
+      const text = document.getElementById('pContentText').value.trim();
+      if(!text){ errEl.textContent = 'Add some text, or set content type to "None for now".'; return; }
+      contentItem = {id:uid('pc'), type:'text', title: document.getElementById('pContentTitle').value.trim(), text};
+    } else if(contentType){
+      const file = pContentFile.files[0];
+      if(!file){ errEl.textContent = 'Choose a file, or set content type to "None for now".'; return; }
+      const limitMB = (state.settings && state.settings.maxUploadMB) || 250;
+      if(file.size > limitMB*1024*1024){ errEl.textContent = `That file is too large — the limit is ${limitMB} MB.`; return; }
+      if(contentType==='document' && !/\.(pdf|doc|docx|xls|xlsx)$/i.test(file.name)){ errEl.textContent = 'Documents must be a PDF, Word, or Excel file.'; return; }
+      const submitBtn = document.getElementById('projSubmitBtn');
+      submitBtn.disabled = true; submitBtn.textContent = 'Uploading…';
+      try{
+        const uploaded = await uploadFileToStorage(file);
+        contentItem = {id:uid('pc'), type:contentType, title: document.getElementById('pContentTitle').value.trim(), ...uploaded};
+      }catch(e){
+        submitBtn.disabled = false; submitBtn.textContent = 'Create';
+        errEl.textContent = describeError(e);
+        return;
+      }
+    }
     const taggedUserIds = getMultiSelectValues('pTag');
-    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds };
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, contentItems: contentItem ? [contentItem] : [] };
     state.projects.push(p); persist(); closeModal();
     ui.projectId = p.id; ui.view='project'; render();
   });

@@ -355,6 +355,12 @@
   .ms-option{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;padding:6px 8px;border-radius:6px;cursor:pointer;}
   .ms-option:hover{background:var(--panel-hi);}
   .access-tree-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;padding:4px 0;cursor:pointer;}
+  .sumcal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;max-width:520px;}
+  .sumcal-dow{text-align:center;font-size:11px;color:var(--paper-faint);font-family:var(--f-mono);padding-bottom:4px;}
+  .sumcal-cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border:1px solid var(--line-soft);border-radius:8px;font-size:13px;color:var(--paper-faint);}
+  .sumcal-cell.sumcal-has-summary{cursor:pointer;color:var(--paper);background:var(--amber-soft);border-color:rgba(224,172,63,.4);font-weight:600;}
+  .sumcal-cell.sumcal-has-summary:hover{outline:1px solid var(--amber);}
+  .sumcal-cell.sumcal-blank{border:none;}
   .content-item{background:var(--panel-raised);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-top:8px;}
   .ci-title{font-size:12px;font-weight:600;color:var(--paper);margin-bottom:3px;}
   .ci-text{font-size:13px;color:var(--paper-dim);line-height:1.6;}
@@ -585,7 +591,10 @@ function blockedTeamsForProject(projectId){
 function blockedDetailForProject(projectId){
   return projectTasks(projectId)
     .filter(t=>t.blockedByTeamId)
-    .map(t=>`${entityName(t.assignedType,t.assignedId)}: ${t.blockerReason || 'no reason given'}`)
+    .map(t=>{
+      const blockerName = t.blockedByUserId ? entityName('user', t.blockedByUserId) : null;
+      return `${entityName(t.assignedType,t.assignedId)}${blockerName?' (blocked by '+blockerName+')':''}: ${t.blockerReason || 'no reason given'}`;
+    })
     .join(' | ');
 }
 
@@ -639,6 +648,7 @@ function seedState(){
   });
 
   const featureNodes = [
+    {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''},
     {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
     {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
     {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
@@ -653,7 +663,7 @@ function seedState(){
   const allNodeIds = featureNodes.map(n=>n.id);
   const userAccess = {};
   users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
-  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 }, userAccess, _userAccessGrandfathered: true };
+  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {} };
 }
 
 function withTimeout(promise, ms){
@@ -680,6 +690,7 @@ function normalizeState(s){
   if(!s) return s;
   if(!Array.isArray(s.featureNodes) || s.featureNodes.length===0){
     s.featureNodes = [
+      {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''},
       {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
       {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
       {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
@@ -747,7 +758,27 @@ function normalizeState(s){
       const nextOrder4 = hrKids4.length ? Math.max(...hrKids4.map(n=>n.order||0))+1 : 1;
       s.featureNodes.push({id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:nextOrder4, contentItems:[], description:'', specialView:null});
     }
+    // One-time addition: the Summary module, placed above Workstream via order 0.
+    if(!s.featureNodes.some(n=>n.id==='feat_summary')){
+      s.featureNodes.push({id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''});
+    }
   }
+  // Give everyone the new Summary module specifically — the general Access grandfather
+  // migration below only ever runs once, so a brand new module added afterward would
+  // otherwise be invisible to everyone until an admin manually ticks it.
+  if(!s._summaryModuleGranted && Array.isArray(s.users)){
+    if(!s.userAccess) s.userAccess = {};
+    s.users.forEach(u=>{
+      if(u.role==='admin') return;
+      if(!s.userAccess[u.id]) s.userAccess[u.id] = [];
+      if(!s.userAccess[u.id].includes('feat_summary')) s.userAccess[u.id].push('feat_summary');
+    });
+    s._summaryModuleGranted = true;
+  }
+  if(!s.dailySnapshots || typeof s.dailySnapshots !== 'object' || Array.isArray(s.dailySnapshots)) s.dailySnapshots = {};
+  if(!s.dailySummaries || typeof s.dailySummaries !== 'object' || Array.isArray(s.dailySummaries)) s.dailySummaries = {};
+  if(!s.weeklySummaries || typeof s.weeklySummaries !== 'object' || Array.isArray(s.weeklySummaries)) s.weeklySummaries = {};
+  if(!s.summaryShownLog || typeof s.summaryShownLog !== 'object' || Array.isArray(s.summaryShownLog)) s.summaryShownLog = {};
   if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
   if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
@@ -873,6 +904,8 @@ async function reconcileWithStorage(){
       if(parsedSession && typeof parsedSession==='object' && parsedSession.userId && state.users.find(u=>u.id===parsedSession.userId)){
         session = parsedSession;
         ui.view = 'home';
+        runSummaryEngine();
+        checkAndShowSummaryPopup();
       }
       render();
       persist(); // ensures a migrated legacy state gets written into the shared bucket right away
@@ -941,6 +974,7 @@ function accessibleProjectIds(){
     if((t.assignedType==='user' && t.assignedId===u.id) || (t.assignedType==='team' && t.assignedId===u.teamId)){
       ids.add(t.projectId);
     }
+    if(t.blockedByUserId===u.id) ids.add(t.projectId);
   });
   state.projects.forEach(p=>{
     if(Array.isArray(p.taggedUserIds) && p.taggedUserIds.includes(u.id)) ids.add(p.id);
@@ -1128,6 +1162,7 @@ function render(){
     return;
   }
   const curSnap = currentNavSnapshot();
+  const isNavigation = !lastViewSnapshot || !snapshotsEqual(lastViewSnapshot, curSnap);
   if(!suppressHistoryPush && lastViewSnapshot && !snapshotsEqual(lastViewSnapshot, curSnap)){
     if(!ui.navHistory) ui.navHistory = [];
     ui.navHistory.push(lastViewSnapshot);
@@ -1164,6 +1199,7 @@ function render(){
   `;
   bindGlobalNav();
   bindView();
+  if(isNavigation) window.scrollTo(0, 0);
 }
 
 function navBtn(view, icon, label){
@@ -1282,6 +1318,8 @@ function bindLogin(){
       session.userId = match.id; persistSession();
       ui.loginError='';
       ui.view='home';
+      runSummaryEngine();
+      checkAndShowSummaryPopup();
       render();
     }catch(err){
       ui.loginError = 'Sign-in hit an unexpected error: ' + (err && err.message ? err.message : err);
@@ -1331,6 +1369,16 @@ function renderFocusAreaHome(){
     </div>`;
   }).join('');
 
+  const cu = currentUser();
+  const myBlockNotices = cu ? state.tasks.filter(t=>t.status!=='closed' && t.blockedByUserId===cu.id) : [];
+  const blockNoticesHtml = myBlockNotices.map(t=>{
+    const fromUser = entityName(t.assignedType, t.assignedId);
+    return `
+    <div class="card" data-open-blocker-task="${t.id}" style="margin-bottom:14px;cursor:pointer;border-color:var(--amber);animation:pillBlink 1.6s ease-in-out infinite;">
+      <div style="font-size:14px;color:var(--amber);font-weight:600;">${fromUser} has tagged you as blocker on the following task: "${t.title||'Untitled task'}"</div>
+    </div>`;
+  }).join('');
+
   return `
     <div class="eyebrow">Focus Area</div>
     <h1 class="page-title" style="margin-bottom:16px;">Everything for your focus, in one place.</h1>
@@ -1344,6 +1392,8 @@ function renderFocusAreaHome(){
         <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--amber);">${blockedOpenTasks.length}</b> <span class="muted">blocked</span></span>
       </div>
     </div>
+
+    ${blockNoticesHtml}
 
     ${featureBoxes}
   `;
@@ -1364,6 +1414,16 @@ function bindFocusAreaHome(){
   });
   document.querySelectorAll('[data-edit-feature-desc]').forEach(el=>{
     el.addEventListener('click', (e)=>{ e.stopPropagation(); openEditNodeModal(el.dataset.editFeatureDesc); });
+  });
+  document.querySelectorAll('[data-open-blocker-task]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const taskId = el.dataset.openBlockerTask;
+      const t = state.tasks.find(x=>x.id===taskId);
+      if(!t) return;
+      ui.projectId = t.projectId; ui.view = 'project';
+      render();
+      openTaskDetailsModal(taskId);
+    });
   });
 }
 
@@ -1797,6 +1857,294 @@ function openAppraisalEditModal(userId){
   });
 }
 
+/* ============================== DAILY & WEEKLY SUMMARY ENGINE ============================== */
+
+// A workstream counts as "open" for summary purposes unless every one of its tasks is closed.
+function isProjectOpenForSummary(p){
+  const tasks = projectTasks(p.id);
+  return !(tasks.length>0 && tasks.every(t=>t.status==='closed'));
+}
+
+// Captures today's state for every open workstream, once per calendar day. Cheap to
+// call on every load — it no-ops instantly once today's snapshot already exists.
+function captureSnapshotIfNeeded(){
+  const today = todayISO();
+  let changed = false;
+  state.projects.filter(isProjectOpenForSummary).forEach(p=>{
+    const key = p.id+'|'+today;
+    if(state.dailySnapshots[key]) return;
+    const tasks = projectTasks(p.id);
+    const tl = projectTimeline(p.id);
+    const closed = tasks.filter(t=>t.status==='closed').length;
+    const overdue = tasks.filter(t=>t.status!=='closed' && isTaskDelayed(t)).length;
+    state.dailySnapshots[key] = {
+      projectId: p.id, date: today,
+      progressPct: tasks.length ? Math.round(closed/tasks.length*100) : 0,
+      isRed: tl.isRed, delay: tl.delay,
+      totalTasks: tasks.length, closedTasks: closed, overdueTasks: overdue,
+      extended: tasks.filter(t=>t.extended).map(t=>({
+        taskId: t.id, title: t.title,
+        reason: (t.extensionHistory && t.extensionHistory.length) ? t.extensionHistory[t.extensionHistory.length-1].reason : ''
+      })),
+      blockers: tasks.filter(t=>t.blockedByUserId).map(t=>({
+        taskId: t.id, taskTitle: t.title, blockedByUserId: t.blockedByUserId,
+        assignedName: entityName(t.assignedType, t.assignedId), blockerReason: t.blockerReason
+      }))
+    };
+    changed = true;
+  });
+  if(changed) persist();
+}
+
+// Adds the Year Heading and Month Sub Heading under the Summary module if this is the
+// first summary ever generated for that year/month. Negative order values make the
+// latest year/month sort first, since siblings sort ascending by order.
+function ensureSummaryYearMonth(dateISO){
+  const year = dateISO.slice(0,4);
+  const monthKey = dateISO.slice(0,7);
+  let yearNode = state.featureNodes.find(n=>n.parentId==='feat_summary' && n.nodeType==='heading' && n.name===year);
+  if(!yearNode){
+    yearNode = {id: uid('syear'), name: year, nodeType:'heading', parentId:'feat_summary', order: -Number(year), contentItems:[], description:''};
+    state.featureNodes.push(yearNode);
+  }
+  const monthLabel = monthLabelLong(monthKey);
+  let monthNode = state.featureNodes.find(n=>n.parentId===yearNode.id && n.name===monthLabel);
+  if(!monthNode){
+    monthNode = {id: uid('smonth'), name: monthLabel, nodeType:'subheading', parentId: yearNode.id, order: -Number(monthKey.replace('-','')), contentItems:[], description:'', specialView:'summaryCalendar', summaryMonthKey: monthKey};
+    state.featureNodes.push(monthNode);
+  }
+}
+
+// One workstream's entry within a generated summary — shared shape for daily and weekly.
+function buildSummaryEntry(proj, snap, prevSnap){
+  const statusText = snap.isRed ? `Delay -${snap.delay}` : 'On Agreed timeline';
+  let progressText;
+  if(!prevSnap){
+    progressText = 'First summary — no prior data to compare yet';
+  } else if(snap.progressPct === prevSnap.progressPct){
+    progressText = `No Progress, still at ${snap.progressPct}%`;
+  } else {
+    progressText = `Progress from ${prevSnap.progressPct}% to ${snap.progressPct}%`;
+  }
+  const taskStatusLines = [`${snap.closedTasks} of ${snap.totalTasks} tasks closed`];
+  if(snap.overdueTasks>0) taskStatusLines.push(`${snap.overdueTasks} of ${snap.totalTasks} tasks is overdue`);
+  (snap.extended||[]).forEach(e=>{
+    taskStatusLines.push(`1 task timeline has been extended — "${e.title}": ${e.reason || 'no reason given'}`);
+  });
+  const prevBlockedTaskIds = new Set((prevSnap && prevSnap.blockers ? prevSnap.blockers : []).map(b=>b.taskId));
+  const blockerLines = (snap.blockers||[]).map(b=>{
+    const blockerName = entityName('user', b.blockedByUserId);
+    return prevBlockedTaskIds.has(b.taskId)
+      ? `Still being blocked by ${blockerName}: ${b.blockerReason || 'no reason given'}`
+      : `${b.assignedName} has added ${blockerName} as blocker: ${b.blockerReason || 'no reason given'}`;
+  });
+  return { projectId: proj.id, title: proj.name, status: statusText, progress: progressText, taskStatusLines, blockerLines };
+}
+
+// Generates yesterday's daily summary the first time anyone opens the app on or after
+// the day after — never generates the same date twice.
+function generateDailySummaryIfNeeded(){
+  const y = addDays(todayISO(), -1);
+  if(state.dailySummaries[y]) return;
+  const dayBefore = addDays(y, -1);
+  const projectIds = new Set();
+  Object.values(state.dailySnapshots).forEach(s=>{ if(s.date===y) projectIds.add(s.projectId); });
+  if(projectIds.size===0) return;
+  const workstreams = Array.from(projectIds).map(pid=>{
+    const proj = state.projects.find(p=>p.id===pid);
+    if(!proj) return null;
+    const snap = state.dailySnapshots[pid+'|'+y];
+    const prevSnap = state.dailySnapshots[pid+'|'+dayBefore] || null;
+    return buildSummaryEntry(proj, snap, prevSnap);
+  }).filter(Boolean);
+  if(!workstreams.length) return;
+  state.dailySummaries[y] = { date: y, generatedAt: todayISO(), workstreams };
+  ensureSummaryYearMonth(y);
+  persist();
+}
+
+// A week is always Monday-Friday. Given any date, returns that week's Monday.
+function mondayOf(dateISO){
+  const d = new Date(dateISO+'T00:00:00');
+  const day = d.getDay();
+  const diff = day===0 ? -6 : 1-day;
+  d.setDate(d.getDate()+diff);
+  return d.toISOString().slice(0,10);
+}
+
+// Generates last week's summary every Monday, comparing that week's Friday snapshot
+// (the last working day) to the Friday before it. Never regenerates the same week.
+function generateWeeklySummaryIfNeeded(){
+  const todayD = new Date(todayISO()+'T00:00:00');
+  if(todayD.getDay() !== 1) return; // only ever runs on a Monday
+  const lastFriday = addDays(todayISO(), -3);
+  const lastMonday = mondayOf(lastFriday);
+  if(state.weeklySummaries[lastMonday]) return;
+  const priorFriday = addDays(lastMonday, -3);
+  const projectIds = new Set();
+  Object.values(state.dailySnapshots).forEach(s=>{ if(s.date===lastFriday) projectIds.add(s.projectId); });
+  if(projectIds.size===0) return;
+  const workstreams = Array.from(projectIds).map(pid=>{
+    const proj = state.projects.find(p=>p.id===pid);
+    if(!proj) return null;
+    const snap = state.dailySnapshots[pid+'|'+lastFriday];
+    const prevSnap = state.dailySnapshots[pid+'|'+priorFriday] || null;
+    return buildSummaryEntry(proj, snap, prevSnap);
+  }).filter(Boolean);
+  if(!workstreams.length) return;
+  state.weeklySummaries[lastMonday] = { weekStart: lastMonday, weekEnd: lastFriday, generatedAt: todayISO(), workstreams };
+  ensureSummaryYearMonth(lastMonday);
+  persist();
+}
+
+// Runs the whole engine — call once per app load, after state is loaded.
+function runSummaryEngine(){
+  captureSnapshotIfNeeded();
+  generateDailySummaryIfNeeded();
+  generateWeeklySummaryIfNeeded();
+}
+
+// Shows today's popup if it's past noon and this person hasn't seen it yet — daily on
+// Tue-Sat (summarizing yesterday), weekly on Monday (summarizing last Mon-Fri). Silent
+// on Sunday, and silent if nothing in the summary is visible to this particular viewer.
+function checkAndShowSummaryPopup(){
+  const cu = currentUser();
+  if(!cu) return;
+  const IST_OFFSET_MS = (5*60+30)*60*1000;
+  const now = new Date(Date.now() + IST_OFFSET_MS);
+  if(now.getUTCHours() < 12) return;
+  const dow = now.getUTCDay();
+  const today = todayISO();
+  if(!state.summaryShownLog[cu.id]) state.summaryShownLog[cu.id] = {};
+  const log = state.summaryShownLog[cu.id];
+
+  if(dow===1){
+    const lastFriday = addDays(today, -3);
+    const lastMonday = mondayOf(lastFriday);
+    if(log.lastWeeklyShown === lastMonday) return;
+    const weekly = state.weeklySummaries[lastMonday];
+    if(!weekly) return;
+    log.lastWeeklyShown = lastMonday;
+    persist();
+    openSummaryPopup('weekly', weekly);
+  } else if(dow>=2 && dow<=6){
+    const yesterday = addDays(today, -1);
+    if(log.lastDailyShown === yesterday) return;
+    const daily = state.dailySummaries[yesterday];
+    if(!daily) return;
+    log.lastDailyShown = yesterday;
+    persist();
+    openSummaryPopup('daily', daily);
+  }
+}
+
+function renderSummaryBlocks(workstreams){
+  return workstreams.map(w=>`
+    <div style="padding:14px 0;border-top:1px solid var(--line-soft);">
+      <div style="font-weight:600;font-size:15px;color:var(--paper);">${w.title}</div>
+      <div class="hint" style="margin-top:4px;">${w.status}</div>
+      <div class="hint" style="margin-top:4px;">${w.progress}</div>
+      ${w.taskStatusLines.map(l=>`<div class="hint" style="margin-top:4px;">${l}</div>`).join('')}
+      ${w.blockerLines.map(l=>`<div class="hint" style="margin-top:4px;color:var(--amber);">${l}</div>`).join('')}
+    </div>`).join('');
+}
+
+function openSummaryPopup(kind, summaryData){
+  const accessible = accessibleProjectIds();
+  const visible = summaryData.workstreams.filter(w=> accessible===null || accessible.includes(w.projectId));
+  if(!visible.length) return;
+  const title = kind==='daily' ? 'Daily Workstream' : 'Weekly Workstream';
+  const dateLabel = kind==='daily' ? fmtDate(summaryData.date) : `${fmtDate(summaryData.weekStart)} — ${fmtDate(summaryData.weekEnd)}`;
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:70;">
+      <div class="modal" style="max-width:640px;max-height:80vh;overflow-y:auto;">
+        <h3>${title}</h3>
+        <div class="modal-sub">${dateLabel}</div>
+        ${renderSummaryBlocks(visible)}
+        <div class="modal-actions"><button class="btn btn-primary" id="summaryPopupClose">Close</button></div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  div.querySelector('#summaryPopupClose').addEventListener('click', ()=> div.remove());
+}
+
+// The calendar page for one Month sub-heading. Every date maps to whichever summary
+// would have actually popped up on that date: Monday shows the week before's weekly
+// summary, Tue-Sat show the prior day's daily summary, Sunday has nothing.
+function renderSummaryCalendar(node){
+  const monthKey = node.summaryMonthKey;
+  const [y,m] = monthKey.split('-').map(Number);
+  const daysInMonth = new Date(y,m,0).getDate();
+  const firstDow = new Date(y,m-1,1).getDay();
+
+  const cells = [];
+  for(let i=0;i<firstDow;i++) cells.push('<div class="sumcal-cell sumcal-blank"></div>');
+  for(let d=1; d<=daysInMonth; d++){
+    const dateISO = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dow = new Date(dateISO+'T00:00:00').getDay();
+    let hasSummary = false;
+    if(dow===1){
+      const priorMonday = mondayOf(addDays(dateISO, -3));
+      hasSummary = !!state.weeklySummaries[priorMonday];
+    } else if(dow>=2 && dow<=6){
+      hasSummary = !!state.dailySummaries[addDays(dateISO, -1)];
+    }
+    cells.push(`<div class="sumcal-cell${hasSummary?' sumcal-has-summary':''}"${hasSummary?` data-summary-date="${dateISO}"`:''}>${d}</div>`);
+  }
+
+  return `
+    <div class="eyebrow">Summary Calendar</div>
+    <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
+    <div class="hint" style="margin-bottom:14px;">Click a highlighted date to see the summary that appeared that day.</div>
+    <div class="sumcal-grid">
+      ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="sumcal-dow">${d}</div>`).join('')}
+      ${cells.join('')}
+    </div>
+  `;
+}
+
+function bindSummaryCalendar(node){
+  document.querySelectorAll('[data-summary-date]').forEach(cell=>{
+    cell.addEventListener('click', ()=>{
+      const dateISO = cell.dataset.summaryDate;
+      const dow = new Date(dateISO+'T00:00:00').getDay();
+      if(dow===1){
+        const priorMonday = mondayOf(addDays(dateISO, -3));
+        const weekly = state.weeklySummaries[priorMonday];
+        if(weekly) openSummaryPopup('weekly', weekly);
+      } else {
+        const daily = state.dailySummaries[addDays(dateISO, -1)];
+        if(daily) openSummaryPopup('daily', daily);
+      }
+    });
+  });
+}
+
+// Free-text search across every stored daily and weekly summary — matches workstream
+// names, status text, progress lines, task lines, and blocker lines.
+function searchAllSummaries(query){
+  const q = query.trim().toLowerCase();
+  if(!q) return [];
+  const accessible = accessibleProjectIds();
+  const results = [];
+  Object.values(state.dailySummaries).forEach(summary=>{
+    summary.workstreams.forEach(w=>{
+      if(accessible!==null && !accessible.includes(w.projectId)) return;
+      const haystack = [w.title, w.status, w.progress, ...w.taskStatusLines, ...w.blockerLines].join(' ').toLowerCase();
+      if(haystack.includes(q)) results.push({kind:'daily', date: summary.date, workstream: w});
+    });
+  });
+  Object.values(state.weeklySummaries).forEach(summary=>{
+    summary.workstreams.forEach(w=>{
+      if(accessible!==null && !accessible.includes(w.projectId)) return;
+      const haystack = [w.title, w.status, w.progress, ...w.taskStatusLines, ...w.blockerLines].join(' ').toLowerCase();
+      if(haystack.includes(q)) results.push({kind:'weekly', weekStart: summary.weekStart, workstream: w});
+    });
+  });
+  return results;
+}
+
 function renderContentItem(it, headingId){
   if(it.type==='link') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">🔗 ${it.title||it.url}</a></div>`;
   const icon = it.type==='text' ? '📝' : it.type==='image' ? '🖼️' : it.type==='video' ? '🎬' : '📄';
@@ -1835,6 +2183,18 @@ function renderHeadingBox(h, showHandle){
 // A Sub Heading, rendered inline within its ancestor Heading's own page — always
 // collapsible, recursively, however deep it goes.
 function renderSubHeadingCollapsible(h, depth){
+  if(h.specialView){
+    return `
+    <div class="card drag-node" style="margin-bottom:14px;margin-left:${depth*20}px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;">
+          <div class="heading-name">${h.name}</div>
+          <div class="muted" style="font-size:12px;margin-top:2px;">${h.description || 'Click to open'}</div>
+        </div>
+        ${isAdmin() ? `<button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>` : ''}
+      </div>
+    </div>`;
+  }
   const items = h.contentItems || [];
   const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading' && canSeeNode(c.id));
   const itemsHtml = items.map(it=>`
@@ -1896,11 +2256,14 @@ function renderFeatureNode(){
   const node = featureNode(ui.featureNodeId);
   if(!node) return `<div class="empty-state"><div class="et">Not found</div></div>`;
 
-  if(node.nodeType==='heading' && node.specialView==='attendance'){
+  if(node.specialView==='attendance'){
     return renderAttendanceSheet(node);
   }
-  if(node.nodeType==='heading' && node.specialView==='appraisal'){
+  if(node.specialView==='appraisal'){
     return renderAppraisalSheet(node);
+  }
+  if(node.specialView==='summaryCalendar'){
+    return renderSummaryCalendar(node);
   }
 
   if(node.nodeType==='heading' || node.nodeType==='subheading'){
@@ -1941,6 +2304,12 @@ function renderFeatureNode(){
   return `
     <div class="eyebrow">${node.parentId ? 'Feature' : 'Module'}</div>
     <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
+    ${node.id==='feat_summary' ? `
+      <div class="field" style="max-width:420px;">
+        <input type="text" id="summarySearchInput" placeholder="Search past summaries — workstream name, status, blocker...">
+      </div>
+      <div id="summarySearchResults" style="margin-top:10px;"></div>
+    ` : ''}
     ${(isAdmin() && ['feat_kr','feat_fai','feat_hr'].includes(node.id)) ? `<button class="btn btn-primary btn-sm" style="margin-bottom:20px;" data-add-heading-only="${node.id}">+ Add Heading</button>` : ''}
     ${subFeatureBoxes}
     ${headingCards}
@@ -1950,12 +2319,16 @@ function renderFeatureNode(){
 
 function bindFeatureNode(){
   const node = featureNode(ui.featureNodeId);
-  if(node && node.nodeType==='heading' && node.specialView==='attendance'){
+  if(node && node.specialView==='attendance'){
     bindAttendanceSheet();
     return;
   }
-  if(node && node.nodeType==='heading' && node.specialView==='appraisal'){
+  if(node && node.specialView==='appraisal'){
     bindAppraisalSheet();
+    return;
+  }
+  if(node && node.specialView==='summaryCalendar'){
+    bindSummaryCalendar(node);
     return;
   }
   document.querySelectorAll('[data-open-feature]').forEach(el=>{
@@ -2007,6 +2380,25 @@ function bindFeatureNode(){
     });
   });
   bindDragReorder();
+  const searchInput = document.getElementById('summarySearchInput');
+  if(searchInput){
+    searchInput.addEventListener('input', ()=>{
+      const resultsEl = document.getElementById('summarySearchResults');
+      const results = searchAllSummaries(searchInput.value);
+      if(!searchInput.value.trim()){ resultsEl.innerHTML = ''; return; }
+      resultsEl.innerHTML = results.length ? results.map((r,i)=>{
+        const label = r.kind==='daily' ? `${r.workstream.title} — ${fmtDate(r.date)} (daily)` : `${r.workstream.title} — week of ${fmtDate(r.weekStart)} (weekly)`;
+        return `<div class="ci-link" data-search-result="${i}" style="cursor:pointer;display:block;padding:6px 0;">${label}</div>`;
+      }).join('') : '<div class="muted" style="font-size:12px;">No matches.</div>';
+      resultsEl.querySelectorAll('[data-search-result]').forEach(el=>{
+        el.addEventListener('click', ()=>{
+          const r = results[Number(el.dataset.searchResult)];
+          if(r.kind==='daily') openSummaryPopup('daily', state.dailySummaries[r.date]);
+          else openSummaryPopup('weekly', state.weeklySummaries[r.weekStart]);
+        });
+      });
+    });
+  }
 }
 
 let dragSourceNodeId = null;
@@ -2581,7 +2973,7 @@ function renderProject(){
   const taskRows = tasks.map((t,i)=>{
     const color = taskStatusColor(t);
     const canEdit = canEditTask(t);
-    const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
+    const blockedTeamName = t.blockedByTeamId ? (t.blockedByUserId ? entityName('user', t.blockedByUserId) : ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team')) : null;
     return `
     <tr>
       <td class="mono" style="color:var(--paper);">${i+1}.</td>
@@ -2720,7 +3112,7 @@ function bindProject(){
     el.addEventListener('click', (e)=>{
       e.stopPropagation();
       const t = state.tasks.find(x=>x.id===el.dataset.clearBlocker);
-      if(t){ t.blockedByTeamId = null; t.blockerReason = null; touchTask(t); persist(); render(); }
+      if(t){ t.blockedByTeamId = null; t.blockedByUserId = null; t.blockerReason = null; touchTask(t); persist(); render(); }
     });
   });
   const addBtn = document.querySelector('[data-add-task]');
@@ -2732,17 +3124,18 @@ function bindProject(){
 function openBlockerModal(taskId){
   const t = state.tasks.find(x=>x.id===taskId);
   if(!t) return;
+  const candidates = state.users.filter(u=>u.role!=='viewer' && u.id!==t.assignedId);
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
         <h3>Flag a blocker</h3>
-        <div class="modal-sub">${t.title} — mark which team this task is waiting on.</div>
+        <div class="modal-sub">${t.title} — tag the specific person this task is waiting on.</div>
         <form id="blockerForm">
-          <div class="field"><label>Blocked by team</label>
-            <select id="bkTeam">${state.teams.map(tm=>`<option value="${tm.id}">${tm.name}</option>`).join('')}</select>
+          <div class="field"><label>Blocked by</label>
+            <select id="bkUser">${candidates.map(u=>`<option value="${u.id}">${entityName('user',u.id)}</option>`).join('')}</select>
           </div>
           <div class="field"><label>Why is it blocked?</label><textarea id="bkReason" placeholder="What's needed from them before this can move?" required></textarea></div>
-          <div class="hint">Everyone viewing this project will see a flashing "Blocked" indicator until this is cleared — hovering over it shows this reason.</div>
+          <div class="hint">Everyone viewing this project will see a flashing "Blocked" indicator until this is cleared, and the person you tag will see a notice on their Focus Area page.</div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="bkSubmitBtn" class="btn btn-danger">Mark as blocked</button>
@@ -2752,10 +3145,12 @@ function openBlockerModal(taskId){
     </div>`;
   bindModalClose();
   runOnClickAndEnter('blockerForm', 'bkSubmitBtn', ()=>{
-    const teamId = document.getElementById('bkTeam').value;
+    const userId = document.getElementById('bkUser').value;
     const reason = document.getElementById('bkReason').value.trim();
-    if(!teamId || !reason) return;
-    t.blockedByTeamId = teamId;
+    if(!userId || !reason) return;
+    const blockingUser = state.users.find(u=>u.id===userId);
+    t.blockedByUserId = userId;
+    t.blockedByTeamId = blockingUser ? blockingUser.teamId : null;
     t.blockerReason = reason;
     touchTask(t);
     persist(); closeModal(); render();
@@ -2810,7 +3205,7 @@ function openBlankTaskModal(projectId){
       id: uid('t'), projectId, title: titleEl.value.trim(),
       description:'', reason:'', assignedType:type, assignedId:id,
       predecessorId: document.getElementById('btPredecessor').value || null,
-      startDate:'', endDate:'', originalEndDate:'', extended:false, blockedByTeamId:null, status:'open', closedDate:null,
+      startDate:'', endDate:'', originalEndDate:'', extended:false, blockedByTeamId:null, blockedByUserId:null, status:'open', closedDate:null,
       datesLocked:false, extensionHistory:[], weekendWork:false, checklistRecord:null, workedWeekendDates:[], lastUpdated:null, blockerReason:null, deadlineDisabled:false,
       checklistRequired: !!(proj && proj.requireChecklist), attachments: []
     };
@@ -2829,7 +3224,7 @@ function openWorkstreamInfoModal(projectId){
   const tasks = projectTasks(projectId);
   const taskTextBlocks = [];
   const taskBlocks = tasks.map((t,i)=>{
-    const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
+    const blockedTeamName = t.blockedByTeamId ? (t.blockedByUserId ? entityName('user', t.blockedByUserId) : ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team')) : null;
     const extensionHtml = (t.extensionHistory && t.extensionHistory.length)
       ? `<div class="hint" style="margin-top:4px;"><b style="color:var(--paper-dim);">Extension history:</b>${t.extensionHistory.map(h=>`<br>→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}`).join('')}</div>`
       : '';
@@ -2894,7 +3289,7 @@ function openTaskDetailsModal(taskId){
   const t = state.tasks.find(x=>x.id===taskId);
   if(!t) return;
   const proj = state.projects.find(p=>p.id===t.projectId);
-  const blockedTeamName = t.blockedByTeamId ? ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team') : null;
+  const blockedTeamName = t.blockedByTeamId ? (t.blockedByUserId ? entityName('user', t.blockedByUserId) : ((state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team')) : null;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">

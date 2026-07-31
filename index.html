@@ -917,12 +917,27 @@ function loadAllInstant(){
 async function reconcileWithStorage(){
   if(!HAS_STORAGE) return;
   const stillOnFreshLogin = ()=> ui.view==='login' && !session.userId;
+  let stateFetchFailed = false;
 
   try{
-    const [stateRes, sessionRes] = await withTimeout(Promise.all([
-      storageAdapter.get(STORAGE_KEY).catch(()=>null),
-      (sessionAdapter ? sessionAdapter.get(SESSION_KEY) : Promise.resolve(null)).catch(()=>null),
+    const [stateSettled, sessionSettled] = await withTimeout(Promise.allSettled([
+      storageAdapter.get(STORAGE_KEY),
+      (sessionAdapter ? sessionAdapter.get(SESSION_KEY) : Promise.resolve(null)),
     ]), 4000);
+
+    let stateRes = null;
+    if(stateSettled.status === 'fulfilled'){
+      stateRes = stateSettled.value;
+    } else {
+      // The fetch itself failed (timeout, network, RLS, anything) — this is NOT the
+      // same thing as "nothing has ever been saved here." Treating a failed fetch as
+      // "empty" is exactly what let this app overwrite real Supabase data with fresh
+      // seed data in the past. From here on, a failed fetch always means "we don't
+      // know what's there" — never "there's nothing there."
+      stateFetchFailed = true;
+      console.error('Fetching saved state failed:', stateSettled.reason);
+    }
+    const sessionRes = (sessionSettled && sessionSettled.status === 'fulfilled') ? sessionSettled.value : null;
 
     let parsedState = stateRes && stateRes.value ? JSON.parse(stateRes.value) : null;
     const parsedSession = sessionRes && sessionRes.value ? JSON.parse(sessionRes.value) : null;
@@ -971,9 +986,18 @@ async function reconcileWithStorage(){
       }
       render();
       persist(); // ensures a migrated legacy state gets written into the shared bucket right away
-    } else if(!isValidState(parsedState)){
-      // nothing usable saved yet — persist our fresh seed so future loads (and other people) have something to find
+    } else if(!isValidState(parsedState) && !stateFetchFailed){
+      // Only safe to treat this as "genuinely nothing saved yet" when the fetch itself
+      // definitely succeeded and found no row — never when the fetch failed, since a
+      // failure tells us nothing about whether real data exists.
       persist();
+    } else if(stateFetchFailed){
+      // The fetch failed — do NOT touch Supabase. Show an error and leave whatever is
+      // there completely alone; refreshing (once connectivity is fine) will find it.
+      const msg = 'Could not load your saved data this time. Nothing was changed or overwritten — refresh to try again.';
+      ui.saveError = msg;
+      ui.loginError = msg;
+      render();
     }
   }catch(e){
     // Storage never responded in time, or something else unexpected failed. The seed

@@ -505,7 +505,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, attendanceMonth:null, navHistory:[] };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[] };
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -943,12 +943,31 @@ async function reconcileWithStorage(){
     }
 
     if(isValidState(parsedState) && stillOnFreshLogin()){
-      state = normalizeState(parsedState);
+      try{
+        state = normalizeState(parsedState);
+      }catch(normErr){
+        // A bug in a migration must never cost real data — fall back to the raw,
+        // un-migrated (but real) state rather than silently leaving the stale seed
+        // data in memory. Surface it so it's never silently invisible, on whichever
+        // screen actually ends up showing (login, if no session to resume; the app
+        // shell, if there is).
+        console.error('normalizeState failed — using raw saved data as a fallback:', normErr);
+        state = parsedState;
+        const migrationMsg = 'A data-migration step hit an error and was skipped: ' + describeError(normErr) + '. Your saved data is still intact — this only means the newest features may not show correctly until this is fixed.';
+        ui.migrationError = migrationMsg;
+        ui.loginError = migrationMsg;
+      }
       if(parsedSession && typeof parsedSession==='object' && parsedSession.userId && state.users.find(u=>u.id===parsedSession.userId)){
         session = parsedSession;
         ui.view = 'home';
-        runSummaryEngine();
-        checkAndShowSummaryPopup();
+        try{
+          runSummaryEngine();
+          checkAndShowSummaryPopup();
+        }catch(summaryErr){
+          // Never let a bug in the newer Summary feature block the rest of the app
+          // from loading and showing real data.
+          console.error('Summary engine failed (non-fatal):', summaryErr);
+        }
       }
       render();
       persist(); // ensures a migrated legacy state gets written into the shared bucket right away
@@ -957,7 +976,15 @@ async function reconcileWithStorage(){
       persist();
     }
   }catch(e){
-    // storage never responded in time or errored — the seed data already on screen keeps working
+    // Storage never responded in time, or something else unexpected failed. The seed
+    // data already on screen keeps the app usable, but the person needs to know their
+    // real data didn't load — silence here is exactly what made past incidents
+    // confusing ("where did my data go?") instead of obviously "still loading/retry".
+    console.error('reconcileWithStorage failed:', e);
+    const msg = 'Could not load your saved data (' + describeError(e) + '). What you see now may be starter/demo content, not your real data. Try refreshing — if this keeps happening, your data is very likely still safe in Supabase, just not reachable from this page load.';
+    ui.saveError = msg;
+    ui.loginError = ui.loginError || msg;
+    render();
   }
 }
 
@@ -1235,6 +1262,11 @@ function render(){
           <div class="who"><span>${currentUser() ? currentUser().name : ''}</span><div class="avatar">${currentUser() ? initials(currentUser().name) : ''}</div></div>
         </div>
       </div>
+      ${ui.migrationError ? `
+      <div style="background:var(--red-soft);border-bottom:1px solid var(--red);padding:10px 28px;display:flex;align-items:center;gap:12px;">
+        <span style="color:var(--red);font-size:13px;flex:1;"><b>Heads up:</b> ${ui.migrationError}</span>
+        <button class="btn btn-sm" id="dismissMigrationError">Dismiss</button>
+      </div>` : ''}
       ${ui.saveError ? `
       <div style="background:var(--red-soft);border-bottom:1px solid var(--red);padding:10px 28px;display:flex;align-items:center;gap:12px;">
         <span style="color:var(--red);font-size:13px;flex:1;"><b>Your last change didn't save.</b> ${ui.saveError}. Check your connection and try again — if you're viewing this through a Claude preview link rather than your real published site, saves are expected to fail there.</span>
@@ -1291,6 +1323,8 @@ function bindGlobalNav(){
   });
   const dismissBtn = document.getElementById('dismissSaveError');
   if(dismissBtn) dismissBtn.addEventListener('click', ()=>{ ui.saveError=null; render(); });
+  const dismissMigrationBtn = document.getElementById('dismissMigrationError');
+  if(dismissMigrationBtn) dismissMigrationBtn.addEventListener('click', ()=>{ ui.migrationError=null; render(); });
   const goBackBtn = document.querySelector('[data-go-back]');
   if(goBackBtn) goBackBtn.addEventListener('click', goBack);
 }
@@ -1366,8 +1400,12 @@ function bindLogin(){
       session.userId = match.id; persistSession();
       ui.loginError='';
       ui.view='home';
-      runSummaryEngine();
-      checkAndShowSummaryPopup();
+      try{
+        runSummaryEngine();
+        checkAndShowSummaryPopup();
+      }catch(summaryErr){
+        console.error('Summary engine failed (non-fatal):', summaryErr);
+      }
       render();
     }catch(err){
       ui.loginError = 'Sign-in hit an unexpected error: ' + (err && err.message ? err.message : err);

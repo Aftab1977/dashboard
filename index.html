@@ -335,8 +335,8 @@
   /* ---------- login ---------- */
   .login-shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;width:100%;}
   .login-card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:34px 30px;}
-  .login-logo{max-width:220px;max-height:72px;width:auto;height:auto;object-fit:contain;margin-bottom:18px;display:block;}
-  .login-title{font-family:var(--f-display);font-size:30px;margin-bottom:2px;}
+  .login-logo{max-width:264px;max-height:86px;width:auto;height:auto;object-fit:contain;margin:0 auto 18px;display:block;}
+  .login-title{font-family:var(--f-display);font-size:30px;margin-bottom:2px;text-align:center;}
   .login-error{color:var(--red);font-size:12px;margin-top:8px;font-family:var(--f-mono);min-height:14px;}
 
   /* ---------- admin tabs ---------- */
@@ -1371,8 +1371,8 @@ function renderLogin(){
     <div class="login-card">
       ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="login-logo">` : ''}
       <div class="login-title">ImproveID Workspace</div>
-      <div class="muted" style="font-size:13px;">Everything for your focus, in one place.</div>
-      <div class="mono" id="loginDateTime" style="font-size:11px;color:var(--paper-faint);margin-top:6px;">${fmtDate(todayISO())} · ${nowTimeIST()} IST</div>
+      <div class="muted" style="font-size:13px;text-align:center;">Everything for your focus, in one place.</div>
+      <div class="mono" id="loginDateTime" style="font-size:11px;color:var(--paper-faint);margin-top:6px;text-align:center;">${fmtDate(todayISO())} · ${nowTimeIST()} IST</div>
       <form id="loginForm" style="margin-top:22px;">
         <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
         <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" required></div>

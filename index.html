@@ -28,6 +28,10 @@
     --amber-soft:#2E2410;
     --amber-border:rgba(224,172,63,.4);
     --amber-glow:rgba(224,172,63,.35);
+    --blocker:#CC5500;
+    --blocker-soft:#2E1B0A;
+    --blocker-border:rgba(204,85,0,.4);
+    --blocker-glow:rgba(204,85,0,.35);
     --card-shadow:none;
     --f-display:'Barlow Condensed',sans-serif;
     --f-body:'Space Grotesk',sans-serif;
@@ -55,6 +59,12 @@
     --amber-soft:#EBF1FB;
     --amber-border:rgba(48,102,206,.35);
     --amber-glow:rgba(48,102,206,.3);
+    /* Blockers get their own dedicated dark-orange, identical across themes — like
+       green/red, this is a status color carrying real meaning, not decoration. */
+    --blocker:#CC5500;
+    --blocker-soft:#FBEDE3;
+    --blocker-border:rgba(204,85,0,.35);
+    --blocker-glow:rgba(204,85,0,.3);
     --card-shadow:0 1px 3px rgba(30,35,60,.06);
   }
   *{box-sizing:border-box;}
@@ -181,6 +191,7 @@
   .pill-green{background:var(--green-soft);color:var(--green);}
   .pill-red{background:var(--red-soft);color:var(--red);}
   .pill-amber{background:var(--amber-soft);color:var(--amber);}
+  .pill-blocker{background:var(--blocker-soft);color:var(--blocker);}
   .dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
   .dot.pulse{animation:pulse 1.8s ease-in-out infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
@@ -407,17 +418,17 @@
      cell classes) for any future table-style feature, so font and alignment stay
      consistent everywhere: one font family, one size, one color, everything centered
      including headers/titles. */
-  .att-table{border-collapse:collapse;font-family:var(--f-mono);font-size:12px;background:#fff;width:100%;table-layout:auto;}
-  .att-table th, .att-table td{border:1px solid #000;padding:0;text-align:center;background:#fff;color:#000;font-family:var(--f-mono);font-size:12px;word-break:break-word;}
-  .att-name-col{position:sticky;left:0;z-index:2;background:#fff;text-align:center;padding:10px 12px !important;font-family:var(--f-mono);font-size:12px;color:#000;font-weight:700;}
-  .att-daycol{padding:6px 0;color:#000;font-weight:700;min-width:26px;font-family:var(--f-mono);font-size:12px;text-align:center;}
+  .att-table{border-collapse:collapse;font-family:var(--f-mono);font-size:11px;background:#fff;width:100%;table-layout:auto;}
+  .att-table th, .att-table td{border:1px solid #000;padding:0;text-align:center;background:#fff;color:#000;font-family:var(--f-mono);font-size:11px;}
+  .att-name-col{position:sticky;left:0;z-index:2;background:#fff;text-align:center;padding:10px 12px !important;font-family:var(--f-mono);font-size:11px;color:#000;font-weight:700;white-space:nowrap;}
+  .att-daycol{padding:6px 0;color:#000;font-weight:700;min-width:24px;font-family:var(--f-mono);font-size:11px;text-align:center;}
   .att-weekend-col{background:#fff;}
-  .att-name{position:sticky;left:0;z-index:1;background:#fff;text-align:center;padding:8px 12px !important;font-family:var(--f-mono);font-size:12px;color:#000;font-weight:600;border-right:1px solid #000;}
-  .att-cell{width:26px;height:28px;color:#000;font-family:var(--f-mono);font-size:12px;text-align:center;}
+  .att-name{position:sticky;left:0;z-index:1;background:#fff;text-align:center;padding:8px 12px !important;font-family:var(--f-mono);font-size:11px;color:#000;font-weight:600;border-right:1px solid #000;white-space:nowrap;}
+  .att-cell{width:24px;height:26px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;}
   .att-cell.att-weekend{background:#fff;color:#000;}
   .att-cell.att-clickable{cursor:pointer;}
   .att-cell.att-clickable:hover{outline:1px solid #000;outline-offset:-1px;}
-  .appraisal-cell{padding:10px 12px !important;text-align:center;color:#000;font-family:var(--f-mono);font-size:12px;}
+  .appraisal-cell{padding:10px 12px !important;text-align:center;color:#000;font-family:var(--f-mono);font-size:11px;}
   .appraisal-overdue{color:var(--red) !important;font-weight:600;}
   tr[data-appraisal-row]:hover .att-name, tr[data-appraisal-row]:hover .appraisal-cell{background:#F0F0F0;}
 </style>
@@ -1207,7 +1218,7 @@ function donutGradient(pct, colorVar){
 }
 
 function pill(status, label, tooltip){
-  const cls = status==='red' ? 'pill-red' : status==='amber' ? 'pill-amber' : 'pill-green';
+  const cls = status==='red' ? 'pill-red' : status==='amber' ? 'pill-amber' : status==='blocker' ? 'pill-blocker' : 'pill-green';
   const pulse = status==='red' ? ' pulse' : '';
   const titleAttr = tooltip ? ` title="${tooltip.replace(/"/g,'&quot;')}"` : '';
   return `<span class="pill ${cls}"${titleAttr}><span class="dot${pulse}"></span>${label}</span>`;
@@ -1474,8 +1485,8 @@ function renderFocusAreaHome(){
   const blockNoticesHtml = myBlockNotices.map(t=>{
     const fromUser = entityName(t.assignedType, t.assignedId);
     return `
-    <div class="card" data-open-blocker-task="${t.id}" style="margin-bottom:14px;cursor:pointer;border-color:var(--amber);animation:pillBlink 1.6s ease-in-out infinite;">
-      <div style="font-size:14px;color:var(--amber);font-weight:600;">${fromUser} has tagged you as blocker on the following task: "${t.title||'Untitled task'}"</div>
+    <div class="card" data-open-blocker-task="${t.id}" style="margin-bottom:14px;cursor:pointer;border-color:var(--blocker);animation:pillBlink 1.6s ease-in-out infinite;">
+      <div style="font-size:14px;color:var(--blocker);font-weight:600;">${fromUser} has tagged you as blocker on the following task: "${t.title||'Untitled task'}"</div>
     </div>`;
   }).join('');
 
@@ -1484,12 +1495,23 @@ function renderFocusAreaHome(){
     <h1 class="page-title" style="margin-bottom:16px;">Everything for your focus, in one place.</h1>
 
     <div class="card" style="margin-bottom:22px;">
-      <div class="section-title" style="margin-bottom:10px;">Today — ${fmtDate(today)}</div>
-      <div style="font-size:14px;color:var(--paper-dim);margin-bottom:10px;">Workstream Snapshot</div>
-      <div style="display:flex;gap:20px;flex-wrap:wrap;">
-        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--paper);">${dueTodayTasks.length}</b> <span class="muted">due today</span></span>
-        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--red);">${delayedOpenTasks.length}</b> <span class="muted">currently delayed</span></span>
-        <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--amber);">${blockedOpenTasks.length}</b> <span class="muted">blocked</span></span>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">
+        <div>
+          <div class="section-title" style="margin-bottom:10px;">Today — ${fmtDate(today)}</div>
+          <div style="font-size:14px;color:var(--paper-dim);margin-bottom:10px;">Workstream Snapshot</div>
+          <div style="display:flex;gap:20px;flex-wrap:wrap;">
+            <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--paper);">${dueTodayTasks.length}</b> <span class="muted">due today</span></span>
+            <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--red);">${delayedOpenTasks.length}</b> <span class="muted">currently delayed</span></span>
+            <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--blocker);">${blockedOpenTasks.length}</b> <span class="muted">blocked</span></span>
+          </div>
+        </div>
+        <div style="min-width:260px;">
+          <div class="section-title" style="margin-bottom:10px;text-align:center;">Workspace Search</div>
+          <div style="position:relative;max-width:280px;">
+            <input type="text" id="workspaceSearchInput" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;">
+            <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1497,6 +1519,65 @@ function renderFocusAreaHome(){
 
     ${featureBoxes}
   `;
+}
+
+// Full Workspace Search — covers everything that's genuinely text-based and within
+// the searching user's own access: workstream names, task text, Repository/FAI/Policies
+// content (full text for Text/Link, title-only for Image/Document/Video since their
+// contents aren't extracted), workstream-level content, and Daily/Weekly Summaries.
+function searchWorkspace(query){
+  const q = query.trim().toLowerCase();
+  if(!q) return [];
+  const results = [];
+  const visibleProjIds = new Set(visibleProjects().map(p=>p.id));
+
+  visibleProjects().forEach(p=>{
+    if(p.name.toLowerCase().includes(q)){
+      results.push({type:'Workstream', label:p.name, go:()=>{ ui.projectId=p.id; ui.view='project'; render(); }});
+    }
+  });
+
+  state.tasks.forEach(t=>{
+    if(!visibleProjIds.has(t.projectId)) return;
+    const haystack = [t.title, t.description, t.reason, t.blockerReason].filter(Boolean).join(' ').toLowerCase();
+    if(haystack.includes(q)){
+      const proj = state.projects.find(p=>p.id===t.projectId);
+      results.push({type:'Task', label:(t.title||'Untitled task')+(proj?' — '+proj.name:''), go:()=>{ ui.projectId=t.projectId; ui.view='project'; render(); openTaskDetailsModal(t.id); }});
+    }
+  });
+
+  state.featureNodes.forEach(node=>{
+    if(!canSeeNode(node.id)) return;
+    (node.contentItems||[]).forEach(item=>{
+      const titleMatch = (item.title||item.fileName||'').toLowerCase().includes(q);
+      const bodyMatch = (item.type==='text' && item.text && item.text.toLowerCase().includes(q)) || (item.type==='link' && item.url && item.url.toLowerCase().includes(q));
+      if(titleMatch || bodyMatch){
+        const name = item.title || item.fileName || (item.type==='text'?'Text note':item.url);
+        results.push({type:'Content', label:name+' — '+node.name, go:()=>{ ui.view='feature'; ui.featureNodeId=node.id; render(); openContentItemPreviewModal(node.id, item.id); }});
+      }
+    });
+  });
+
+  visibleProjects().forEach(p=>{
+    (p.contentItems||[]).forEach(item=>{
+      const titleMatch = (item.title||item.fileName||'').toLowerCase().includes(q);
+      const bodyMatch = (item.type==='text' && item.text && item.text.toLowerCase().includes(q));
+      if(titleMatch || bodyMatch){
+        const name = item.title || item.fileName || 'Untitled';
+        results.push({type:'Workstream content', label:name+' — '+p.name, go:()=>{ ui.projectId=p.id; ui.view='project'; render(); openProjectContentPreviewModal(p.id, item.id); }});
+      }
+    });
+  });
+
+  searchAllSummaries(query).forEach(r=>{
+    const label = r.kind==='daily' ? `${r.workstream.title} — ${fmtDate(r.date)} (daily summary)` : `${r.workstream.title} — week of ${fmtDate(r.weekStart)} (weekly summary)`;
+    results.push({type:'Summary', label, go:()=>{
+      if(r.kind==='daily') openSummaryPopup('daily', state.dailySummaries[r.date]);
+      else openSummaryPopup('weekly', state.weeklySummaries[r.weekStart]);
+    }});
+  });
+
+  return results;
 }
 
 function bindFocusAreaHome(){
@@ -1525,6 +1606,40 @@ function bindFocusAreaHome(){
       openTaskDetailsModal(taskId);
     });
   });
+  const wsInput = document.getElementById('workspaceSearchInput');
+  if(wsInput){
+    wsInput.addEventListener('input', ()=>{
+      const resultsEl = document.getElementById('workspaceSearchResults');
+      if(!wsInput.value.trim()){ resultsEl.innerHTML=''; return; }
+      const matches = searchWorkspace(wsInput.value).slice(0, 30);
+      window.__wsSearchResults = matches;
+      resultsEl.innerHTML = matches.length ? `
+        <div class="card" style="padding:6px;box-shadow:0 8px 20px rgba(0,0,0,.25);max-height:360px;overflow-y:auto;">
+          ${matches.map((r,i)=>`
+            <div class="ci-link" data-search-result-idx="${i}" style="cursor:pointer;display:block;padding:8px 10px;border-radius:6px;">
+              <span class="mono" style="font-size:10px;color:var(--paper-faint);text-transform:uppercase;letter-spacing:.04em;">${r.type}</span><br>
+              ${r.label}
+            </div>`).join('')}
+        </div>` : `
+        <div class="card" style="padding:10px 12px;box-shadow:0 8px 20px rgba(0,0,0,.25);">
+          <span class="muted" style="font-size:12px;">Nothing found for "${wsInput.value.trim()}".</span>
+        </div>`;
+      resultsEl.querySelectorAll('[data-search-result-idx]').forEach(el=>{
+        el.addEventListener('click', ()=>{
+          const r = window.__wsSearchResults[Number(el.dataset.searchResultIdx)];
+          if(r) r.go();
+        });
+      });
+    });
+    document.addEventListener('click', (e)=>{
+      const resultsEl = document.getElementById('workspaceSearchResults');
+      const inputEl = document.getElementById('workspaceSearchInput');
+      if(!resultsEl || !inputEl) return; // navigated away from Focus Area — nothing to do
+      if(!inputEl.contains(e.target) && !resultsEl.contains(e.target)){
+        resultsEl.innerHTML = '';
+      }
+    });
+  }
 }
 
 function renderPortfolio(){
@@ -1570,7 +1685,7 @@ function renderPortfolio(){
       ${lastClosedDate ? `<div class="proj-meta" style="margin-top:4px;"><span>CLOSED <b style="color:var(--paper);">${fmtDate(lastClosedDate)}</b></span></div>` : ''}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
         ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
-        ${blockingTeams.length ? `<span class="pill pill-amber pill-blink" title="${blockedDetailForProject(s.p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+        ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" title="${blockedDetailForProject(s.p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
       </div>
       <div class="proj-meta" style="margin-top:14px;">
         <span>${s.pct}% PROGRESS</span>
@@ -1729,7 +1844,7 @@ function renderAttendanceSheet(node){
       const cls = `att-cell${weekend?' att-weekend':''}${admin?' att-clickable':''}`;
       return `<td class="${cls}" style="${style}"${clickAttr}>${label}</td>`;
     }).join('');
-    return `<tr><td style="padding:8px 12px;color:#000;font-family:var(--f-mono);font-size:12px;text-align:center;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
+    return `<tr><td style="padding:8px 12px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
   }).join('');
 
   const legend = Object.entries(ATT_STATUS).map(([code,v])=>
@@ -1751,7 +1866,7 @@ function renderAttendanceSheet(node){
 
     <div class="att-wrap">
       <table class="att-table">
-        <thead><tr><th style="padding:10px 12px;font-family:var(--f-mono);font-size:12px;text-align:center;">Employee ID</th><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
+        <thead><tr><th style="padding:10px 12px;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
         <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
@@ -1901,7 +2016,7 @@ function renderAppraisalSheet(node){
       : '';
     return `
       <tr data-appraisal-row="${u.id}" style="cursor:pointer;">
-        <td style="padding:8px 12px;color:#000;font-family:var(--f-mono);font-size:12px;text-align:center;">${u.employeeId||''}</td>
+        <td style="padding:8px 12px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">${u.employeeId||''}</td>
         <td class="att-name">${u.name}</td>
         <td class="appraisal-cell">${rec.designation||''}</td>
         <td class="appraisal-cell mono">${rec.doj?fmtDate(rec.doj):''}</td>
@@ -1921,7 +2036,7 @@ function renderAppraisalSheet(node){
     <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>
     <div class="att-wrap">
       <table class="att-table" style="font-size:12px;">
-        <thead><tr><th style="padding:10px 12px;font-family:var(--f-mono);font-size:12px;text-align:center;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
+        <thead><tr><th style="padding:10px 12px;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
         <tbody>${bodyRows || `<tr><td colspan="${cols.length+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
@@ -2170,7 +2285,7 @@ function renderSummaryBlocks(workstreams){
       <div class="hint" style="margin-top:4px;">${w.status}</div>
       <div class="hint" style="margin-top:4px;">${w.progress}</div>
       ${w.taskStatusLines.map(l=>`<div class="hint" style="margin-top:4px;">${l}</div>`).join('')}
-      ${w.blockerLines.map(l=>`<div class="hint" style="margin-top:4px;color:var(--amber);">${l}</div>`).join('')}
+      ${w.blockerLines.map(l=>`<div class="hint" style="margin-top:4px;color:var(--blocker);">${l}</div>`).join('')}
     </div>`).join('');
 }
 
@@ -3105,7 +3220,7 @@ function renderProject(){
       <td>
         <div class="task-title task-title-link" data-view-task="${t.id}">${t.title || '<span class="muted">Untitled task</span>'}</div>
         ${t.description ? `<div class="task-desc">${t.description}</div>` : '<div class="task-desc">No description yet</div>'}
-        ${blockedTeamName ? `<div style="margin-top:6px;">${pill('amber', 'Blocked by '+blockedTeamName, entityName(t.assignedType,t.assignedId)+': '+(t.blockerReason||'no reason given'))}</div>` : ''}
+        ${blockedTeamName ? `<div style="margin-top:6px;">${pill('blocker', 'Blocked by '+blockedTeamName, entityName(t.assignedType,t.assignedId)+': '+(t.blockerReason||'no reason given'))}</div>` : ''}
         ${t.weekendWork ? `<div style="margin-top:6px;">${pill('amber', 'Includes weekend work')}</div>` : ''}
       </td>
       <td>${entityName(t.assignedType,t.assignedId)}</td>
@@ -3124,7 +3239,7 @@ function renderProject(){
           ${canEdit ? `<button class="btn btn-sm" data-edit-task="${t.id}">Edit</button>` : ''}
           ${canEdit && t.status!=='closed' && !t.deadlineDisabled ? `<button class="btn btn-sm btn-danger" data-extend-task="${t.id}">Extend date</button>` : ''}
           ${canEdit && t.status!=='closed' ? (blockedTeamName
-              ? `<button class="btn btn-sm" data-clear-blocker="${t.id}" style="background:var(--amber-soft);color:var(--amber);border-color:var(--amber-border);">Clear blocker</button>`
+              ? `<button class="btn btn-sm" data-clear-blocker="${t.id}" style="background:var(--blocker-soft);color:var(--blocker);border-color:var(--blocker-border);">Clear blocker</button>`
               : `<button class="btn btn-sm" data-set-blocker="${t.id}">Blocker</button>`) : ''}
         </div>
       </td>
@@ -3148,7 +3263,7 @@ function renderProject(){
         ${p.description ? `<div class="muted" style="font-size:13px;margin-top:4px;max-width:640px;">${p.description}</div>` : ''}
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           ${pill(status, status==='red' ? `Delayed ${tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
-          ${blockingTeams.length ? `<span class="pill pill-amber pill-blink" title="${blockedDetailForProject(p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+          ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" title="${blockedDetailForProject(p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
         </div>
       </div>
       <div class="hero-metrics">
@@ -3354,7 +3469,7 @@ function openWorkstreamInfoModal(projectId){
       ? `<div class="hint" style="margin-top:4px;"><b style="color:var(--paper-dim);">Extension history:</b>${t.extensionHistory.map(h=>`<br>→ moved to ${fmtDate(h.newEndDate)}${h.category?' · '+h.category:''} — ${h.reason||'no reason given'}`).join('')}</div>`
       : '';
     const blockerHtml = blockedTeamName
-      ? `<div class="hint" style="margin-top:4px;color:var(--amber);"><b>Blocked by ${blockedTeamName}:</b> ${t.blockerReason || 'no reason given'}</div>`
+      ? `<div class="hint" style="margin-top:4px;color:var(--blocker);"><b>Blocked by ${blockedTeamName}:</b> ${t.blockerReason || 'no reason given'}</div>`
       : '';
     const timelineText = t.deadlineDisabled
       ? (t.startDate ? fmtDate(t.startDate)+' — no deadline' : 'Timeline not set yet')
@@ -3434,7 +3549,7 @@ function openTaskDetailsModal(taskId){
         <div class="field"><label>Status</label><div class="hint">${t.status==='closed' ? 'Closed on '+fmtDate(t.closedDate) : 'Open'}</div></div>
 
         ${blockedTeamName ? `
-        <div class="field"><label>Blocked by</label><div class="hint" style="color:var(--amber);">${blockedTeamName} — ${t.blockerReason || 'no reason given'}</div></div>
+        <div class="field"><label>Blocked by</label><div class="hint" style="color:var(--blocker);">${blockedTeamName} — ${t.blockerReason || 'no reason given'}</div></div>
         ` : ''}
 
         ${t.weekendWork ? `<div style="margin:6px 0;">${pill('amber','Includes weekend work')}</div>` : ''}
@@ -4051,7 +4166,7 @@ function activeAssignmentsData(){
 function taskWorkloadStatus(t){
   if(t.blockedByTeamId){
     const teamName = (state.teams.find(tm=>tm.id===t.blockedByTeamId)||{}).name || 'Unknown team';
-    return { color:'amber', label:'Blocked by '+teamName, tooltip: t.blockerReason||'no reason given' };
+    return { color:'blocker', label:'Blocked by '+teamName, tooltip: t.blockerReason||'no reason given' };
   }
   if(isTaskDelayed(t)) return { color:'red', label: t.extended?'Extended':'Overdue' };
   return { color:'green', label:'In progress' };
@@ -4197,7 +4312,7 @@ function renderAssignments(){
   const cards = rows.map(r=>{
     const headerStatus = r.openCount===0
       ? pill('green','Available')
-      : (r.openTasks.some(t=>t.blockedByTeamId) ? pill('amber', 'Blocked')
+      : (r.openTasks.some(t=>t.blockedByTeamId) ? pill('blocker', 'Blocked')
         : r.openTasks.some(t=>isTaskDelayed(t)) ? pill('red','Delayed')
         : pill('green','On track'));
 
@@ -4414,8 +4529,9 @@ function renderAdmin(){
       <button class="tab ${ui.adminTab==='users'?'active':''}" data-tab="users">Users</button>
       <button class="tab ${ui.adminTab==='teams'?'active':''}" data-tab="teams">Teams</button>
       <button class="tab ${ui.adminTab==='projects'?'active':''}" data-tab="projects">Workstreams</button>
+      <button class="tab ${ui.adminTab==='settings'?'active':''}" data-tab="settings">Admin</button>
     </div>
-    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='teams' ? renderAdminTeams() : renderAdminProjects()}
+    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='settings' ? renderAdminSettings() : renderAdminProjects()}
   `;
 }
 
@@ -4445,6 +4561,21 @@ function renderAdminUsers(){
       </div></td>
     </tr>`;
   }).join('');
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Users</div>
+        <button class="btn btn-primary btn-sm" data-add-user>+ Create user</button>
+      </div>
+      <table>
+        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team</th><th>Access</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty-state">No users yet.</td></tr>`}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderAdminSettings(){
+  const admin = currentUser();
   return `
     <div class="card" style="margin-bottom:16px;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -4493,21 +4624,12 @@ function renderAdminUsers(){
         </div>
       </div>
     </div>
-    <div class="card" style="margin-bottom:16px;border-color:var(--red);">
+    <div class="card" style="border-color:var(--red);">
       <div class="section-title" style="margin-bottom:2px;color:var(--red);">Danger zone</div>
       <div class="muted" style="font-size:12px;margin-bottom:12px;">This permanently erases every workstream, task, user, and record in the app and replaces it with starter demo data. This cannot be undone.</div>
       <button class="btn btn-sm btn-danger" id="dangerResetBtn">Reset all app data</button>
     </div>
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-        <div class="section-title" style="margin-bottom:0;">Users</div>
-        <button class="btn btn-primary btn-sm" data-add-user>+ Create user</button>
-      </div>
-      <table>
-        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team</th><th>Access</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty-state">No users yet.</td></tr>`}</tbody>
-      </table>
-    </div>`;
+  `;
 }
 
 function renderAdminTeams(){

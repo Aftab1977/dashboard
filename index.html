@@ -1539,12 +1539,21 @@ function allDescendantNodeIds(nodeId){
 function searchWorkspace(query){
   const q = query.trim().toLowerCase();
   if(!q) return [];
-  const results = [];
   const visibleProjIds = new Set(visibleProjects().map(p=>p.id));
+
+  // Keyed by the exact displayed path — when a Heading's own name matches AND a
+  // content item living directly inside it (with no title of its own) produces the
+  // identical path, they're the same effective destination and should show once, not
+  // twice. Whichever result actually has a destination to show (a URL) wins.
+  const resultMap = new Map();
+  function addResult(r){
+    const existing = resultMap.get(r.label);
+    if(!existing || (r.url && !existing.url)) resultMap.set(r.label, r);
+  }
 
   visibleProjects().forEach(p=>{
     if(p.name.toLowerCase().includes(q)){
-      results.push({type:'Workstream', label:p.name, go:()=>{ ui.projectId=p.id; ui.view='project'; render(); }});
+      addResult({type:'Workstream', label:p.name, go:()=>{ ui.projectId=p.id; ui.view='project'; render(); }});
     }
   });
 
@@ -1555,8 +1564,8 @@ function searchWorkspace(query){
     if(!canSeeNode(node.id)) return;
     if(!node.name.toLowerCase().includes(q)) return;
     const typeLabel = node.nodeType==='feature' ? 'Module' : node.nodeType==='heading' ? 'Heading' : 'Sub Heading';
-    const pathStr = featureNodePath(node.id).map(n=>n.name).join('-');
-    results.push({type:typeLabel, label:pathStr, go:()=>{
+    const pathStr = featureNodePath(node.id).map(n=>n.name).join('>');
+    addResult({type:typeLabel, label:pathStr, go:()=>{
       ui.expandNodeIds = [node.id, ...allDescendantNodeIds(node.id)];
       if(node.systemView){ ui.view = node.systemView; }
       else { ui.view='feature'; ui.featureNodeId=node.id; }
@@ -1569,7 +1578,7 @@ function searchWorkspace(query){
     const haystack = [t.title, t.description, t.reason, t.blockerReason].filter(Boolean).join(' ').toLowerCase();
     if(haystack.includes(q)){
       const proj = state.projects.find(p=>p.id===t.projectId);
-      results.push({type:'Task', label:(t.title||'Untitled task')+(proj?' — '+proj.name:''), go:()=>{ ui.projectId=t.projectId; ui.view='project'; render(); openTaskDetailsModal(t.id); }});
+      addResult({type:'Task', label:(t.title||'Untitled task')+(proj?'>'+proj.name:''), go:()=>{ ui.projectId=t.projectId; ui.view='project'; render(); openTaskDetailsModal(t.id); }});
     }
   });
 
@@ -1579,11 +1588,10 @@ function searchWorkspace(query){
       const titleMatch = (item.title||item.fileName||'').toLowerCase().includes(q);
       const bodyMatch = (item.type==='text' && item.text && item.text.toLowerCase().includes(q)) || (item.type==='link' && item.url && item.url.toLowerCase().includes(q));
       if(titleMatch || bodyMatch){
-        const name = item.title || item.fileName || (item.type==='text'?'Text note':item.url);
-        const pathStr = featureNodePath(node.id).map(n=>n.name).join('-');
-        const fullLabel = item.title ? `${pathStr}-${item.title}` : pathStr;
+        const pathStr = featureNodePath(node.id).map(n=>n.name).join('>');
+        const fullLabel = item.title ? `${pathStr}>${item.title}` : pathStr;
         const ancestorIds = featureNodePath(node.id).map(n=>n.id);
-        results.push({type:'Content', label:fullLabel, url: (item.type==='link'?item.url:null), go:()=>{
+        addResult({type:'Content', label:fullLabel, url: (item.type==='link'?item.url:null), go:()=>{
           ui.expandNodeIds = ancestorIds;
           ui.view='feature'; ui.featureNodeId=node.id;
           render();
@@ -1598,22 +1606,21 @@ function searchWorkspace(query){
       const titleMatch = (item.title||item.fileName||'').toLowerCase().includes(q);
       const bodyMatch = (item.type==='text' && item.text && item.text.toLowerCase().includes(q));
       if(titleMatch || bodyMatch){
-        const name = item.title || item.fileName || 'Untitled';
-        const fullLabel2 = item.title ? `Workstream-${p.name}-${item.title}` : `Workstream-${p.name}`;
-        results.push({type:'Workstream content', label:fullLabel2, url:(item.type==='link'?item.url:null), go:()=>{ ui.projectId=p.id; ui.view='project'; render(); openProjectContentPreviewModal(p.id, item.id); }});
+        const fullLabel2 = item.title ? `Workstream>${p.name}>${item.title}` : `Workstream>${p.name}`;
+        addResult({type:'Workstream content', label:fullLabel2, url:(item.type==='link'?item.url:null), go:()=>{ ui.projectId=p.id; ui.view='project'; render(); openProjectContentPreviewModal(p.id, item.id); }});
       }
     });
   });
 
   searchAllSummaries(query).forEach(r=>{
-    const label = r.kind==='daily' ? `${r.workstream.title} — ${fmtDate(r.date)} (daily summary)` : `${r.workstream.title} — week of ${fmtDate(r.weekStart)} (weekly summary)`;
-    results.push({type:'Summary', label, go:()=>{
+    const label = r.kind==='daily' ? `${r.workstream.title}>${fmtDate(r.date)} (daily summary)` : `${r.workstream.title}>week of ${fmtDate(r.weekStart)} (weekly summary)`;
+    addResult({type:'Summary', label, go:()=>{
       if(r.kind==='daily') openSummaryPopup('daily', state.dailySummaries[r.date]);
       else openSummaryPopup('weekly', state.weeklySummaries[r.weekStart]);
     }});
   });
 
-  return results;
+  return Array.from(resultMap.values());
 }
 
 function bindFocusAreaHome(){

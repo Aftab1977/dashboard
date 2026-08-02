@@ -1671,6 +1671,8 @@ function bindFocusAreaHome(){
       resultsEl.querySelectorAll('[data-search-result-idx]').forEach(el=>{
         el.addEventListener('click', ()=>{
           const r = window.__wsSearchResults[Number(el.dataset.searchResultIdx)];
+          wsInput.value = '';
+          resultsEl.innerHTML = '';
           if(r) r.go();
         });
       });

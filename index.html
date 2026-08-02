@@ -513,7 +513,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[] };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[] };
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -1521,6 +1521,17 @@ function renderFocusAreaHome(){
   `;
 }
 
+// All descendant node IDs under a given node, recursively — used so that landing on a
+// Heading found by name shows everything underneath it expanded, not just one level.
+function allDescendantNodeIds(nodeId){
+  const ids = [];
+  featureChildren(nodeId).forEach(child=>{
+    ids.push(child.id);
+    ids.push(...allDescendantNodeIds(child.id));
+  });
+  return ids;
+}
+
 // Full Workspace Search — covers everything that's genuinely text-based and within
 // the searching user's own access: workstream names, task text, Repository/FAI/Policies
 // content (full text for Text/Link, title-only for Image/Document/Video since their
@@ -1535,6 +1546,22 @@ function searchWorkspace(query){
     if(p.name.toLowerCase().includes(q)){
       results.push({type:'Workstream', label:p.name, go:()=>{ ui.projectId=p.id; ui.view='project'; render(); }});
     }
+  });
+
+  // Module / Heading / Sub Heading names themselves — landing on one expands
+  // everything nested underneath it (its own content and every descendant), so
+  // whatever the person was looking for is immediately visible.
+  state.featureNodes.forEach(node=>{
+    if(!canSeeNode(node.id)) return;
+    if(!node.name.toLowerCase().includes(q)) return;
+    const typeLabel = node.nodeType==='feature' ? 'Module' : node.nodeType==='heading' ? 'Heading' : 'Sub Heading';
+    const pathStr = featureNodePath(node.id).map(n=>n.name).join('-');
+    results.push({type:typeLabel, label:pathStr, go:()=>{
+      ui.expandNodeIds = [node.id, ...allDescendantNodeIds(node.id)];
+      if(node.systemView){ ui.view = node.systemView; }
+      else { ui.view='feature'; ui.featureNodeId=node.id; }
+      render();
+    }});
   });
 
   state.tasks.forEach(t=>{
@@ -1553,7 +1580,15 @@ function searchWorkspace(query){
       const bodyMatch = (item.type==='text' && item.text && item.text.toLowerCase().includes(q)) || (item.type==='link' && item.url && item.url.toLowerCase().includes(q));
       if(titleMatch || bodyMatch){
         const name = item.title || item.fileName || (item.type==='text'?'Text note':item.url);
-        results.push({type:'Content', label:name+' — '+node.name, go:()=>{ ui.view='feature'; ui.featureNodeId=node.id; render(); openContentItemPreviewModal(node.id, item.id); }});
+        const pathStr = featureNodePath(node.id).map(n=>n.name).join('-');
+        const fullLabel = item.title ? `${pathStr}-${item.title}` : pathStr;
+        const ancestorIds = featureNodePath(node.id).map(n=>n.id);
+        results.push({type:'Content', label:fullLabel, url: (item.type==='link'?item.url:null), go:()=>{
+          ui.expandNodeIds = ancestorIds;
+          ui.view='feature'; ui.featureNodeId=node.id;
+          render();
+          openContentItemPreviewModal(node.id, item.id);
+        }});
       }
     });
   });
@@ -1564,7 +1599,8 @@ function searchWorkspace(query){
       const bodyMatch = (item.type==='text' && item.text && item.text.toLowerCase().includes(q));
       if(titleMatch || bodyMatch){
         const name = item.title || item.fileName || 'Untitled';
-        results.push({type:'Workstream content', label:name+' — '+p.name, go:()=>{ ui.projectId=p.id; ui.view='project'; render(); openProjectContentPreviewModal(p.id, item.id); }});
+        const fullLabel2 = item.title ? `Workstream-${p.name}-${item.title}` : `Workstream-${p.name}`;
+        results.push({type:'Workstream content', label:fullLabel2, url:(item.type==='link'?item.url:null), go:()=>{ ui.projectId=p.id; ui.view='project'; render(); openProjectContentPreviewModal(p.id, item.id); }});
       }
     });
   });
@@ -1619,6 +1655,7 @@ function bindFocusAreaHome(){
             <div class="ci-link" data-search-result-idx="${i}" style="cursor:pointer;display:block;padding:8px 10px;border-radius:6px;">
               <span class="mono" style="font-size:10px;color:var(--paper-faint);text-transform:uppercase;letter-spacing:.04em;">${r.type}</span><br>
               ${r.label}
+              ${r.url ? `<br><span class="mono" style="font-size:11px;color:var(--paper-faint);word-break:break-all;">${r.url}</span>` : ''}
             </div>`).join('')}
         </div>` : `
         <div class="card" style="padding:10px 12px;box-shadow:0 8px 20px rgba(0,0,0,.25);">
@@ -2442,11 +2479,12 @@ function renderSubHeadingCollapsible(h, depth){
       ${renderContentItem(it, h.id)}
       ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
     </div>`).join('');
+  const forceOpen = (ui.expandNodeIds||[]).includes(h.id);
   return `
     <div class="heading-card" style="margin-left:${depth*20}px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <div data-toggle-heading="${h.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
-          <span id="harrow-${h.id}" class="collapse-arrow">▸</span>
+          <span id="harrow-${h.id}" class="collapse-arrow">${forceOpen?'▾':'▸'}</span>
           <div class="heading-name">${h.name}</div>
         </div>
         ${isAdmin() ? `<div class="row-actions">
@@ -2456,7 +2494,7 @@ function renderSubHeadingCollapsible(h, depth){
           <button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>
         </div>` : ''}
       </div>
-      <div id="hcontent-${h.id}" class="hcontent collapsed" style="margin-top:8px;">
+      <div id="hcontent-${h.id}" class="hcontent${forceOpen?'':' collapsed'}" style="margin-top:8px;">
         ${itemsHtml || '<div class="muted" style="font-size:12px;">No content yet.</div>'}
         ${subHeadings.map(sh=>renderSubHeadingCollapsible(sh, depth+1)).join('')}
       </div>
@@ -2481,10 +2519,10 @@ function renderHeadingPageBody(h){
     ${items.length ? `
     <div class="heading-card" style="margin-left:0;">
       <div data-toggle-heading="${h.id}_own" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
-        <span id="harrow-${h.id}_own" class="collapse-arrow">▸</span>
+        <span id="harrow-${h.id}_own" class="collapse-arrow">${(ui.expandNodeIds||[]).includes(h.id)?'▾':'▸'}</span>
         <div class="heading-name">Content</div>
       </div>
-      <div id="hcontent-${h.id}_own" class="hcontent collapsed" style="margin-top:8px;">
+      <div id="hcontent-${h.id}_own" class="hcontent${(ui.expandNodeIds||[]).includes(h.id)?'':' collapsed'}" style="margin-top:8px;">
         ${itemsHtml}
       </div>
     </div>` : ''}
@@ -2559,6 +2597,7 @@ function renderFeatureNode(){
 
 function bindFeatureNode(){
   const node = featureNode(ui.featureNodeId);
+  ui.expandNodeIds = []; // one-time effect — render already consumed it before this ran
   if(node && node.specialView==='attendance'){
     bindAttendanceSheet();
     return;
@@ -2888,6 +2927,9 @@ function openContentItemPreviewModal(headingId, itemId){
       body = `<iframe src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(it.url)}" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>
         <div class="hint" style="margin-top:8px;">If the preview doesn't load, <a href="${it.url}" target="_blank" rel="noopener" class="ci-link">open the file directly</a>.</div>`;
     }
+  } else if(it.type==='link'){
+    body = `<div class="hint" style="margin-bottom:10px;">This item links out to:</div>
+      <a href="${it.url}" target="_blank" rel="noopener" class="ci-link mono" style="font-size:13px;word-break:break-all;">${it.url}</a>`;
   } else {
     body = '';
   }
@@ -2918,6 +2960,9 @@ function renderPreviewBody(it){
     }
     return `<iframe src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(it.url)}" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>
       <div class="hint" style="margin-top:8px;">If the preview doesn't load, <a href="${it.url}" target="_blank" rel="noopener" class="ci-link">open the file directly</a>.</div>`;
+  } else if(it.type==='link'){
+    return `<div class="hint" style="margin-bottom:10px;">This item links out to:</div>
+      <a href="${it.url}" target="_blank" rel="noopener" class="ci-link mono" style="font-size:13px;word-break:break-all;">${it.url}</a>`;
   }
   return '';
 }

@@ -1508,7 +1508,7 @@ function renderFocusAreaHome(){
         <div style="min-width:260px;">
           <div class="section-title" style="margin-bottom:10px;text-align:center;">Workspace Search</div>
           <div style="position:relative;max-width:280px;">
-            <input type="text" id="workspaceSearchInput" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;">
+            <input type="text" id="workspaceSearchInput" autocomplete="off" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;">
             <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>
           </div>
         </div>
@@ -1523,6 +1523,19 @@ function renderFocusAreaHome(){
 
 // All descendant node IDs under a given node, recursively — used so that landing on a
 // Heading found by name shows everything underneath it expanded, not just one level.
+// Splits a query into individual words and checks that every one of them appears
+// somewhere in the haystack, in any order, not necessarily adjacent — so "figma
+// wallet" matches "...Figma...JCE Wallet Mobile App..." even though those two words
+// aren't next to each other in the original text.
+function queryTerms(query){
+  return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+function matchesAllTerms(haystack, terms){
+  if(!terms.length) return false;
+  const h = haystack.toLowerCase();
+  return terms.every(term => h.includes(term));
+}
+
 function allDescendantNodeIds(nodeId){
   const ids = [];
   featureChildren(nodeId).forEach(child=>{
@@ -1537,8 +1550,8 @@ function allDescendantNodeIds(nodeId){
 // content (full text for Text/Link, title-only for Image/Document/Video since their
 // contents aren't extracted), workstream-level content, and Daily/Weekly Summaries.
 function searchWorkspace(query){
-  const q = query.trim().toLowerCase();
-  if(!q) return [];
+  const terms = queryTerms(query);
+  if(!terms.length) return [];
   const visibleProjIds = new Set(visibleProjects().map(p=>p.id));
 
   // Keyed by the exact displayed path — when a Heading's own name matches AND a
@@ -1552,7 +1565,7 @@ function searchWorkspace(query){
   }
 
   visibleProjects().forEach(p=>{
-    if(p.name.toLowerCase().includes(q)){
+    if(matchesAllTerms(p.name, terms)){
       addResult({type:'Workstream', label:p.name, go:()=>{ ui.projectId=p.id; ui.view='project'; render(); }});
     }
   });
@@ -1562,7 +1575,7 @@ function searchWorkspace(query){
   // whatever the person was looking for is immediately visible.
   state.featureNodes.forEach(node=>{
     if(!canSeeNode(node.id)) return;
-    if(!node.name.toLowerCase().includes(q)) return;
+    if(!matchesAllTerms(node.name, terms)) return;
     const typeLabel = node.nodeType==='feature' ? 'Module' : node.nodeType==='heading' ? 'Heading' : 'Sub Heading';
     const pathStr = featureNodePath(node.id).map(n=>n.name).join('>');
     addResult({type:typeLabel, label:pathStr, go:()=>{
@@ -1575,20 +1588,22 @@ function searchWorkspace(query){
 
   state.tasks.forEach(t=>{
     if(!visibleProjIds.has(t.projectId)) return;
-    const haystack = [t.title, t.description, t.reason, t.blockerReason].filter(Boolean).join(' ').toLowerCase();
-    if(haystack.includes(q)){
+    const haystack = [t.title, t.description, t.reason, t.blockerReason].filter(Boolean).join(' ');
+    if(matchesAllTerms(haystack, terms)){
       const proj = state.projects.find(p=>p.id===t.projectId);
       addResult({type:'Task', label:(t.title||'Untitled task')+(proj?'>'+proj.name:''), go:()=>{ ui.projectId=t.projectId; ui.view='project'; render(); openTaskDetailsModal(t.id); }});
     }
   });
 
+  // Content items match on the combination of their own text AND the path they live
+  // under — so a term like "figma" (only present in the ancestor Heading's name) can
+  // combine with a term like "wallet" (only present in the item's own title).
   state.featureNodes.forEach(node=>{
     if(!canSeeNode(node.id)) return;
+    const pathStr = featureNodePath(node.id).map(n=>n.name).join('>');
     (node.contentItems||[]).forEach(item=>{
-      const titleMatch = (item.title||item.fileName||'').toLowerCase().includes(q);
-      const bodyMatch = (item.type==='text' && item.text && item.text.toLowerCase().includes(q)) || (item.type==='link' && item.url && item.url.toLowerCase().includes(q));
-      if(titleMatch || bodyMatch){
-        const pathStr = featureNodePath(node.id).map(n=>n.name).join('>');
+      const haystack = [pathStr, item.title, item.fileName, item.type==='text'?item.text:'', item.type==='link'?item.url:''].filter(Boolean).join(' ');
+      if(matchesAllTerms(haystack, terms)){
         const fullLabel = item.title ? `${pathStr}>${item.title}` : pathStr;
         const ancestorIds = featureNodePath(node.id).map(n=>n.id);
         addResult({type:'Content', label:fullLabel, url: (item.type==='link'?item.url:null), go:()=>{
@@ -1603,9 +1618,8 @@ function searchWorkspace(query){
 
   visibleProjects().forEach(p=>{
     (p.contentItems||[]).forEach(item=>{
-      const titleMatch = (item.title||item.fileName||'').toLowerCase().includes(q);
-      const bodyMatch = (item.type==='text' && item.text && item.text.toLowerCase().includes(q));
-      if(titleMatch || bodyMatch){
+      const haystack = [p.name, item.title, item.fileName, item.type==='text'?item.text:''].filter(Boolean).join(' ');
+      if(matchesAllTerms(haystack, terms)){
         const fullLabel2 = item.title ? `Workstream>${p.name}>${item.title}` : `Workstream>${p.name}`;
         addResult({type:'Workstream content', label:fullLabel2, url:(item.type==='link'?item.url:null), go:()=>{ ui.projectId=p.id; ui.view='project'; render(); openProjectContentPreviewModal(p.id, item.id); }});
       }
@@ -2410,22 +2424,22 @@ function bindSummaryCalendar(node){
 // Free-text search across every stored daily and weekly summary — matches workstream
 // names, status text, progress lines, task lines, and blocker lines.
 function searchAllSummaries(query){
-  const q = query.trim().toLowerCase();
-  if(!q) return [];
+  const terms = queryTerms(query);
+  if(!terms.length) return [];
   const accessible = accessibleProjectIds();
   const results = [];
   Object.values(state.dailySummaries).forEach(summary=>{
     summary.workstreams.forEach(w=>{
       if(accessible!==null && !accessible.includes(w.projectId)) return;
-      const haystack = [w.title, w.status, w.progress, ...w.taskStatusLines, ...w.blockerLines].join(' ').toLowerCase();
-      if(haystack.includes(q)) results.push({kind:'daily', date: summary.date, workstream: w});
+      const haystack = [w.title, w.status, w.progress, ...w.taskStatusLines, ...w.blockerLines].join(' ');
+      if(matchesAllTerms(haystack, terms)) results.push({kind:'daily', date: summary.date, workstream: w});
     });
   });
   Object.values(state.weeklySummaries).forEach(summary=>{
     summary.workstreams.forEach(w=>{
       if(accessible!==null && !accessible.includes(w.projectId)) return;
-      const haystack = [w.title, w.status, w.progress, ...w.taskStatusLines, ...w.blockerLines].join(' ').toLowerCase();
-      if(haystack.includes(q)) results.push({kind:'weekly', weekStart: summary.weekStart, workstream: w});
+      const haystack = [w.title, w.status, w.progress, ...w.taskStatusLines, ...w.blockerLines].join(' ');
+      if(matchesAllTerms(haystack, terms)) results.push({kind:'weekly', weekStart: summary.weekStart, workstream: w});
     });
   });
   return results;

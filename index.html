@@ -1464,6 +1464,7 @@ function bindAiAgentWidget(){
 // the moment they open the panel rather than starting blank every time they log in.
 // Fire-and-forget by design — never blocks or breaks login if it fails.
 async function loadAiConversationHistory(userId){
+  aiAgentMessages = []; // always start clean — never inherit whatever was here before, even if a fetch fails or finds nothing
   try{
     const res = await fetch(`${SUPABASE_URL}/rest/v1/ai_conversations?user_id=eq.${userId}&select=messages`, {
       headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer '+SUPABASE_ANON_KEY },
@@ -1547,7 +1548,7 @@ function bindGlobalNav(){
   document.querySelectorAll('[data-nav]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const v = btn.dataset.nav;
-      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; ui.navHistory=[]; lastViewSnapshot=null; render(); return; }
+      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; ui.navHistory=[]; lastViewSnapshot=null; aiAgentMessages=[]; ui.aiAgentOpen=false; aiAgentThinking=false; render(); return; }
       ui.view = v; render();
     });
   });

@@ -401,7 +401,11 @@
   .ms-options{max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
   .ms-option{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;padding:6px 8px;border-radius:6px;cursor:pointer;}
   .ms-option:hover{background:var(--panel-hi);}
-  .access-tree-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;padding:4px 0;cursor:pointer;}
+  .access-tree-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;padding:4px 0;}
+  .access-toggle-arrow{cursor:pointer;color:var(--paper-faint);font-size:11px;width:14px;display:inline-block;user-select:none;}
+  .access-children{overflow:hidden;}
+  .access-children.collapsed{display:none;}
+  .access-node.access-search-hidden{display:none;}
   .sumcal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;max-width:520px;}
   .sumcal-dow{text-align:center;font-size:11px;color:var(--paper-faint);font-family:var(--f-mono);padding-bottom:4px;}
   .sumcal-cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border:1px solid #555555;border-radius:8px;font-size:13px;color:var(--paper-faint);}
@@ -1821,6 +1825,13 @@ function canSeeNode(nodeId){
   if(isAdmin()) return true;
   const cu = currentUser();
   if(!cu) return false;
+  // Summary module is granted at the module level only — Year and Month nodes
+  // underneath it are never individually ticked; once someone has the module, they
+  // see everything in it (filtered by their own workstream access, same as always).
+  const path = featureNodePath(nodeId);
+  if(path.some(n=>n.id==='feat_summary')){
+    return hasDirectNodeAccess(cu.id, 'feat_summary');
+  }
   return hasNodeAccessOrDescendant(cu.id, nodeId);
 }
 // Root Modules a non-admin can see at all — new Modules are invisible to everyone
@@ -5070,16 +5081,34 @@ function openAddUserModal(){
 
 // Recursively builds the whole tree as checkboxes — every Module, and everything
 // nested under it, at whatever depth.
+// Whether this node or anything underneath it matches a search term — used to decide
+// what to show/auto-expand when the admin is searching within the Access tree.
+function nodeOrDescendantMatches(node, q){
+  if(!q) return true;
+  if(node.name.toLowerCase().includes(q)) return true;
+  return featureChildren(node.id).some(c=>nodeOrDescendantMatches(c, q));
+}
 function buildAccessTree(userId, parentId, depth){
   const kids = state.featureNodes.filter(n=>n.parentId===parentId).sort((a,b)=>(a.order||0)-(b.order||0));
   return kids.map(n=>{
     const checked = hasDirectNodeAccess(userId, n.id);
-    const childrenHtml = buildAccessTree(userId, n.id, depth+1);
+    // Summary's Year/Month structure is granted at the module level only — don't show
+    // its Years/Months as separately tickable children in this tree.
+    const hasKids = n.id!=='feat_summary' && featureChildren(n.id).length>0;
+    const childrenHtml = hasKids ? buildAccessTree(userId, n.id, depth+1) : '';
     return `
-      <label class="access-tree-row" style="margin-left:${depth*20}px;">
-        <input type="checkbox" class="access-node-check" value="${n.id}" ${checked?'checked':''}> ${n.name}
-      </label>
-      ${childrenHtml}`;
+      <div class="access-node" data-access-node="${n.id}" data-access-name="${n.name.toLowerCase().replace(/"/g,'&quot;')}">
+        <div class="access-tree-row" style="margin-left:${depth*20}px;">
+          ${hasKids ? `<span class="access-toggle-arrow" data-access-toggle="${n.id}">▸</span>` : `<span style="display:inline-block;width:14px;"></span>`}
+          <label style="display:flex;align-items:center;gap:8px;flex:1;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;cursor:pointer;">
+            <input type="checkbox" class="access-node-check" value="${n.id}" ${checked?'checked':''}> ${n.name}
+          </label>
+          ${hasKids ? `<button type="button" class="btn btn-sm btn-ghost" data-select-all="${n.id}" style="padding:2px 8px;font-size:11px;">Select all</button>` : ''}
+        </div>
+        <div class="access-children collapsed" id="access-children-${n.id}">
+          ${childrenHtml}
+        </div>
+      </div>`;
   }).join('');
 }
 function openNodeAccessModal(userId){
@@ -5092,7 +5121,10 @@ function openNodeAccessModal(userId){
       <div class="modal" style="max-width:520px;">
         <h3>${u.name} — Access</h3>
         <div class="modal-sub">Tick every Module, Feature, Heading, or Sub Heading this person should be able to see. Anything left unticked stays hidden from them — including anything new you add later, until you come back and tick it here.</div>
-        <div style="max-height:50vh;overflow-y:auto;margin:12px 0;display:flex;flex-direction:column;gap:6px;">
+        <div class="field" style="margin-top:10px;margin-bottom:4px;">
+          <input type="text" id="accessTreeSearch" autocomplete="off" placeholder="Search this list...">
+        </div>
+        <div style="max-height:50vh;overflow-y:auto;margin:12px 0;display:flex;flex-direction:column;gap:2px;" id="accessTreeContainer">
           ${treeHtml || '<div class="muted" style="font-size:12px;">Nothing to show yet.</div>'}
         </div>
         <div class="modal-actions">
@@ -5102,6 +5134,62 @@ function openNodeAccessModal(userId){
       </div>
     </div>`;
   bindModalClose();
+
+  // Expand/collapse individual branches
+  document.querySelectorAll('[data-access-toggle]').forEach(arrow=>{
+    arrow.addEventListener('click', ()=>{
+      const nodeId = arrow.dataset.accessToggle;
+      const childrenEl = document.getElementById('access-children-'+nodeId);
+      if(!childrenEl) return;
+      const nowCollapsed = childrenEl.classList.toggle('collapsed');
+      arrow.textContent = nowCollapsed ? '▸' : '▾';
+    });
+  });
+
+  // Select all — always ticks the COMPLETE set of descendants, regardless of whatever
+  // search filter happens to be active at the time. "Select all Figma" means every-
+  // thing under Figma, not just whatever a search happened to be showing.
+  document.querySelectorAll('[data-select-all]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const nodeId = btn.dataset.selectAll;
+      const ids = allDescendantNodeIds(nodeId);
+      ids.forEach(id=>{
+        const cb = document.querySelector(`.access-node-check[value="${id}"]`);
+        if(cb) cb.checked = true;
+      });
+      // also expand this branch so the result is visible immediately
+      const childrenEl = document.getElementById('access-children-'+nodeId);
+      const arrow = document.querySelector(`[data-access-toggle="${nodeId}"]`);
+      if(childrenEl){ childrenEl.classList.remove('collapsed'); if(arrow) arrow.textContent = '▾'; }
+    });
+  });
+
+  // Search — filters which nodes show, auto-expanding ancestors of anything matching;
+  // clearing the search reverts everything back to its normal collapsed-by-default state.
+  const searchInput = document.getElementById('accessTreeSearch');
+  if(searchInput){
+    searchInput.addEventListener('input', ()=>{
+      const q = searchInput.value.trim().toLowerCase();
+      document.querySelectorAll('.access-node').forEach(el=>{
+        const nodeId = el.dataset.accessNode;
+        const node = featureNode(nodeId);
+        if(!node) return;
+        const show = !q || nodeOrDescendantMatches(node, q);
+        el.classList.toggle('access-search-hidden', !show);
+        if(q && show){
+          const childrenEl = document.getElementById('access-children-'+nodeId);
+          const arrow = document.querySelector(`[data-access-toggle="${nodeId}"]`);
+          if(childrenEl){ childrenEl.classList.remove('collapsed'); if(arrow) arrow.textContent = '▾'; }
+        } else if(!q){
+          const childrenEl = document.getElementById('access-children-'+nodeId);
+          const arrow = document.querySelector(`[data-access-toggle="${nodeId}"]`);
+          if(childrenEl){ childrenEl.classList.add('collapsed'); if(arrow) arrow.textContent = '▸'; }
+        }
+      });
+    });
+  }
+
   document.getElementById('accessSaveBtn').addEventListener('click', ()=>{
     const checked = Array.from(document.querySelectorAll('.access-node-check:checked')).map(el=>el.value);
     if(!state.userAccess) state.userAccess = {};

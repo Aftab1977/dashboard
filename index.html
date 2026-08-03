@@ -1467,6 +1467,9 @@ async function submitAiAgentQuestion(){
   if(!question || aiAgentThinking) return;
   const cu = currentUser();
   if(!cu) return;
+  // Capture prior turns before adding this new question, so the backend can use them
+  // for multi-turn memory — errors aren't real conversation turns, so they're excluded.
+  const history = aiAgentMessages.filter(m=>m.role==='user' || m.role==='assistant');
   aiAgentMessages.push({role:'user', text:question});
   aiAgentThinking = true;
   renderAiAgentWidget();
@@ -1476,7 +1479,7 @@ async function submitAiAgentQuestion(){
     const res = await fetch(AI_AGENT_FUNCTION_URL, {
       method:'POST',
       headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY},
-      body: JSON.stringify({ question, userId: cu.id }),
+      body: JSON.stringify({ question, userId: cu.id, history }),
     });
     const data = await res.json();
     if(data.error){

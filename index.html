@@ -258,6 +258,7 @@
     background:var(--panel-raised);padding:10px 14px;min-width:96px;max-width:190px;
     display:flex;flex-direction:column;gap:3px;
   }
+  .rail-att-badge{position:absolute;top:6px;right:8px;font-size:11px;line-height:1;cursor:default;}
   .rail-node .nt{font-size:12px;font-weight:600;color:var(--paper);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:162px;}
   .rail-node .nd{font-family:var(--f-mono);font-size:10px;color:var(--paper-dim);}
   .rail-node .nu{font-size:9.5px;color:var(--paper);line-height:1.3;margin-top:1px;}
@@ -406,6 +407,46 @@
   .access-children{overflow:hidden;}
   .access-children.collapsed{display:none;}
   .access-node.access-search-hidden{display:none;}
+
+  /* ---------- AI Agent: floating bubble + slide-out panel ---------- */
+  .ai-bubble{
+    position:fixed;bottom:24px;right:24px;z-index:80;width:56px;height:56px;
+    border-radius:50%;background:var(--panel);border:1.5px solid var(--line);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    box-shadow:0 4px 16px rgba(0,0,0,.18);transition:transform .15s ease;
+  }
+  .ai-bubble:hover{transform:scale(1.06);}
+  .ai-icon-glow path, .ai-icon-glow circle{stroke:#4FC3F7;fill:none;}
+  .ai-icon-glow .node{fill:#4FC3F7;stroke:none;}
+  .ai-icon-glow .trace{stroke-width:2.2;}
+  .ai-icon-glow.idle .node{animation:aiIdlePulse 3s ease-in-out infinite;}
+  .ai-icon-glow.idle .trace{animation:aiIdleGlow 3s ease-in-out infinite;}
+  @keyframes aiIdlePulse{0%,100%{opacity:.55;filter:drop-shadow(0 0 1px #4FC3F7);}50%{opacity:1;filter:drop-shadow(0 0 4px #4FC3F7);}}
+  @keyframes aiIdleGlow{0%,100%{opacity:.4;}50%{opacity:.85;}}
+  .ai-icon-glow.thinking .node{animation:aiThinkPulse 1.4s ease-in-out infinite;}
+  .ai-icon-glow.thinking .trace{animation:aiThinkGlow 1.4s ease-in-out infinite;opacity:.5;}
+  @keyframes aiThinkPulse{0%,100%{opacity:.3;filter:drop-shadow(0 0 1px #4FC3F7);}50%{opacity:1;filter:drop-shadow(0 0 6px #7FDBFF) drop-shadow(0 0 12px #4FC3F7);}}
+  @keyframes aiThinkGlow{0%,100%{opacity:.3;}50%{opacity:.9;}}
+
+  .ai-panel{
+    position:fixed;top:0;right:0;height:100vh;width:380px;max-width:92vw;z-index:81;
+    background:var(--panel);border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(0,0,0,.14);
+    display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s ease;
+  }
+  .ai-panel.open{transform:translateX(0);}
+  .ai-panel-header{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line);}
+  .ai-panel-title{font-family:var(--f-display);font-size:16px;color:var(--paper);flex:1;}
+  .ai-panel-close{cursor:pointer;color:var(--paper-faint);font-size:18px;background:none;border:none;padding:4px;}
+  .ai-panel-messages{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:12px;}
+  .ai-msg{max-width:88%;padding:10px 13px;border-radius:12px;font-size:13px;line-height:1.5;white-space:pre-wrap;}
+  .ai-msg.user{align-self:flex-end;background:var(--amber);color:#fff;}
+  .ai-msg.assistant{align-self:flex-start;background:var(--panel-raised);color:var(--paper);border:1px solid var(--line);}
+  .ai-msg.error{align-self:flex-start;background:var(--red-soft,rgba(220,60,60,.1));color:var(--red);border:1px solid var(--red-border,rgba(220,60,60,.3));}
+  .ai-panel-empty{color:var(--paper-faint);font-size:13px;text-align:center;margin-top:40px;padding:0 20px;}
+  .ai-panel-input-row{display:flex;gap:8px;padding:14px 18px;border-top:1px solid var(--line);}
+  .ai-panel-input{flex:1;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;resize:none;font-family:var(--f-body);}
+  .ai-panel-send{background:var(--amber);color:#fff;border:none;border-radius:8px;padding:0 16px;cursor:pointer;font-weight:600;font-size:13px;}
+  .ai-panel-send:disabled{opacity:.5;cursor:default;}
   .sumcal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;max-width:520px;}
   .sumcal-dow{text-align:center;font-size:11px;color:var(--paper-faint);font-family:var(--f-mono);padding-bottom:4px;}
   .sumcal-cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border:1px solid #555555;border-radius:8px;font-size:13px;color:var(--paper-faint);}
@@ -440,6 +481,7 @@
 <body>
 <div id="app"></div>
 <div id="modalRoot"></div>
+<div id="aiAgentRoot"></div>
 
 <script>
 /* ============================== STATE ============================== */
@@ -451,6 +493,10 @@
  * ============================================================================ */
 const SUPABASE_URL = 'https://gjnxgdzpfdkbptzimbgf.supabase.co';       // e.g. 'https://abcdefghijk.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqbnhnZHpwZmRrYnB0emltYmdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzOTI2MDQsImV4cCI6MjA5OTk2ODYwNH0.IYOuQARn6MiY9sc6e9w2-VGwuajWTerf6Ps48gwMBqM';  // your project's anon public key
+// Your Edge Function ended up named "bright-handler" rather than "ai-agent" when it
+// was created — this points to wherever it actually lives. If you ever rename or
+// redeploy it under a different name, update this one line to match.
+const AI_AGENT_FUNCTION_URL = 'https://gjnxgdzpfdkbptzimbgf.supabase.co/functions/v1/bright-handler';
 /* ============================================================================ */
 
 const STORAGE_KEY = 'controlroom_state_v1';
@@ -517,7 +563,9 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[] };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false };
+let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
+let aiAgentThinking = false;
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -586,6 +634,14 @@ function addDays(iso, n){
 }
 function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00')) / 86400000); }
 function fmtDate(iso){ if(!iso) return '—'; const d = new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'2-digit',year:'numeric'}); }
+// "5th Aug 2026" style, specifically for the task attendance summary on the Handoff Rail.
+function fmtDateOrdinal(iso){
+  const d = new Date(iso+'T00:00:00');
+  const day = d.getDate();
+  const suffix = (day%10===1 && day!==11) ? 'st' : (day%10===2 && day!==12) ? 'nd' : (day%10===3 && day!==13) ? 'rd' : 'th';
+  const month = d.toLocaleDateString('en-US',{month:'short'});
+  return `${day}${suffix} ${month} ${d.getFullYear()}`;
+}
 function isWeekendISO(iso){ const dow = new Date(iso+'T00:00:00').getDay(); return dow===0 || dow===6; }
 // Inclusive day span between two dates, and how many of those days fall on a Sat/Sun —
 // purely informational, doesn't feed into any delay or duration math.
@@ -704,6 +760,7 @@ function seedState(){
 
   const featureNodes = [
     {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''},
+    {id:'feat_ai_agent', name:'AI Agent', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
     {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
     {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
     {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
@@ -715,7 +772,7 @@ function seedState(){
     {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
   ];
 
-  const allNodeIds = featureNodes.map(n=>n.id);
+  const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent');
   const userAccess = {};
   users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
   return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {} };
@@ -746,6 +803,7 @@ function normalizeState(s){
   if(!Array.isArray(s.featureNodes) || s.featureNodes.length===0){
     s.featureNodes = [
       {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''},
+      {id:'feat_ai_agent', name:'AI Agent', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
       {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
       {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
       {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
@@ -816,6 +874,11 @@ function normalizeState(s){
     // One-time addition: the Summary module, placed above Workstream via order 0.
     if(!s.featureNodes.some(n=>n.id==='feat_summary')){
       s.featureNodes.push({id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''});
+    }
+    // One-time addition: the AI Agent. Unlike Summary, this deliberately does NOT
+    // get auto-granted to anyone below — access is admin-controlled from the start.
+    if(!s.featureNodes.some(n=>n.id==='feat_ai_agent')){
+      s.featureNodes.push({id:'feat_ai_agent', name:'AI Agent', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''});
     }
   }
   // Give everyone the new Summary module specifically — the general Access grandfather
@@ -1314,6 +1377,118 @@ function render(){
   bindGlobalNav();
   bindView();
   if(isNavigation) window.scrollTo(0, 0);
+  renderAiAgentWidget();
+}
+
+// The circuit-brain icon markup, shared between the idle bubble and the "thinking"
+// state while waiting on a response. Full inline markup (not <use>) deliberately —
+// referencing shared defs via <use> doesn't reliably carry CSS-driven color/animation
+// across all browsers, confirmed the hard way while designing this.
+function aiAgentIconSvg(stateClass){
+  return `<svg class="ai-icon-glow ${stateClass}" width="30" height="30" viewBox="0 0 100 100">
+    <path class="trace" d="M50 8 L50 20 M35 12 L35 24 L28 24 L28 32 M65 12 L65 24 L72 24 L72 32"/>
+    <path class="trace" d="M28 32 L28 45 L20 45 L20 58 M72 32 L72 45 L80 45 L80 58"/>
+    <path class="trace" d="M20 58 L20 70 L28 70 L28 80 M80 58 L80 70 L72 70 L72 80"/>
+    <path class="trace" d="M35 24 L42 24 L42 36 L50 36 L50 24 L58 24 L58 36 L65 24"/>
+    <path class="trace" d="M42 36 L42 48 L35 48 L35 60 M58 36 L58 48 L65 48 L65 60"/>
+    <path class="trace" d="M35 60 L42 60 L42 72 L50 72 L50 60 L58 60 L58 72 L65 60"/>
+    <path class="trace" d="M50 36 L50 48 M50 60 L50 72 L50 84"/>
+    <path class="trace" d="M28 45 L35 45 M65 45 L72 45"/>
+    <path class="trace" d="M28 70 L35 70 M65 70 L72 70"/>
+    <circle class="node" cx="50" cy="8" r="2.6"/><circle class="node" cx="35" cy="12" r="2.2"/>
+    <circle class="node" cx="65" cy="12" r="2.2"/><circle class="node" cx="28" cy="24" r="2.4"/>
+    <circle class="node" cx="72" cy="24" r="2.4"/><circle class="node" cx="20" cy="45" r="2.6"/>
+    <circle class="node" cx="80" cy="45" r="2.6"/><circle class="node" cx="20" cy="58" r="2.4"/>
+    <circle class="node" cx="80" cy="58" r="2.4"/><circle class="node" cx="28" cy="70" r="2.4"/>
+    <circle class="node" cx="72" cy="70" r="2.4"/><circle class="node" cx="28" cy="80" r="2.6"/>
+    <circle class="node" cx="72" cy="80" r="2.6"/><circle class="node" cx="42" cy="24" r="2"/>
+    <circle class="node" cx="58" cy="24" r="2"/><circle class="node" cx="42" cy="36" r="2.2"/>
+    <circle class="node" cx="58" cy="36" r="2.2"/><circle class="node" cx="50" cy="36" r="2.4"/>
+    <circle class="node" cx="35" cy="48" r="2.2"/><circle class="node" cx="65" cy="48" r="2.2"/>
+    <circle class="node" cx="35" cy="60" r="2.2"/><circle class="node" cx="65" cy="60" r="2.2"/>
+    <circle class="node" cx="42" cy="60" r="2"/><circle class="node" cx="58" cy="60" r="2"/>
+    <circle class="node" cx="42" cy="72" r="2.2"/><circle class="node" cx="58" cy="72" r="2.2"/>
+    <circle class="node" cx="50" cy="72" r="2.4"/><circle class="node" cx="50" cy="84" r="2.6"/>
+  </svg>`;
+}
+
+function renderAiAgentWidget(){
+  const root = document.getElementById('aiAgentRoot');
+  if(!root) return;
+  if(ui.view==='login' || !canSeeNode('feat_ai_agent')){
+    root.innerHTML = '';
+    return;
+  }
+  const messagesHtml = aiAgentMessages.length ? aiAgentMessages.map(m=>
+    `<div class="ai-msg ${m.role}">${(m.text||'').replace(/</g,'&lt;')}</div>`
+  ).join('') : `<div class="ai-panel-empty">Ask about any workstream or task you have access to.</div>`;
+
+  root.innerHTML = `
+    <div class="ai-bubble" id="aiBubbleBtn" title="AI Agent">
+      ${aiAgentIconSvg(aiAgentThinking ? 'thinking' : 'idle')}
+    </div>
+    <div class="ai-panel ${ui.aiAgentOpen?'open':''}">
+      <div class="ai-panel-header">
+        ${aiAgentIconSvg(aiAgentThinking ? 'thinking' : 'idle')}
+        <div class="ai-panel-title">AI Agent</div>
+        <button class="ai-panel-close" id="aiPanelCloseBtn">✕</button>
+      </div>
+      <div class="ai-panel-messages" id="aiPanelMessages">${messagesHtml}</div>
+      <div class="ai-panel-input-row">
+        <textarea class="ai-panel-input" id="aiPanelInput" rows="1" placeholder="Ask a question..." ${aiAgentThinking?'disabled':''}></textarea>
+        <button class="ai-panel-send" id="aiPanelSendBtn" ${aiAgentThinking?'disabled':''}>Send</button>
+      </div>
+    </div>
+  `;
+  bindAiAgentWidget();
+  const msgBox = document.getElementById('aiPanelMessages');
+  if(msgBox) msgBox.scrollTop = msgBox.scrollHeight;
+}
+
+function bindAiAgentWidget(){
+  const bubble = document.getElementById('aiBubbleBtn');
+  if(bubble) bubble.addEventListener('click', ()=>{ ui.aiAgentOpen = !ui.aiAgentOpen; renderAiAgentWidget(); });
+  const closeBtn = document.getElementById('aiPanelCloseBtn');
+  if(closeBtn) closeBtn.addEventListener('click', ()=>{ ui.aiAgentOpen = false; renderAiAgentWidget(); });
+  const sendBtn = document.getElementById('aiPanelSendBtn');
+  const input = document.getElementById('aiPanelInput');
+  if(sendBtn && input){
+    sendBtn.addEventListener('click', submitAiAgentQuestion);
+    input.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); submitAiAgentQuestion(); }
+    });
+  }
+}
+
+async function submitAiAgentQuestion(){
+  const input = document.getElementById('aiPanelInput');
+  if(!input) return;
+  const question = input.value.trim();
+  if(!question || aiAgentThinking) return;
+  const cu = currentUser();
+  if(!cu) return;
+  aiAgentMessages.push({role:'user', text:question});
+  aiAgentThinking = true;
+  renderAiAgentWidget();
+  const newInput = document.getElementById('aiPanelInput');
+  if(newInput) newInput.value = '';
+  try{
+    const res = await fetch(AI_AGENT_FUNCTION_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY},
+      body: JSON.stringify({ question, userId: cu.id }),
+    });
+    const data = await res.json();
+    if(data.error){
+      aiAgentMessages.push({role:'error', text:data.error});
+    } else {
+      aiAgentMessages.push({role:'assistant', text:data.answer || 'No response received.'});
+    }
+  } catch(e){
+    aiAgentMessages.push({role:'error', text:'Could not reach the AI Agent — check your connection and try again. (If you are viewing this through a Claude preview link rather than your real published site, outbound calls like this are expected to fail there.)'});
+  }
+  aiAgentThinking = false;
+  renderAiAgentWidget();
 }
 
 function navBtn(view, icon, label){
@@ -1837,7 +2012,7 @@ function canSeeNode(nodeId){
 // Root Modules a non-admin can see at all — new Modules are invisible to everyone
 // until explicitly granted, by construction (they simply won't be in anyone's list yet).
 function rootFeatureNodesVisible(){
-  const roots = state.featureNodes.filter(n=>n.parentId===null).sort((a,b)=>(a.order||0)-(b.order||0));
+  const roots = state.featureNodes.filter(n=>n.parentId===null && n.id!=='feat_ai_agent').sort((a,b)=>(a.order||0)-(b.order||0));
   return roots.filter(n=>canSeeNode(n.id));
 }
 function nextOrderFor(parentId){
@@ -1860,6 +2035,61 @@ const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color
 
 function attendanceKey(userId, date){ return userId+'|'+date; }
 function getAttendance(userId, date){ return state.attendance[attendanceKey(userId,date)] || null; }
+
+// For a task assigned to a specific person, summarizes any Leave/WFH days across its
+// active date range — from start date through today if still open (so it keeps
+// growing day by day while the task remains open), or through its actual close date
+// if closed. Only Leave and WFH are considered; every other status is ignored.
+// Consecutive days of the same status collapse into one range rather than listing
+// each day separately.
+// Who can see Leave/WFH badges on a workstream's Handoff Rail: admins always; anyone
+// who actually has a task of their own in this specific workstream; and viewers who've
+// been explicitly granted read-only access to this workstream, even without a task of
+// their own there. Nobody else — general workstream visibility alone isn't enough.
+function canSeeAttendanceBadges(projectId){
+  if(isAdmin()) return true;
+  const cu = currentUser();
+  if(!cu) return false;
+  const hasOwnTask = state.tasks.some(t=>t.projectId===projectId && (
+    (t.assignedType==='user' && t.assignedId===cu.id) ||
+    (t.assignedType==='team' && t.assignedId===cu.teamId)
+  ));
+  if(hasOwnTask) return true;
+  if(cu.role==='viewer'){
+    if(cu.viewerProjectIds==='all') return true;
+    if(Array.isArray(cu.viewerProjectIds) && cu.viewerProjectIds.includes(projectId)) return true;
+  }
+  return false;
+}
+
+function taskAttendanceSummary(t){
+  if(t.assignedType!=='user' || !t.assignedId || !t.startDate) return null;
+  const rangeEnd = t.status==='closed' ? (t.closedDate||t.startDate) : todayISO();
+  if(rangeEnd < t.startDate) return null;
+  const days = [];
+  let cur = t.startDate;
+  while(cur <= rangeEnd){
+    const status = getAttendance(t.assignedId, cur);
+    if(status==='L' || status==='WFH') days.push({date:cur, status});
+    cur = addDays(cur, 1);
+  }
+  if(!days.length) return null;
+  // Group consecutive days sharing the same status into ranges
+  const groups = [];
+  days.forEach(d=>{
+    const last = groups[groups.length-1];
+    if(last && last.status===d.status && addDays(last.end,1)===d.date){
+      last.end = d.date;
+    } else {
+      groups.push({status:d.status, start:d.date, end:d.date});
+    }
+  });
+  const label = groups.map(g=>{
+    const statusName = g.status==='L' ? 'Leave' : 'WFH';
+    return g.start===g.end ? `${statusName} ${fmtDateOrdinal(g.start)}` : `${statusName} ${fmtDateOrdinal(g.start)} till ${fmtDateOrdinal(g.end)}`;
+  }).join(', ');
+  return { groups, label, hasLeave: groups.some(g=>g.status==='L'), hasWFH: groups.some(g=>g.status==='WFH') };
+}
 function setAttendanceValue(userId, date, status){
   const key = attendanceKey(userId,date);
   if(status) state.attendance[key] = status; else delete state.attendance[key];
@@ -1915,7 +2145,7 @@ function renderAttendanceSheet(node){
       const cls = `att-cell${weekend?' att-weekend':''}${admin?' att-clickable':''}`;
       return `<td class="${cls}" style="${style}"${clickAttr}>${label}</td>`;
     }).join('');
-    return `<tr><td style="padding:8px 12px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
+    return `<tr><td style="padding:8px 6px;width:70px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
   }).join('');
 
   const legend = Object.entries(ATT_STATUS).map(([code,v])=>
@@ -1937,7 +2167,7 @@ function renderAttendanceSheet(node){
 
     <div class="att-wrap">
       <table class="att-table">
-        <thead><tr><th style="padding:10px 12px;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
+        <thead><tr><th style="padding:8px 6px;width:70px;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
         <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
@@ -2087,7 +2317,7 @@ function renderAppraisalSheet(node){
       : '';
     return `
       <tr data-appraisal-row="${u.id}" style="cursor:pointer;">
-        <td style="padding:8px 12px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">${u.employeeId||''}</td>
+        <td style="padding:8px 6px;width:70px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">${u.employeeId||''}</td>
         <td class="att-name">${u.name}</td>
         <td class="appraisal-cell">${rec.designation||''}</td>
         <td class="appraisal-cell mono">${rec.doj?fmtDate(rec.doj):''}</td>
@@ -2107,7 +2337,7 @@ function renderAppraisalSheet(node){
     <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>
     <div class="att-wrap">
       <table class="att-table" style="font-size:12px;">
-        <thead><tr><th style="padding:10px 12px;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
+        <thead><tr><th style="padding:8px 6px;width:70px;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
         <tbody>${bodyRows || `<tr><td colspan="${cols.length+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
@@ -3241,6 +3471,7 @@ function renderProject(){
   const deadline = tl.originalDeadline || addDays(p.startDate, tl.originalTotal);
   const lastClosedDate = (tasks.length>0 && closed===tasks.length) ? tasks.reduce((max,t)=> (t.closedDate && (!max || t.closedDate > max)) ? t.closedDate : max, null) : null;
 
+  const canSeeAttBadges = canSeeAttendanceBadges(p.id);
   const railRows = tl.chains.map((chain, idx)=>{
     const isCritical = idx === tl.criticalIndex && tl.chains.length>1;
     const nodes = chain.map((t,i)=>{
@@ -3249,9 +3480,11 @@ function renderProject(){
       const durLabel = t.deadlineDisabled ? 'no deadline' : `${dur}d`;
       const lu = t.lastUpdated;
       const luText = lu ? `Updated by ${lu.byName} at ${fmtDateTime(lu.at)}` : 'Not yet updated';
+      const attSummary = canSeeAttBadges ? taskAttendanceSummary(t) : null;
+      const attBadge = attSummary ? `<span class="rail-att-badge" title="${entityName(t.assignedType,t.assignedId)} (${attSummary.label.replace(/"/g,'&quot;')})">${attSummary.hasWFH ? '🏠' : ''}${attSummary.hasLeave ? '🌴' : ''}</span>` : '';
       return `
         ${i>0 ? '<div class="rail-connector"></div>' : ''}
-        <div class="rail-node ${color}" data-task-node="${t.id}" style="cursor:pointer;">
+        <div class="rail-node ${color}" data-task-node="${t.id}" style="cursor:pointer;">          ${attBadge}
           <span class="nt">${t.title || 'Untitled task'}</span>
           <span class="nd">${entityName(t.assignedType,t.assignedId)} · ${durLabel}</span>
           <span class="nu">${luText}</span>

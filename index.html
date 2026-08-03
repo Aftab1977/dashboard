@@ -1460,6 +1460,22 @@ function bindAiAgentWidget(){
   }
 }
 
+// Loads this person's previously-saved AI Agent conversation, if any, so it's there
+// the moment they open the panel rather than starting blank every time they log in.
+// Fire-and-forget by design — never blocks or breaks login if it fails.
+async function loadAiConversationHistory(userId){
+  try{
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/ai_conversations?user_id=eq.${userId}&select=messages`, {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer '+SUPABASE_ANON_KEY },
+    });
+    const rows = await res.json();
+    if(Array.isArray(rows) && rows[0] && Array.isArray(rows[0].messages)){
+      aiAgentMessages = rows[0].messages;
+      renderAiAgentWidget();
+    }
+  }catch(e){ /* best-effort — a fresh, empty conversation is a fine fallback */ }
+}
+
 async function submitAiAgentQuestion(){
   const input = document.getElementById('aiPanelInput');
   if(!input) return;
@@ -1614,6 +1630,7 @@ function bindLogin(){
         console.error('Summary engine failed (non-fatal):', summaryErr);
       }
       render();
+      loadAiConversationHistory(match.id); // fire-and-forget — never delays login itself
     }catch(err){
       ui.loginError = 'Sign-in hit an unexpected error: ' + (err && err.message ? err.message : err);
       render();

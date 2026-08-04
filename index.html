@@ -452,6 +452,7 @@
   .ai-msg.assistant{align-self:flex-start;background:var(--panel-raised);color:var(--paper);border:1px solid var(--line);}
   .ai-msg.error{align-self:flex-start;background:var(--red-soft,rgba(220,60,60,.1));color:var(--red);border:1px solid var(--red-border,rgba(220,60,60,.3));}
   .ai-msg-table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12px;}
+  .ai-est-flag{background:rgba(230,145,56,.16);color:#B8541A;border:1px solid rgba(230,145,56,.4);border-radius:5px;padding:1px 6px;font-weight:600;cursor:help;white-space:nowrap;}
   .ai-msg-table th, .ai-msg-table td{border:1px solid var(--line);padding:6px 10px;text-align:left;}
   .ai-msg-table th{background:var(--panel);font-weight:600;color:var(--paper);}
   .ai-msg:has(.ai-msg-table){max-width:96%;}
@@ -1433,7 +1434,8 @@ function renderMarkdownLite(text){
   return html;
 }
 function applyInlineMd(s){
-  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  const withBold = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  return withBold.replace(/\[\[est:(.+?)\]\]/g, '<span class="ai-est-flag" title="This figure was calculated or estimated by the AI itself, not pulled directly from your data — worth double-checking.">⚠ $1</span>');
 }
 
 function aiAgentIconSvg(stateClass){

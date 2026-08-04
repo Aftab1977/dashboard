@@ -411,9 +411,10 @@
   /* ---------- Workspace CoPilot: floating bubble + slide-out panel ---------- */
   .ai-bubble{
     position:fixed;bottom:24px;right:24px;z-index:80;width:70px;height:70px;
+    border-radius:50%;background:var(--panel);border:1.5px solid var(--line);
     display:flex;align-items:center;justify-content:center;cursor:pointer;
     transition:transform .15s ease;
-    filter:drop-shadow(0 4px 10px rgba(0,0,0,.35));
+    box-shadow:0 4px 16px rgba(0,0,0,.18);
   }
   .ai-bubble:hover{transform:scale(1.06);}
   .ai-icon-glow path, .ai-icon-glow circle{stroke:#4FC3F7;fill:none;}
@@ -1486,7 +1487,7 @@ function renderAiAgentWidget(){
 
   root.innerHTML = `
     <div class="ai-bubble" id="aiBubbleBtn" title="Workspace CoPilot">
-      <div id="aiBubbleLottie" style="width:51px;height:51px;"></div>
+      <div id="aiBubbleLottie" style="width:67px;height:67px;"></div>
     </div>
     <div class="ai-panel ${ui.aiAgentOpen?'open':''} ${ui.aiAgentMinimized?'minimized':''}" style="height:${ui.aiAgentMinimized?'auto':ui.aiAgentHeightVh+'vh'};">
       <div class="ai-panel-header">

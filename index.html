@@ -408,7 +408,7 @@
   .access-children.collapsed{display:none;}
   .access-node.access-search-hidden{display:none;}
 
-  /* ---------- AI Agent: floating bubble + slide-out panel ---------- */
+  /* ---------- Workspace CoPilot: floating bubble + slide-out panel ---------- */
   .ai-bubble{
     position:fixed;bottom:24px;right:24px;z-index:80;width:56px;height:56px;
     border-radius:50%;background:var(--panel);border:1.5px solid var(--line);
@@ -510,7 +510,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // was created — this points to wherever it actually lives. If you ever rename or
 // redeploy it under a different name, update this one line to match.
 const AI_AGENT_FUNCTION_URL = 'https://gjnxgdzpfdkbptzimbgf.supabase.co/functions/v1/bright-handler';
-// AI Agent chat history is kept for this many days, then trimmed — one source of
+// Workspace CoPilot chat history is kept for this many days, then trimmed — one source of
 // truth used both when loading a conversation and in the Admin page's info box.
 const AI_HISTORY_RETENTION_DAYS = 10;
 /* ============================================================================ */
@@ -776,7 +776,7 @@ function seedState(){
 
   const featureNodes = [
     {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''},
-    {id:'feat_ai_agent', name:'AI Agent', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
+    {id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
     {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
     {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
     {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
@@ -819,7 +819,7 @@ function normalizeState(s){
   if(!Array.isArray(s.featureNodes) || s.featureNodes.length===0){
     s.featureNodes = [
       {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''},
-      {id:'feat_ai_agent', name:'AI Agent', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
+      {id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
       {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
       {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
       {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
@@ -891,10 +891,10 @@ function normalizeState(s){
     if(!s.featureNodes.some(n=>n.id==='feat_summary')){
       s.featureNodes.push({id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''});
     }
-    // One-time addition: the AI Agent. Unlike Summary, this deliberately does NOT
+    // One-time addition: Workspace CoPilot. Unlike Summary, this deliberately does NOT
     // get auto-granted to anyone below — access is admin-controlled from the start.
     if(!s.featureNodes.some(n=>n.id==='feat_ai_agent')){
-      s.featureNodes.push({id:'feat_ai_agent', name:'AI Agent', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''});
+      s.featureNodes.push({id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''});
     }
   }
   // Give everyone the new Summary module specifically — the general Access grandfather
@@ -1402,7 +1402,7 @@ function render(){
 // state while waiting on a response. Full inline markup (not <use>) deliberately —
 // referencing shared defs via <use> doesn't reliably carry CSS-driven color/animation
 // across all browsers, confirmed the hard way while designing this.
-// A small, focused markdown renderer for AI Agent messages — handles tables and
+// A small, focused markdown renderer for Workspace CoPilot messages — handles tables and
 // bold text specifically, since those are what the AI actually produces for
 // structured data like the employee directory. Not a full markdown implementation
 // on purpose; just enough to make the two things that matter here readable.
@@ -1477,13 +1477,13 @@ function renderAiAgentWidget(){
   const aiCtx = currentAiAgentContext();
 
   root.innerHTML = `
-    <div class="ai-bubble" id="aiBubbleBtn" title="AI Agent">
+    <div class="ai-bubble" id="aiBubbleBtn" title="Workspace CoPilot">
       ${aiAgentIconSvg(aiAgentThinking ? 'thinking' : 'idle')}
     </div>
     <div class="ai-panel ${ui.aiAgentOpen?'open':''} ${ui.aiAgentMinimized?'minimized':''}" style="height:${ui.aiAgentMinimized?'auto':ui.aiAgentHeightVh+'vh'};">
       <div class="ai-panel-header">
         ${aiAgentIconSvg(aiAgentThinking ? 'thinking' : 'idle')}
-        <div class="ai-panel-title">AI Agent</div>
+        <div class="ai-panel-title">Workspace CoPilot</div>
         ${!ui.aiAgentMinimized ? `
         <button class="ai-panel-btn" id="aiPanelShrinkBtn" title="Decrease height">−</button>
         <button class="ai-panel-btn" id="aiPanelGrowBtn" title="Increase height">+</button>
@@ -1525,7 +1525,7 @@ function bindAiAgentWidget(){
   }
 }
 
-// Loads this person's previously-saved AI Agent conversation, if any, so it's there
+// Loads this person's previously-saved Workspace CoPilot conversation, if any, so it's there
 // the moment they open the panel rather than starting blank every time they log in.
 // Fire-and-forget by design — never blocks or breaks login if it fails.
 async function loadAiConversationHistory(userId){
@@ -1593,7 +1593,7 @@ async function submitAiAgentQuestion(){
       aiAgentMessages.push({role:'assistant', text:data.answer || 'No response received.', at: new Date().toISOString()});
     }
   } catch(e){
-    aiAgentMessages.push({role:'error', text:'Could not reach the AI Agent — check your connection and try again. (If you are viewing this through a Claude preview link rather than your real published site, outbound calls like this are expected to fail there.)', at: new Date().toISOString()});
+    aiAgentMessages.push({role:'error', text:'Could not reach Workspace CoPilot — check your connection and try again. (If you are viewing this through a Claude preview link rather than your real published site, outbound calls like this are expected to fail there.)', at: new Date().toISOString()});
   }
   aiAgentThinking = false;
   renderAiAgentWidget();
@@ -5046,8 +5046,8 @@ function renderAdminSettings(){
       </div>
     </div>
     <div class="card" style="margin-bottom:16px;">
-      <div class="section-title" style="margin-bottom:2px;">AI Agent chat history</div>
-      <div class="muted" style="font-size:12px;">Conversations with the AI Agent are kept for <b>${AI_HISTORY_RETENTION_DAYS} days</b>, then automatically trimmed. This is a fixed setting for now — if needed, it can be changed to a different number of days in a future update.</div>
+      <div class="section-title" style="margin-bottom:2px;">Workspace CoPilot chat history</div>
+      <div class="muted" style="font-size:12px;">Conversations with Workspace CoPilot are kept for <b>${AI_HISTORY_RETENTION_DAYS} days</b>, then automatically trimmed. This is a fixed setting for now — if needed, it can be changed to a different number of days in a future update.</div>
     </div>
     <div class="card" style="border-color:var(--red);">
       <div class="section-title" style="margin-bottom:2px;color:var(--red);">Danger zone</div>

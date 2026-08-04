@@ -55,10 +55,10 @@
     --red:#DD5147;
     --red-soft:#FCEAE8;
     --red-glow:rgba(221,81,71,.22);
-    --amber:#3066CE;
-    --amber-soft:#EBF1FB;
-    --amber-border:rgba(48,102,206,.35);
-    --amber-glow:rgba(48,102,206,.3);
+    --amber:#0060BF;
+    --amber-soft:#E8F1F9;
+    --amber-border:rgba(0,96,191,.35);
+    --amber-glow:rgba(0,96,191,.3);
     /* Blockers get their own dedicated dark-orange, identical across themes — like
        green/red, this is a status color carrying real meaning, not decoration. */
     --blocker:#CC5500;
@@ -416,7 +416,14 @@
     transition:transform .15s ease;
     box-shadow:0 4px 16px rgba(0,0,0,.18);
   }
-  .ai-bubble:hover{transform:scale(1.06);}
+  .ai-bubble:hover, .ai-bubble.ai-bubble-hover-active{transform:scale(1.06);}
+  .ai-bubble-label:hover, .ai-bubble-label.ai-bubble-hover-active{transform:scale(1.06);}
+  .ai-bubble-label{
+    position:fixed;bottom:104px;right:24px;z-index:80;
+    background:var(--panel);border:1.5px solid var(--line);border-radius:8px;
+    padding:7px 14px;font-size:13px;font-weight:600;color:var(--paper);
+    box-shadow:0 3px 10px rgba(0,0,0,.12);white-space:nowrap;cursor:pointer;
+  }
   .ai-icon-glow path, .ai-icon-glow circle{stroke:#4FC3F7;fill:none;}
   .ai-icon-glow .node{fill:#4FC3F7;stroke:none;}
   .ai-icon-glow .trace{stroke-width:2.2;}
@@ -1486,6 +1493,7 @@ function renderAiAgentWidget(){
   const aiCtx = currentAiAgentContext();
 
   root.innerHTML = `
+    ${!ui.aiAgentOpen ? `<div class="ai-bubble-label" id="aiBubbleLabel">Workspace CoPilot</div>` : ''}
     <div class="ai-bubble" id="aiBubbleBtn" title="Workspace CoPilot">
       <div id="aiBubbleLottie" style="width:67px;height:67px;"></div>
     </div>
@@ -1539,6 +1547,17 @@ function initWorkspaceCopilotLottie(){
 function bindAiAgentWidget(){
   const bubble = document.getElementById('aiBubbleBtn');
   if(bubble) bubble.addEventListener('click', ()=>{ ui.aiAgentOpen = !ui.aiAgentOpen; renderAiAgentWidget(); });
+  const bubbleLabel = document.getElementById('aiBubbleLabel');
+  if(bubbleLabel) bubbleLabel.addEventListener('click', ()=>{ ui.aiAgentOpen = true; renderAiAgentWidget(); });
+  // Combined hover — since the label only ever appears alongside the bubble, hovering
+  // either one triggers the same reaction on both, so they read as one connected
+  // element rather than two independent pieces that happen to sit near each other.
+  if(bubble && bubbleLabel){
+    bubble.addEventListener('mouseenter', ()=> bubbleLabel.classList.add('ai-bubble-hover-active'));
+    bubble.addEventListener('mouseleave', ()=> bubbleLabel.classList.remove('ai-bubble-hover-active'));
+    bubbleLabel.addEventListener('mouseenter', ()=> bubble.classList.add('ai-bubble-hover-active'));
+    bubbleLabel.addEventListener('mouseleave', ()=> bubble.classList.remove('ai-bubble-hover-active'));
+  }
   const closeBtn = document.getElementById('aiPanelCloseBtn');
   if(closeBtn) closeBtn.addEventListener('click', ()=>{ ui.aiAgentOpen = false; renderAiAgentWidget(); });
   const minimizeBtn = document.getElementById('aiPanelMinimizeBtn');

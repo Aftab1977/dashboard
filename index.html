@@ -450,6 +450,10 @@
   .ai-msg.user{align-self:flex-end;background:var(--amber);color:#fff;}
   .ai-msg.assistant{align-self:flex-start;background:var(--panel-raised);color:var(--paper);border:1px solid var(--line);}
   .ai-msg.error{align-self:flex-start;background:var(--red-soft,rgba(220,60,60,.1));color:var(--red);border:1px solid var(--red-border,rgba(220,60,60,.3));}
+  .ai-msg-table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12px;}
+  .ai-msg-table th, .ai-msg-table td{border:1px solid var(--line);padding:6px 10px;text-align:left;}
+  .ai-msg-table th{background:var(--panel);font-weight:600;color:var(--paper);}
+  .ai-msg:has(.ai-msg-table){max-width:96%;}
   .ai-panel-empty{color:var(--paper-faint);font-size:13px;text-align:center;margin-top:40px;padding:0 20px;}
   .ai-panel-input-row{display:flex;gap:8px;padding:14px 18px;border-top:1px solid var(--line);}
   .ai-panel-input{flex:1;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;resize:none;font-family:var(--f-body);}
@@ -1393,6 +1397,40 @@ function render(){
 // state while waiting on a response. Full inline markup (not <use>) deliberately —
 // referencing shared defs via <use> doesn't reliably carry CSS-driven color/animation
 // across all browsers, confirmed the hard way while designing this.
+// A small, focused markdown renderer for AI Agent messages — handles tables and
+// bold text specifically, since those are what the AI actually produces for
+// structured data like the employee directory. Not a full markdown implementation
+// on purpose; just enough to make the two things that matter here readable.
+function renderMarkdownLite(text){
+  const escaped = (text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const lines = escaped.split('\n');
+  let html = '';
+  let i = 0;
+  while(i < lines.length){
+    const line = lines[i];
+    // A markdown table: a header row, a separator row (|---|---|), then data rows —
+    // all lines starting and containing at least one pipe.
+    if(line.trim().startsWith('|') && lines[i+1] && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i+1])){
+      const headerCells = line.split('|').map(c=>c.trim()).filter((c,idx,arr)=> !(idx===0&&c==='') && !(idx===arr.length-1&&c===''));
+      let tableRows = `<tr>${headerCells.map(c=>`<th>${applyInlineMd(c)}</th>`).join('')}</tr>`;
+      i += 2; // skip header + separator
+      while(i < lines.length && lines[i].trim().startsWith('|')){
+        const cells = lines[i].split('|').map(c=>c.trim()).filter((c,idx,arr)=> !(idx===0&&c==='') && !(idx===arr.length-1&&c===''));
+        tableRows += `<tr>${cells.map(c=>`<td>${applyInlineMd(c)}</td>`).join('')}</tr>`;
+        i++;
+      }
+      html += `<table class="ai-msg-table">${tableRows}</table>`;
+      continue;
+    }
+    html += (html ? '<br>' : '') + applyInlineMd(line);
+    i++;
+  }
+  return html;
+}
+function applyInlineMd(s){
+  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+}
+
 function aiAgentIconSvg(stateClass){
   return `<svg class="ai-icon-glow ${stateClass}" width="30" height="30" viewBox="0 0 100 100">
     <path class="trace" d="M50 8 L50 20 M35 12 L35 24 L28 24 L28 32 M65 12 L65 24 L72 24 L72 32"/>
@@ -1429,7 +1467,7 @@ function renderAiAgentWidget(){
     return;
   }
   const messagesHtml = aiAgentMessages.length ? aiAgentMessages.map(m=>
-    `<div class="ai-msg ${m.role}">${(m.text||'').replace(/</g,'&lt;')}</div>`
+    `<div class="ai-msg ${m.role}">${renderMarkdownLite(m.text||'')}</div>`
   ).join('') : `<div class="ai-panel-empty">Ask about any workstream or task you have access to.</div>`;
   const aiCtx = currentAiAgentContext();
 

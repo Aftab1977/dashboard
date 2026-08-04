@@ -438,6 +438,7 @@
   }
   .ai-panel.open{transform:translateY(0) scale(1);opacity:1;pointer-events:auto;}
   .ai-panel.minimized .ai-panel-messages, .ai-panel.minimized .ai-panel-input-row{display:none;}
+  .ai-panel.minimized{width:25vw;max-width:320px;min-width:220px;}
   .ai-panel-header{display:flex;align-items:center;gap:6px;padding:14px 16px;border-bottom:1px solid var(--line);}
   .ai-panel.minimized .ai-panel-header{border-bottom:none;}
   .ai-panel-title{font-family:var(--f-display);font-size:16px;color:var(--paper);flex:1;}
@@ -509,6 +510,9 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // was created — this points to wherever it actually lives. If you ever rename or
 // redeploy it under a different name, update this one line to match.
 const AI_AGENT_FUNCTION_URL = 'https://gjnxgdzpfdkbptzimbgf.supabase.co/functions/v1/bright-handler';
+// AI Agent chat history is kept for this many days, then trimmed — one source of
+// truth used both when loading a conversation and in the Admin page's info box.
+const AI_HISTORY_RETENTION_DAYS = 10;
 /* ============================================================================ */
 
 const STORAGE_KEY = 'controlroom_state_v1';
@@ -1070,6 +1074,7 @@ async function reconcileWithStorage(){
           // from loading and showing real data.
           console.error('Summary engine failed (non-fatal):', summaryErr);
         }
+        loadAiConversationHistory(session.userId); // this path (session restored on page load/refresh) was missing this call entirely
       }
       render();
       persist(); // ensures a migrated legacy state gets written into the shared bucket right away
@@ -1531,7 +1536,11 @@ async function loadAiConversationHistory(userId){
     });
     const rows = await res.json();
     if(Array.isArray(rows) && rows[0] && Array.isArray(rows[0].messages)){
-      aiAgentMessages = rows[0].messages;
+      const cutoff = Date.now() - AI_HISTORY_RETENTION_DAYS*24*60*60*1000;
+      // A message saved before timestamps existed has no 'at' field — treated as
+      // past the cutoff, so it doesn't linger indefinitely just because it predates
+      // this feature.
+      aiAgentMessages = rows[0].messages.filter(m=> m.at && new Date(m.at).getTime() >= cutoff);
       renderAiAgentWidget();
     }
   }catch(e){ /* best-effort — a fresh, empty conversation is a fine fallback */ }
@@ -1566,7 +1575,7 @@ async function submitAiAgentQuestion(){
   // Capture prior turns before adding this new question, so the backend can use them
   // for multi-turn memory — errors aren't real conversation turns, so they're excluded.
   const history = aiAgentMessages.filter(m=>m.role==='user' || m.role==='assistant');
-  aiAgentMessages.push({role:'user', text:question});
+  aiAgentMessages.push({role:'user', text:question, at: new Date().toISOString()});
   aiAgentThinking = true;
   renderAiAgentWidget();
   const newInput = document.getElementById('aiPanelInput');
@@ -1579,12 +1588,12 @@ async function submitAiAgentQuestion(){
     });
     const data = await res.json();
     if(data.error){
-      aiAgentMessages.push({role:'error', text:data.error});
+      aiAgentMessages.push({role:'error', text:data.error, at: new Date().toISOString()});
     } else {
-      aiAgentMessages.push({role:'assistant', text:data.answer || 'No response received.'});
+      aiAgentMessages.push({role:'assistant', text:data.answer || 'No response received.', at: new Date().toISOString()});
     }
   } catch(e){
-    aiAgentMessages.push({role:'error', text:'Could not reach the AI Agent — check your connection and try again. (If you are viewing this through a Claude preview link rather than your real published site, outbound calls like this are expected to fail there.)'});
+    aiAgentMessages.push({role:'error', text:'Could not reach the AI Agent — check your connection and try again. (If you are viewing this through a Claude preview link rather than your real published site, outbound calls like this are expected to fail there.)', at: new Date().toISOString()});
   }
   aiAgentThinking = false;
   renderAiAgentWidget();
@@ -5035,6 +5044,10 @@ function renderAdminSettings(){
           <button class="btn btn-sm" id="saveMaxUploadBtn">Save</button>
         </div>
       </div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="section-title" style="margin-bottom:2px;">AI Agent chat history</div>
+      <div class="muted" style="font-size:12px;">Conversations with the AI Agent are kept for <b>${AI_HISTORY_RETENTION_DAYS} days</b>, then automatically trimmed. This is a fixed setting for now — if needed, it can be changed to a different number of days in a future update.</div>
     </div>
     <div class="card" style="border-color:var(--red);">
       <div class="section-title" style="margin-bottom:2px;color:var(--red);">Danger zone</div>

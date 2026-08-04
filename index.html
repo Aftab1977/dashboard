@@ -429,14 +429,22 @@
   @keyframes aiThinkGlow{0%,100%{opacity:.3;}50%{opacity:.9;}}
 
   .ai-panel{
-    position:fixed;top:0;right:0;height:100vh;width:380px;max-width:92vw;z-index:81;
-    background:var(--panel);border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(0,0,0,.14);
-    display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s ease;
+    position:fixed;bottom:92px;right:24px;width:50vw;max-width:640px;min-width:320px;
+    z-index:81;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 12px 32px rgba(0,0,0,.2);
+    display:flex;flex-direction:column;
+    transform:translateY(16px) scale(.97);opacity:0;pointer-events:none;
+    transition:transform .18s ease, opacity .18s ease;
   }
-  .ai-panel.open{transform:translateX(0);}
-  .ai-panel-header{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line);}
+  .ai-panel.open{transform:translateY(0) scale(1);opacity:1;pointer-events:auto;}
+  .ai-panel.minimized .ai-panel-messages, .ai-panel.minimized .ai-panel-input-row{display:none;}
+  .ai-panel-header{display:flex;align-items:center;gap:6px;padding:14px 16px;border-bottom:1px solid var(--line);}
+  .ai-panel.minimized .ai-panel-header{border-bottom:none;}
   .ai-panel-title{font-family:var(--f-display);font-size:16px;color:var(--paper);flex:1;}
-  .ai-panel-close{cursor:pointer;color:var(--paper-faint);font-size:18px;background:none;border:none;padding:4px;}
+  .ai-panel-btn{cursor:pointer;color:var(--paper-faint);font-size:14px;background:none;border:none;padding:5px 8px;border-radius:5px;}
+  .ai-panel-btn:hover{background:var(--panel-raised);color:var(--paper);}
+  .ai-panel-close{cursor:pointer;color:var(--paper-faint);font-size:18px;background:none;border:none;padding:4px 6px;}
+  .ai-panel-context{font-size:11px;color:var(--paper-faint);font-family:var(--f-mono);padding:8px 18px;background:var(--panel-raised);border-bottom:1px solid var(--line);}
   .ai-panel-messages{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:12px;}
   .ai-msg{max-width:88%;padding:10px 13px;border-radius:12px;font-size:13px;line-height:1.5;white-space:pre-wrap;}
   .ai-msg.user{align-self:flex-end;background:var(--amber);color:#fff;}
@@ -563,7 +571,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50 };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
 
@@ -1330,6 +1338,7 @@ function render(){
   if(ui.view === 'login'){
     app.innerHTML = renderLogin();
     bindLogin();
+    renderAiAgentWidget();
     return;
   }
   const curSnap = currentNavSnapshot();
@@ -1422,17 +1431,24 @@ function renderAiAgentWidget(){
   const messagesHtml = aiAgentMessages.length ? aiAgentMessages.map(m=>
     `<div class="ai-msg ${m.role}">${(m.text||'').replace(/</g,'&lt;')}</div>`
   ).join('') : `<div class="ai-panel-empty">Ask about any workstream or task you have access to.</div>`;
+  const aiCtx = currentAiAgentContext();
 
   root.innerHTML = `
     <div class="ai-bubble" id="aiBubbleBtn" title="AI Agent">
       ${aiAgentIconSvg(aiAgentThinking ? 'thinking' : 'idle')}
     </div>
-    <div class="ai-panel ${ui.aiAgentOpen?'open':''}">
+    <div class="ai-panel ${ui.aiAgentOpen?'open':''} ${ui.aiAgentMinimized?'minimized':''}" style="height:${ui.aiAgentMinimized?'auto':ui.aiAgentHeightVh+'vh'};">
       <div class="ai-panel-header">
         ${aiAgentIconSvg(aiAgentThinking ? 'thinking' : 'idle')}
         <div class="ai-panel-title">AI Agent</div>
-        <button class="ai-panel-close" id="aiPanelCloseBtn">✕</button>
+        ${!ui.aiAgentMinimized ? `
+        <button class="ai-panel-btn" id="aiPanelShrinkBtn" title="Decrease height">−</button>
+        <button class="ai-panel-btn" id="aiPanelGrowBtn" title="Increase height">+</button>
+        ` : ''}
+        <button class="ai-panel-btn" id="aiPanelMinimizeBtn" title="${ui.aiAgentMinimized?'Restore':'Minimize'}">${ui.aiAgentMinimized?'▢':'—'}</button>
+        <button class="ai-panel-close" id="aiPanelCloseBtn" title="Close">✕</button>
       </div>
+      ${(!ui.aiAgentMinimized && aiCtx) ? `<div class="ai-panel-context">${aiCtx.label}</div>` : ''}
       <div class="ai-panel-messages" id="aiPanelMessages">${messagesHtml}</div>
       <div class="ai-panel-input-row">
         <textarea class="ai-panel-input" id="aiPanelInput" rows="1" placeholder="Ask a question..." ${aiAgentThinking?'disabled':''}></textarea>
@@ -1450,6 +1466,12 @@ function bindAiAgentWidget(){
   if(bubble) bubble.addEventListener('click', ()=>{ ui.aiAgentOpen = !ui.aiAgentOpen; renderAiAgentWidget(); });
   const closeBtn = document.getElementById('aiPanelCloseBtn');
   if(closeBtn) closeBtn.addEventListener('click', ()=>{ ui.aiAgentOpen = false; renderAiAgentWidget(); });
+  const minimizeBtn = document.getElementById('aiPanelMinimizeBtn');
+  if(minimizeBtn) minimizeBtn.addEventListener('click', ()=>{ ui.aiAgentMinimized = !ui.aiAgentMinimized; renderAiAgentWidget(); });
+  const shrinkBtn = document.getElementById('aiPanelShrinkBtn');
+  if(shrinkBtn) shrinkBtn.addEventListener('click', ()=>{ ui.aiAgentHeightVh = Math.max(25, ui.aiAgentHeightVh - 10); renderAiAgentWidget(); });
+  const growBtn = document.getElementById('aiPanelGrowBtn');
+  if(growBtn) growBtn.addEventListener('click', ()=>{ ui.aiAgentHeightVh = Math.min(90, ui.aiAgentHeightVh + 10); renderAiAgentWidget(); });
   const sendBtn = document.getElementById('aiPanelSendBtn');
   const input = document.getElementById('aiPanelInput');
   if(sendBtn && input){
@@ -1477,6 +1499,25 @@ async function loadAiConversationHistory(userId){
   }catch(e){ /* best-effort — a fresh, empty conversation is a fine fallback */ }
 }
 
+// Describes whatever the person is currently looking at, in a form both readable
+// for a UI indicator and useful to hand to the backend as extra context — so asking
+// "why is this delayed" while viewing a specific workstream doesn't require naming it.
+function currentAiAgentContext(){
+  if(ui.view==='project' && ui.projectId){
+    const p = state.projects.find(x=>x.id===ui.projectId);
+    if(p) return { label: 'Viewing workstream: '+p.name, projectId: p.id };
+  }
+  if(ui.view==='feature' && ui.featureNodeId){
+    const node = featureNode(ui.featureNodeId);
+    if(node) return { label: 'Viewing: '+featureNodePath(node.id).map(n=>n.name).join(' > '), nodeId: node.id };
+  }
+  if(ui.view==='portfolio') return { label: 'Viewing: Workstream overview (all workstreams)' };
+  if(ui.view==='assignments') return { label: 'Viewing: Active Assignments' };
+  if(ui.view==='reports') return { label: 'Viewing: Reports' };
+  if(ui.view==='home') return { label: 'Viewing: Focus Area' };
+  return null;
+}
+
 async function submitAiAgentQuestion(){
   const input = document.getElementById('aiPanelInput');
   if(!input) return;
@@ -1496,7 +1537,7 @@ async function submitAiAgentQuestion(){
     const res = await fetch(AI_AGENT_FUNCTION_URL, {
       method:'POST',
       headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY},
-      body: JSON.stringify({ question, userId: cu.id, history }),
+      body: JSON.stringify({ question, userId: cu.id, history, pageContext: currentAiAgentContext() }),
     });
     const data = await res.json();
     if(data.error){
@@ -1548,7 +1589,7 @@ function bindGlobalNav(){
   document.querySelectorAll('[data-nav]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const v = btn.dataset.nav;
-      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; ui.navHistory=[]; lastViewSnapshot=null; aiAgentMessages=[]; ui.aiAgentOpen=false; aiAgentThinking=false; render(); return; }
+      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; ui.navHistory=[]; lastViewSnapshot=null; aiAgentMessages=[]; ui.aiAgentOpen=false; ui.aiAgentMinimized=false; ui.aiAgentHeightVh=50; aiAgentThinking=false; render(); return; }
       ui.view = v; render();
     });
   });

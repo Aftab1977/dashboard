@@ -463,6 +463,12 @@
   .ai-msg.user .ai-msg-time{text-align:right;}
   .ai-msg-table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12px;}
   .ai-est-flag{background:rgba(230,145,56,.16);color:#B8541A;border:1px solid rgba(230,145,56,.4);border-radius:5px;padding:1px 6px;font-weight:600;cursor:help;white-space:nowrap;}
+  .toggle-switch{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0;}
+  .toggle-switch input{opacity:0;width:0;height:0;}
+  .toggle-track{position:absolute;inset:0;background:var(--line);border-radius:24px;cursor:pointer;transition:background .15s ease;}
+  .toggle-track::before{content:'';position:absolute;left:3px;top:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform .15s ease;box-shadow:0 1px 3px rgba(0,0,0,.3);}
+  .toggle-switch input:checked + .toggle-track{background:var(--amber);}
+  .toggle-switch input:checked + .toggle-track::before{transform:translateX(18px);}
   .ai-msg-table th, .ai-msg-table td{border:1px solid var(--line);padding:6px 10px;text-align:left;}
   .ai-msg-table th{background:var(--panel);font-weight:600;color:var(--paper);}
   .ai-msg:has(.ai-msg-table){max-width:96%;}
@@ -599,6 +605,7 @@ let aiAgentMessages = []; // kept in memory only for now — real persisted hist
 let aiAgentThinking = false;
 let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
 let aiProviderInfo = null; // {provider, model} once fetched from the backend — null until then
+let copilotAnalyticsData = null; // {logs, provider, model} once fetched — null until then
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -808,7 +815,7 @@ function seedState(){
   const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent');
   const userAccess = {};
   users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
-  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250 }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {} };
+  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {} };
 }
 
 function withTimeout(promise, ms){
@@ -929,11 +936,37 @@ function normalizeState(s){
   if(!s.dailySnapshots || typeof s.dailySnapshots !== 'object' || Array.isArray(s.dailySnapshots)) s.dailySnapshots = {};
   if(!s.dailySummaries || typeof s.dailySummaries !== 'object' || Array.isArray(s.dailySummaries)) s.dailySummaries = {};
   if(!s.weeklySummaries || typeof s.weeklySummaries !== 'object' || Array.isArray(s.weeklySummaries)) s.weeklySummaries = {};
+  // One-time backfill: earlier daily/weekly summaries were generated before the fix
+  // that lets a workstream be labeled "Completed" once every task in it is closed —
+  // before that fix, a fully-closed workstream still showed "On Agreed timeline".
+  // Recomputed here from each entry's own stored task-count line (e.g. "1 of 1 tasks
+  // closed"), the same source of truth the original label came from — not guessed,
+  // not just overwritten by hand.
+  if(!s._summaryClosedStatusBackfilled){
+    function correctSummaryStatuses(summaryMap){
+      Object.values(summaryMap || {}).forEach(entry=>{
+        (entry.workstreams || []).forEach(w=>{
+          const line = (w.taskStatusLines || [])[0] || '';
+          const m = line.match(/^(\d+) of (\d+) tasks closed$/);
+          if(m){
+            const closedCount = Number(m[1]), totalCount = Number(m[2]);
+            if(totalCount>0 && closedCount===totalCount && w.status !== 'Completed — all tasks closed'){
+              w.status = 'Completed — all tasks closed';
+            }
+          }
+        });
+      });
+    }
+    correctSummaryStatuses(s.dailySummaries);
+    correctSummaryStatuses(s.weeklySummaries);
+    s._summaryClosedStatusBackfilled = true;
+  }
   if(!s.summaryShownLog || typeof s.summaryShownLog !== 'object' || Array.isArray(s.summaryShownLog)) s.summaryShownLog = {};
   if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
   if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
+  if(typeof s.settings.aiCopilotEnabled !== 'boolean') s.settings.aiCopilotEnabled = true;
   if(!s.userAccess || typeof s.userAccess !== 'object' || Array.isArray(s.userAccess)) s.userAccess = {};
   if(Array.isArray(s.projects)) s.projects.forEach(p=>{ if(!Array.isArray(p.contentItems)) p.contentItems = []; });
   // One-time only: the Access feature didn't exist before, so nobody had any grants yet.
@@ -1485,7 +1518,7 @@ function aiAgentIconSvg(stateClass){
 function renderAiAgentWidget(){
   const root = document.getElementById('aiAgentRoot');
   if(!root) return;
-  if(ui.view==='login' || !canSeeNode('feat_ai_agent')){
+  if(ui.view==='login' || !canSeeNode('feat_ai_agent') || !state.settings.aiCopilotEnabled){
     root.innerHTML = '';
     return;
   }
@@ -1599,6 +1632,28 @@ async function loadAiProviderInfo(){
       if(ui.view==='admin' && ui.adminTab==='settings') render();
     }
   }catch(e){ /* best-effort — the rest of the Admin page works fine without this */ }
+}
+
+// Fetches the real, raw Copilot usage data for the Analytics dashboard. Goes
+// through the backend's admin-verified endpoint rather than reading ai_logs
+// directly — that table has no anon-read policy on purpose, since it holds the
+// actual questions people have asked, which is more sensitive than most of what
+// this app reads directly from Supabase.
+async function loadCopilotAnalyticsData(){
+  const cu = currentUser();
+  if(!cu) return;
+  try{
+    const res = await fetch(AI_AGENT_FUNCTION_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY},
+      body: JSON.stringify({ dashboardData: true, userId: cu.id }),
+    });
+    const data = await res.json();
+    if(Array.isArray(data.logs)){
+      copilotAnalyticsData = { logs: data.logs, provider: data.provider, model: data.model };
+      if(ui.view==='admin' && ui.adminTab==='copilotAnalytics') render();
+    }
+  }catch(e){ /* best-effort — the tab shows a clear loading/empty state either way */ }
 }
 
 async function loadAiConversationHistory(userId){
@@ -5045,8 +5100,9 @@ function renderAdmin(){
       <button class="tab ${ui.adminTab==='teams'?'active':''}" data-tab="teams">Teams</button>
       <button class="tab ${ui.adminTab==='projects'?'active':''}" data-tab="projects">Workstreams</button>
       <button class="tab ${ui.adminTab==='settings'?'active':''}" data-tab="settings">Admin</button>
+      <button class="tab ${ui.adminTab==='copilotAnalytics'?'active':''}" data-tab="copilotAnalytics">Copilot Analytics</button>
     </div>
-    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='settings' ? renderAdminSettings() : renderAdminProjects()}
+    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='settings' ? renderAdminSettings() : ui.adminTab==='copilotAnalytics' ? renderCopilotAnalytics() : renderAdminProjects()}
   `;
 }
 
@@ -5140,11 +5196,19 @@ function renderAdminSettings(){
       </div>
     </div>
     <div class="card" style="margin-bottom:16px;">
-      <div class="section-title" style="margin-bottom:2px;">Workspace CoPilot chat history</div>
-      <div class="muted" style="font-size:12px;">Conversations with Workspace CoPilot are kept for <b>${AI_HISTORY_RETENTION_DAYS} days</b>, then automatically trimmed. This is a fixed setting for now — if needed, it can be changed to a different number of days in a future update.</div>
-    </div>
-    <div class="card" style="margin-bottom:16px;">
-      <div class="section-title" style="margin-bottom:2px;">Workspace CoPilot — AI service</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="section-title" style="margin-bottom:0;">Workspace Copilot Details</div>
+        <label class="toggle-switch" title="${state.settings.aiCopilotEnabled ? 'Turn off for everyone' : 'Turn on for everyone with access'}">
+          <input type="checkbox" id="aiCopilotToggle" ${state.settings.aiCopilotEnabled?'checked':''}>
+          <div class="toggle-track"></div>
+        </label>
+      </div>
+      <div class="muted" style="font-size:12px;margin-bottom:12px;">
+        This is an admin-only master switch. Turning it off hides Workspace CoPilot for absolutely everyone, regardless of who has access. Turning it on doesn't grant access to anyone by itself — who can actually see and use it once it's on is still controlled separately, through the Access tree for each person.
+      </div>
+      <div class="muted" style="font-size:12px;margin-bottom:12px;">
+        Conversations with Workspace CoPilot are kept for <b>${AI_HISTORY_RETENTION_DAYS} days</b>, then automatically trimmed. This is a fixed setting for now — if needed, it can be changed to a different number of days in a future update.
+      </div>
       <div class="muted" style="font-size:12px;">
         ${aiProviderInfo
           ? `Currently using <b>${aiProviderInfo.provider}</b>, model <b>${aiProviderInfo.model}</b>. This is read directly from the backend, so it will always reflect whichever provider or model is actually in use — including if that changes in the future.`
@@ -5155,6 +5219,82 @@ function renderAdminSettings(){
       <div class="section-title" style="margin-bottom:2px;color:var(--red);">Danger zone</div>
       <div class="muted" style="font-size:12px;margin-bottom:12px;">This permanently erases every workstream, task, user, and record in the app and replaces it with starter demo data. This cannot be undone.</div>
       <button class="btn btn-sm btn-danger" id="dangerResetBtn">Reset all app data</button>
+    </div>
+  `;
+}
+
+function renderCopilotAnalytics(){
+  if(!copilotAnalyticsData){
+    return `<div class="card"><div class="muted" style="font-size:13px;">Loading Copilot usage data…</div></div>`;
+  }
+  const { logs, provider, model } = copilotAnalyticsData;
+  if(!logs.length){
+    return `<div class="card"><div class="muted" style="font-size:13px;">No Copilot usage recorded yet — this fills in once people start asking it questions.</div></div>`;
+  }
+
+  // All aggregation happens here, client-side, from the raw rows the backend
+  // already verified this admin is allowed to see — real numbers, not estimates.
+  const byMonth = {};
+  const byUser = {};
+  let totalCost = 0, totalSummaryCost = 0, totalUnhelpful = 0;
+  logs.forEach(row=>{
+    const mk = (row.created_at||'').slice(0,7);
+    if(!byMonth[mk]) byMonth[mk] = { count:0, cost:0, summaryCost:0, unhelpful:0 };
+    byMonth[mk].count++;
+    byMonth[mk].cost += Number(row.cost_usd)||0;
+    byMonth[mk].summaryCost += Number(row.summary_cost_usd)||0;
+    if(row.was_unhelpful) byMonth[mk].unhelpful++;
+    const uname = row.user_name || 'Unknown';
+    byUser[uname] = (byUser[uname]||0) + 1;
+    totalCost += Number(row.cost_usd)||0;
+    totalSummaryCost += Number(row.summary_cost_usd)||0;
+    if(row.was_unhelpful) totalUnhelpful++;
+  });
+  const monthKeys = Object.keys(byMonth).sort().reverse();
+  const monthRows = monthKeys.map(mk=>{
+    const m = byMonth[mk];
+    return `<tr><td>${mk}</td><td>${m.count}</td><td>$${m.cost.toFixed(4)}</td><td>$${m.summaryCost.toFixed(4)}</td><td>${m.unhelpful}</td></tr>`;
+  }).join('');
+  const userRows = Object.entries(byUser).sort((a,b)=>b[1]-a[1]).map(([name,count])=>
+    `<tr><td>${name}</td><td>${count}</td></tr>`
+  ).join('');
+  const unhelpfulRows = logs.filter(r=>r.was_unhelpful).slice(0,20).map(r=>`
+    <div style="padding:10px 0;border-bottom:1px solid var(--line);">
+      <div style="font-size:11px;color:var(--paper-faint);font-family:var(--f-mono);">${r.user_name||'Unknown'} · ${(r.created_at||'').slice(0,16).replace('T',' ')}</div>
+      <div style="font-size:13px;margin-top:2px;"><b>Q:</b> ${(r.question||'').replace(/</g,'&lt;')}</div>
+      <div style="font-size:13px;color:var(--paper-dim);margin-top:2px;"><b>A:</b> ${(r.answer||'').replace(/</g,'&lt;')}</div>
+    </div>
+  `).join('');
+
+  return `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="section-title" style="margin-bottom:8px;">Overview</div>
+      <div style="display:flex;gap:32px;flex-wrap:wrap;">
+        <div><div style="font-size:22px;font-weight:700;color:var(--paper);">${logs.length}</div><div class="muted" style="font-size:11px;">total questions</div></div>
+        <div><div style="font-size:22px;font-weight:700;color:var(--paper);">$${totalCost.toFixed(4)}</div><div class="muted" style="font-size:11px;">total cost</div></div>
+        <div><div style="font-size:22px;font-weight:700;color:var(--paper);">$${totalSummaryCost.toFixed(4)}</div><div class="muted" style="font-size:11px;">of which: analytics summary feature</div></div>
+        <div><div style="font-size:22px;font-weight:700;color:var(--paper);">${totalUnhelpful}</div><div class="muted" style="font-size:11px;">unhelpful responses</div></div>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:10px;">Costs shown are calculated based on <b>${provider}, model ${model}</b> — if that ever changes, only figures from after the change reflect the new provider; earlier numbers stay as they were.</div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="section-title" style="margin-bottom:8px;">Usage by month</div>
+      <table class="ai-msg-table" style="width:100%;">
+        <tr><th>Month</th><th>Questions</th><th>Total cost</th><th>Summary feature cost</th><th>Unhelpful</th></tr>
+        ${monthRows}
+      </table>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="section-title" style="margin-bottom:8px;">Questions per person</div>
+      <table class="ai-msg-table" style="width:100%;">
+        <tr><th>Person</th><th>Questions asked</th></tr>
+        ${userRows}
+      </table>
+    </div>
+    <div class="card">
+      <div class="section-title" style="margin-bottom:4px;">Recent unhelpful responses</div>
+      <div class="muted" style="font-size:12px;margin-bottom:8px;">Real questions and answers flagged as likely unhelpful — a good place to look for actual gaps worth fixing.</div>
+      ${unhelpfulRows || '<div class="muted" style="font-size:13px;">None found — nothing flagged as unhelpful yet.</div>'}
     </div>
   `;
 }
@@ -5202,6 +5342,7 @@ function bindAdmin(){
     ui.adminTab=b.dataset.tab;
     render();
     if(ui.adminTab==='settings' && !aiProviderInfo) loadAiProviderInfo();
+    if(ui.adminTab==='copilotAnalytics' && !copilotAnalyticsData) loadCopilotAnalyticsData();
   }));
   document.querySelectorAll('[data-open-project]').forEach(b=>b.addEventListener('click', ()=>{ ui.projectId=b.dataset.openProject; ui.view='project'; render(); }));
 
@@ -5243,6 +5384,12 @@ function bindAdmin(){
     if(!state.settings) state.settings = {};
     state.settings.maxUploadMB = v;
     persist(); render();
+  });
+
+  const aiCopilotToggle = document.getElementById('aiCopilotToggle');
+  if(aiCopilotToggle) aiCopilotToggle.addEventListener('change', ()=>{
+    state.settings.aiCopilotEnabled = aiCopilotToggle.checked;
+    persist(); render(); renderAiAgentWidget();
   });
 
   const logoUploadBtn = document.getElementById('logoUploadBtn');

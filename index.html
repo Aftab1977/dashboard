@@ -597,6 +597,8 @@ let session = { userId: null };
 let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50 };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
+let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
+let aiProviderInfo = null; // {provider, model} once fetched from the backend — null until then
 
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
@@ -1511,7 +1513,7 @@ function renderAiAgentWidget(){
       ${(!ui.aiAgentMinimized && aiCtx) ? `<div class="ai-panel-context">${aiCtx.label}</div>` : ''}
       <div class="ai-panel-messages" id="aiPanelMessages">${messagesHtml}</div>
       <div class="ai-panel-input-row">
-        <textarea class="ai-panel-input" id="aiPanelInput" rows="1" placeholder="Ask a question..." ${aiAgentThinking?'disabled':''}></textarea>
+        <textarea class="ai-panel-input" id="aiPanelInput" rows="1" placeholder="Ask a question..." ${aiAgentThinking?'disabled':''}>${aiAgentDraftText.replace(/</g,'&lt;')}</textarea>
         <button class="ai-panel-send" id="aiPanelSendBtn" ${aiAgentThinking?'disabled':''}>Send</button>
       </div>
     </div>
@@ -1570,6 +1572,7 @@ function bindAiAgentWidget(){
   const input = document.getElementById('aiPanelInput');
   if(sendBtn && input){
     sendBtn.addEventListener('click', submitAiAgentQuestion);
+    input.addEventListener('input', ()=>{ aiAgentDraftText = input.value; });
     input.addEventListener('keydown', (e)=>{
       if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); submitAiAgentQuestion(); }
     });
@@ -1579,6 +1582,25 @@ function bindAiAgentWidget(){
 // Loads this person's previously-saved Workspace CoPilot conversation, if any, so it's there
 // the moment they open the panel rather than starting blank every time they log in.
 // Fire-and-forget by design — never blocks or breaks login if it fails.
+// Fetches which LLM provider/model Workspace CoPilot is currently using, for the
+// Admin page to display. Reads it from the backend rather than hardcoding a second
+// copy here, so it can't quietly drift out of sync if the backend ever changes —
+// only fetched when the Admin settings tab is actually opened, not on every load.
+async function loadAiProviderInfo(){
+  try{
+    const res = await fetch(AI_AGENT_FUNCTION_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY},
+      body: JSON.stringify({ info: true }),
+    });
+    const data = await res.json();
+    if(data.provider && data.model){
+      aiProviderInfo = { provider: data.provider, model: data.model };
+      if(ui.view==='admin' && ui.adminTab==='settings') render();
+    }
+  }catch(e){ /* best-effort — the rest of the Admin page works fine without this */ }
+}
+
 async function loadAiConversationHistory(userId){
   aiAgentMessages = []; // always start clean — never inherit whatever was here before, even if a fetch fails or finds nothing
   try{
@@ -1647,6 +1669,7 @@ async function submitAiAgentQuestion(){
   const history = aiAgentMessages.filter(m=>m.role==='user' || m.role==='assistant');
   aiAgentMessages.push({role:'user', text:question, at: new Date().toISOString()});
   aiAgentThinking = true;
+  aiAgentDraftText = '';
   renderAiAgentWidget();
   const newInput = document.getElementById('aiPanelInput');
   if(newInput) newInput.value = '';
@@ -1706,7 +1729,7 @@ function bindGlobalNav(){
   document.querySelectorAll('[data-nav]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const v = btn.dataset.nav;
-      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; ui.navHistory=[]; lastViewSnapshot=null; aiAgentMessages=[]; ui.aiAgentOpen=false; ui.aiAgentMinimized=false; ui.aiAgentHeightVh=50; aiAgentThinking=false; render(); return; }
+      if(v==='logout'){ session.userId=null; persistSession(); ui.view='login'; ui.loginError=''; ui.navHistory=[]; lastViewSnapshot=null; aiAgentMessages=[]; ui.aiAgentOpen=false; ui.aiAgentMinimized=false; ui.aiAgentHeightVh=50; aiAgentThinking=false; aiAgentDraftText=''; render(); return; }
       ui.view = v; render();
     });
   });
@@ -5120,6 +5143,14 @@ function renderAdminSettings(){
       <div class="section-title" style="margin-bottom:2px;">Workspace CoPilot chat history</div>
       <div class="muted" style="font-size:12px;">Conversations with Workspace CoPilot are kept for <b>${AI_HISTORY_RETENTION_DAYS} days</b>, then automatically trimmed. This is a fixed setting for now — if needed, it can be changed to a different number of days in a future update.</div>
     </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="section-title" style="margin-bottom:2px;">Workspace CoPilot — AI service</div>
+      <div class="muted" style="font-size:12px;">
+        ${aiProviderInfo
+          ? `Currently using <b>${aiProviderInfo.provider}</b>, model <b>${aiProviderInfo.model}</b>. This is read directly from the backend, so it will always reflect whichever provider or model is actually in use — including if that changes in the future.`
+          : `Checking which AI service is currently in use…`}
+      </div>
+    </div>
     <div class="card" style="border-color:var(--red);">
       <div class="section-title" style="margin-bottom:2px;color:var(--red);">Danger zone</div>
       <div class="muted" style="font-size:12px;margin-bottom:12px;">This permanently erases every workstream, task, user, and record in the app and replaces it with starter demo data. This cannot be undone.</div>
@@ -5167,7 +5198,11 @@ function renderAdminProjects(){
 }
 
 function bindAdmin(){
-  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click', ()=>{ ui.adminTab=b.dataset.tab; render(); }));
+  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click', ()=>{
+    ui.adminTab=b.dataset.tab;
+    render();
+    if(ui.adminTab==='settings' && !aiProviderInfo) loadAiProviderInfo();
+  }));
   document.querySelectorAll('[data-open-project]').forEach(b=>b.addEventListener('click', ()=>{ ui.projectId=b.dataset.openProject; ui.view='project'; render(); }));
 
   const addUser = document.querySelector('[data-add-user]');

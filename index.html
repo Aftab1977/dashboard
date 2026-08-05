@@ -2637,7 +2637,8 @@ function ensureSummaryYearMonth(dateISO){
 
 // One workstream's entry within a generated summary — shared shape for daily and weekly.
 function buildSummaryEntry(proj, snap, prevSnap){
-  const statusText = snap.isRed ? `Delay -${snap.delay}` : 'On Agreed timeline';
+  const isFullyClosed = snap.totalTasks>0 && snap.closedTasks===snap.totalTasks;
+  const statusText = isFullyClosed ? 'Completed — all tasks closed' : (snap.isRed ? `Delay -${snap.delay}` : 'On Agreed timeline');
   let progressText;
   if(!prevSnap){
     progressText = 'First summary — no prior data to compare yet';

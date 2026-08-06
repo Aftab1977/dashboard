@@ -1772,16 +1772,19 @@ function renderAiAgentWidget(){
 // Renders the uploaded animation exactly as provided — no color or timing changes
 // to the animation itself — sized to match the 30x30px the previous hand-built icon
 // used. Only plays while Workspace CoPilot is actually generating a response;
-// otherwise it sits still on its first frame. A fresh instance is created every
-// time this state changes (renderAiAgentWidget already re-runs whenever
-// aiAgentThinking flips), so setting autoplay based on that alone is enough —
-// nothing about the animation's own frames or colors is touched either way.
+// otherwise it sits still on its first frame, except for a periodic single loop
+// every 10 seconds while closed (see startBubbleIdlePulse below). A fresh instance
+// is created every time this state changes (renderAiAgentWidget already re-runs
+// whenever aiAgentThinking flips), so setting autoplay based on that alone is
+// enough — nothing about the animation's own frames or colors is touched either way.
+let workspaceCopilotLottieInstances = {};
 function initWorkspaceCopilotLottie(){
   if(typeof lottie === 'undefined') return; // library failed to load — fail quietly, rest of the widget still works
   ['aiBubbleLottie','aiHeaderLottie'].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
-    lottie.loadAnimation({
+    if(workspaceCopilotLottieInstances[id]) workspaceCopilotLottieInstances[id].destroy(); // avoid piling up instances across re-renders
+    workspaceCopilotLottieInstances[id] = lottie.loadAnimation({
       container: el,
       renderer: 'svg',
       loop: true,
@@ -1790,6 +1793,19 @@ function initWorkspaceCopilotLottie(){
     });
   });
 }
+
+// Every 10 seconds, if the panel is closed and nothing's actively being generated,
+// play exactly one loop of the bubble's icon as a gentle "still here" pulse, then
+// let it settle back to still — never touching the animation itself, just when it
+// plays. Started once, keeps running for the life of the page.
+setInterval(()=>{
+  if(ui.aiAgentOpen || aiAgentThinking) return;
+  const inst = workspaceCopilotLottieInstances['aiBubbleLottie'];
+  if(!inst) return;
+  const onLoopComplete = ()=>{ inst.pause(); inst.removeEventListener('loopComplete', onLoopComplete); };
+  inst.addEventListener('loopComplete', onLoopComplete);
+  inst.goToAndPlay(0, true);
+}, 10000);
 
 function bindAiAgentWidget(){
   const bubble = document.getElementById('aiBubbleBtn');

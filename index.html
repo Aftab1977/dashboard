@@ -844,7 +844,7 @@ function seedState(){
     {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
     {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
     {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
-    {id:'feat_fai', name:'FAI — Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
+    {id:'feat_fai', name:'Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
     {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
     {id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:1, contentItems:[], description:'', specialView:'attendance'},
     {id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:2, contentItems:[], description:'', specialView:'appraisal'},
@@ -888,7 +888,7 @@ function normalizeState(s){
       {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
       {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
       {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
-      {id:'feat_fai', name:'FAI — Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
+      {id:'feat_fai', name:'Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
       {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
       {id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:1, contentItems:[], description:'', specialView:'attendance'},
       {id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:2, contentItems:[], description:'', specialView:'appraisal'},
@@ -984,6 +984,14 @@ function normalizeState(s){
     const wsNode = s.featureNodes.find(n=>n.id==='feat_workstream');
     if(wsNode && wsNode.name==='Workstream') wsNode.name = 'Workstreams';
     s._workstreamModuleRenamed = true;
+  }
+  // One-time rename: "FAI — Frequently Asked Information" -> "Frequently Asked
+  // Information". Same care as the Workstreams rename — only touches it if it's
+  // still exactly the old default name, leaving any deliberate admin customization alone.
+  if(!s._faiModuleRenamed){
+    const faiNode = s.featureNodes.find(n=>n.id==='feat_fai');
+    if(faiNode && faiNode.name==='FAI — Frequently Asked Information') faiNode.name = 'Frequently Asked Information';
+    s._faiModuleRenamed = true;
   }
   // Dashboard widgets are personal to each person now — their own order, their own
   // on/off choices — not a single shared arrangement for everyone. Reconciled on

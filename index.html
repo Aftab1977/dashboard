@@ -819,7 +819,7 @@ function seedState(){
     {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:2.5, contentItems:[], description:''},
     {id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
     {id:'feat_workspace_search', name:'Workspace Search', nodeType:'feature', parentId:null, systemView:'search-widget', order:0.9, contentItems:[], description:''},
-    {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
+    {id:'feat_workstream', name:'Workstreams', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
     {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
     {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
     {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
@@ -863,7 +863,7 @@ function normalizeState(s){
       {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:2.5, contentItems:[], description:''},
       {id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
     {id:'feat_workspace_search', name:'Workspace Search', nodeType:'feature', parentId:null, systemView:'search-widget', order:0.9, contentItems:[], description:''},
-      {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
+      {id:'feat_workstream', name:'Workstreams', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
       {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
       {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
       {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
@@ -955,6 +955,14 @@ function normalizeState(s){
       }
     });
     s._workspaceSearchModuleGranted = true;
+  }
+  // One-time rename: "Workstream" -> "Workstreams". Only touches it if it's still
+  // exactly the old default name — if an admin already renamed it to something
+  // else, that deliberate customization is left alone.
+  if(!s._workstreamModuleRenamed){
+    const wsNode = s.featureNodes.find(n=>n.id==='feat_workstream');
+    if(wsNode && wsNode.name==='Workstream') wsNode.name = 'Workstreams';
+    s._workstreamModuleRenamed = true;
   }
   // Give everyone the new Summary module specifically — the general Access grandfather
   // migration below only ever runs once, so a brand new module added afterward would
@@ -1798,14 +1806,23 @@ function initWorkspaceCopilotLottie(){
 // play exactly one loop of the bubble's icon as a gentle "still here" pulse, then
 // let it settle back to still — never touching the animation itself, just when it
 // plays. Started once, keeps running for the life of the page.
-setInterval(()=>{
+function triggerBubbleIdlePulse(){
   if(ui.aiAgentOpen || aiAgentThinking) return;
   const inst = workspaceCopilotLottieInstances['aiBubbleLottie'];
   if(!inst) return;
   const onLoopComplete = ()=>{ inst.pause(); inst.removeEventListener('loopComplete', onLoopComplete); };
   inst.addEventListener('loopComplete', onLoopComplete);
   inst.goToAndPlay(0, true);
-}, 10000);
+}
+setInterval(triggerBubbleIdlePulse, 10000);
+// Browsers heavily throttle setInterval timers in tabs that are backgrounded or
+// not actively focused — often to once a minute or slower — as a battery-saving
+// measure. That's outside anything JS can override, but this at least means the
+// pulse reliably fires the moment someone actually comes back to the tab, rather
+// than depending only on a timer that may have been sitting throttled while away.
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible') triggerBubbleIdlePulse();
+});
 
 function bindAiAgentWidget(){
   const bubble = document.getElementById('aiBubbleBtn');
@@ -2125,7 +2142,7 @@ function renderFocusAreaHome(){
       return `
       <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;" draggable="true" data-drag-node="${f.id}">
         <div style="text-align:center;">
-          <div class="section-title" style="margin-bottom:10px;">Workspace Search</div>
+          <div style="font-family:var(--f-display);font-size:22px;font-weight:600;margin-bottom:10px;">Workspace Search</div>
           <div style="position:relative;max-width:280px;margin:0 auto;">
             <input type="text" id="workspaceSearchInput" autocomplete="off" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;text-align:center;">
             <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>

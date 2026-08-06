@@ -534,6 +534,23 @@ const AI_AGENT_FUNCTION_URL = 'https://gjnxgdzpfdkbptzimbgf.supabase.co/function
 // Workspace CoPilot chat history is kept for this many days, then trimmed — one source of
 // truth used both when loading a conversation and in the Admin page's info box.
 const AI_HISTORY_RETENTION_DAYS = 10;
+// Workspace Dashboard widgets — each one keeps its own fixed color tied to its
+// identity, not its position, so it stays recognizable as people rearrange them.
+// Colors applied at ~10% opacity as a background tint, so they never fight with
+// the text sitting on top of them.
+const DASHBOARD_WIDGET_COLORS = {
+  wg_active:  '#4C8DFF',
+  wg_ontrack: '#33A85C',
+  wg_overdue: '#DD5147',
+  wg_blocked: '#CC5500',
+  wg_empty1:  '#9B59B6',
+  wg_empty2:  '#16A085',
+  wg_empty3:  '#E91E8C',
+  wg_empty4:  '#F5A623',
+  wg_empty5:  '#17A2C4',
+  wg_empty6:  '#5C6BC0',
+};
+const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_empty1','wg_empty2','wg_empty3','wg_empty4','wg_empty5','wg_empty6'];
 /* ============================================================================ */
 
 const STORAGE_KEY = 'controlroom_state_v1';
@@ -799,8 +816,9 @@ function seedState(){
   });
 
   const featureNodes = [
-    {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''},
+    {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:2.5, contentItems:[], description:''},
     {id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
+    {id:'feat_workspace_search', name:'Workspace Search', nodeType:'feature', parentId:null, systemView:'search-widget', order:0.9, contentItems:[], description:''},
     {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
     {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
     {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
@@ -815,7 +833,7 @@ function seedState(){
   const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent');
   const userAccess = {};
   users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
-  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {} };
+  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {} };
 }
 
 function withTimeout(promise, ms){
@@ -842,8 +860,9 @@ function normalizeState(s){
   if(!s) return s;
   if(!Array.isArray(s.featureNodes) || s.featureNodes.length===0){
     s.featureNodes = [
-      {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''},
+      {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:2.5, contentItems:[], description:''},
       {id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''},
+    {id:'feat_workspace_search', name:'Workspace Search', nodeType:'feature', parentId:null, systemView:'search-widget', order:0.9, contentItems:[], description:''},
       {id:'feat_workstream', name:'Workstream', nodeType:'feature', parentId:null, systemView:'portfolio', order:1, contentItems:[], description:''},
       {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
       {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
@@ -913,13 +932,29 @@ function normalizeState(s){
     }
     // One-time addition: the Summary module, placed above Workstream via order 0.
     if(!s.featureNodes.some(n=>n.id==='feat_summary')){
-      s.featureNodes.push({id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:0, contentItems:[], description:''});
+      s.featureNodes.push({id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:2.5, contentItems:[], description:''});
     }
     // One-time addition: Workspace CoPilot. Unlike Summary, this deliberately does NOT
     // get auto-granted to anyone below — access is admin-controlled from the start.
     if(!s.featureNodes.some(n=>n.id==='feat_ai_agent')){
       s.featureNodes.push({id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''});
     }
+    // One-time addition: Workspace Search, now a real reorderable node like every
+    // other module (previously a fixed, separately-rendered element) so it can be
+    // dragged and repositioned the same way everything else can. Granted to
+    // everyone below, same as Summary — it's never been access-gated, so becoming
+    // a real node shouldn't suddenly require an explicit grant.
+    if(!s.featureNodes.some(n=>n.id==='feat_workspace_search')){
+      s.featureNodes.push({id:'feat_workspace_search', name:'Workspace Search', nodeType:'feature', parentId:null, systemView:'search-widget', order:0.9, contentItems:[], description:''});
+    }
+  }
+  if(!s._workspaceSearchModuleGranted){
+    s.users.forEach(u=>{
+      if(u.role!=='admin' && Array.isArray(s.userAccess[u.id]) && !s.userAccess[u.id].includes('feat_workspace_search')){
+        s.userAccess[u.id].push('feat_workspace_search');
+      }
+    });
+    s._workspaceSearchModuleGranted = true;
   }
   // Give everyone the new Summary module specifically — the general Access grandfather
   // migration below only ever runs once, so a brand new module added afterward would
@@ -961,12 +996,31 @@ function normalizeState(s){
     correctSummaryStatuses(s.weeklySummaries);
     s._summaryClosedStatusBackfilled = true;
   }
+  // One-time reorder: Summary - Daily & Weekly moves after Active Assignments, so
+  // Focus Area reads Workstream, Active Assignments, then Summary. Existing accounts
+  // already have this node stored with its old order value — updating the
+  // definitions above only affects brand new installs, so this corrects what's
+  // already saved for everyone else.
+  if(!s._summaryModuleReordered){
+    const summaryNode = s.featureNodes.find(n=>n.id==='feat_summary');
+    if(summaryNode) summaryNode.order = 2.5;
+    s._summaryModuleReordered = true;
+  }
   if(!s.summaryShownLog || typeof s.summaryShownLog !== 'object' || Array.isArray(s.summaryShownLog)) s.summaryShownLog = {};
   if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
   if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
   if(typeof s.settings.aiCopilotEnabled !== 'boolean') s.settings.aiCopilotEnabled = true;
+  if(!Array.isArray(s.settings.dashboardWidgetOrder)) s.settings.dashboardWidgetOrder = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
+  else {
+    // Keep this in sync if the widget set itself ever changes — add any new
+    // widget IDs at the end, drop any that no longer exist, without disturbing
+    // the order of everything else someone may have already rearranged.
+    const known = new Set(DEFAULT_DASHBOARD_WIDGET_ORDER);
+    s.settings.dashboardWidgetOrder = s.settings.dashboardWidgetOrder.filter(id=>known.has(id));
+    DEFAULT_DASHBOARD_WIDGET_ORDER.forEach(id=>{ if(!s.settings.dashboardWidgetOrder.includes(id)) s.settings.dashboardWidgetOrder.push(id); });
+  }
   if(!s.userAccess || typeof s.userAccess !== 'object' || Array.isArray(s.userAccess)) s.userAccess = {};
   if(Array.isArray(s.projects)) s.projects.forEach(p=>{ if(!Array.isArray(p.contentItems)) p.contentItems = []; });
   // One-time only: the Access feature didn't exist before, so nobody had any grants yet.
@@ -1221,6 +1275,164 @@ function visibleProjects(){
   const ids = accessibleProjectIds();
   return ids===null ? state.projects : state.projects.filter(p=>ids.includes(p.id));
 }
+function isProjectFullyClosed(projectId){
+  const tasks = projectTasks(projectId);
+  return tasks.length>0 && tasks.every(t=>t.status==='closed');
+}
+function isProjectOnTrack(projectId){
+  const tasks = projectTasks(projectId).filter(t=>t.status!=='closed');
+  return !tasks.some(t=>isTaskDelayed(t));
+}
+// For a fully-closed workstream, how many days from its earliest task's start to
+// its latest task's close — null if it isn't fully closed or is missing dates.
+function closedProjectDurationDays(projectId){
+  if(!isProjectFullyClosed(projectId)) return null;
+  const tasks = projectTasks(projectId);
+  const starts = tasks.map(t=>t.startDate).filter(Boolean).sort();
+  const closes = tasks.map(t=>t.closedDate).filter(Boolean).sort();
+  if(!starts.length || !closes.length) return null;
+  return { days: Math.max(daysBetween(starts[0], closes[closes.length-1]), 0), closedDate: closes[closes.length-1] };
+}
+function quarterKeyOf(dateIso){
+  const [y,m] = dateIso.split('-').map(Number);
+  return `${y}-Q${Math.ceil(m/3)}`;
+}
+function currentAndLastQuarterKeys(todayIso){
+  const [y,m] = todayIso.split('-').map(Number);
+  const q = Math.ceil(m/3);
+  let lastY=y, lastQ=q-1;
+  if(lastQ===0){ lastQ=4; lastY=y-1; }
+  return { current: `${y}-Q${q}`, last: `${lastY}-Q${lastQ}` };
+}
+// The full metrics set for the Workstream module widgets — scoped to whatever
+// workstreams the current person can actually see, matching the real Workstream
+// page, and computed fresh every time this is called, never cached or stale.
+function computeWorkstreamWidgetMetrics(){
+  const projects = visibleProjects();
+  const activeProjects = projects.filter(p=>!isProjectFullyClosed(p.id));
+  const onTrackCount = activeProjects.filter(p=>isProjectOnTrack(p.id)).length;
+  const onTrackPct = activeProjects.length ? Math.round((onTrackCount/activeProjects.length)*100) : 0;
+
+  const visibleIds = new Set(projects.map(p=>p.id));
+  const relevantTasks = state.tasks.filter(t=>visibleIds.has(t.projectId) && t.status!=='closed');
+  const overdueCount = relevantTasks.filter(t=>isTaskDelayed(t)).length;
+  const blockedCount = relevantTasks.filter(t=>t.blockedByUserId || t.blockedByTeamId).length;
+
+  // Average close-duration, and how it's trending this quarter vs last — based on
+  // real closed-workstream data, not an estimate. Gracefully reports when there
+  // isn't enough data yet rather than showing a misleading or broken percentage.
+  const durations = projects.map(p=>closedProjectDurationDays(p.id)).filter(Boolean);
+  const { current: curQ, last: lastQ } = currentAndLastQuarterKeys(todayISO());
+  const curQDurations = durations.filter(d=>quarterKeyOf(d.closedDate)===curQ).map(d=>d.days);
+  const lastQDurations = durations.filter(d=>quarterKeyOf(d.closedDate)===lastQ).map(d=>d.days);
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+  const curQAvg = avg(curQDurations);
+  const lastQAvg = avg(lastQDurations);
+  // Never leave these blank — 0 is an honest, real value when there's nothing to
+  // average yet, rather than a vague placeholder message.
+  let avgDurationLabel = 'Avg: 0 days';
+  let quarterTrendLabel = '0% vs Last Quarter';
+  let quarterTrendIsImprovement = null;
+  if(curQAvg!=null){
+    avgDurationLabel = `Avg: ${Math.round(curQAvg)} days`;
+    if(lastQAvg!=null && lastQAvg>0){
+      const pctChange = Math.round(((curQAvg-lastQAvg)/lastQAvg)*100);
+      quarterTrendIsImprovement = pctChange<=0; // faster (fewer days) is the improvement
+      quarterTrendLabel = `${pctChange<=0?'↓':'↑'} ${Math.abs(pctChange)}% vs Last Quarter`;
+    }
+  }
+
+  return {
+    activeCount: activeProjects.length,
+    onTrackCount, onTrackPct,
+    overdueCount, blockedCount,
+    avgDurationLabel, quarterTrendLabel, quarterTrendIsImprovement,
+  };
+}
+
+// A single widget card, matching the reference layout: a large icon on the left,
+// vertically centered against a text column on the right (label, number, trend),
+// the whole composition centered together rather than stacked top-to-bottom.
+function widgetBorder(id){
+  const c = DASHBOARD_WIDGET_COLORS[id];
+  if(!c || !c.startsWith('#')) return 'var(--line)';
+  // A visibly-colored border in the widget's own color, stronger than the
+  // background tint so it reads clearly, complementing the glow around it.
+  return `${c}80`;
+}
+function widgetCard({id, iconSvg, iconColor, label, value, lines}){
+  const bgTint = DASHBOARD_WIDGET_COLORS[id] || 'var(--panel-raised)';
+  // Appending 1A to a hex color gives roughly 10% opacity (26/255 ≈ 10.2%) — a
+  // tint that reads clearly as color without ever competing with the text on top.
+  const bgStyle = bgTint.startsWith('#') ? `${bgTint}1A` : bgTint;
+  return `
+    <div class="drag-node" style="flex:1;min-width:150px;background:${bgStyle};border:1.5px solid ${widgetBorder(id)};border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;cursor:grab;" draggable="true" data-widget-drag="${id}">
+      <div style="width:56px;height:56px;border-radius:50%;background:${iconColor}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        ${iconSvg}
+      </div>
+      <div style="min-width:0;">
+        <div style="font-size:13px;font-weight:600;color:var(--paper);margin-bottom:2px;">${label}</div>
+        <div style="font-family:var(--f-display);font-size:32px;font-weight:700;color:var(--paper);line-height:1.1;">${value}</div>
+        ${(lines||[]).join('')}
+      </div>
+    </div>`;
+}
+function emptyWidgetCard(id){
+  const bgTint = DASHBOARD_WIDGET_COLORS[id] || 'var(--panel-raised)';
+  const bgStyle = bgTint.startsWith('#') ? `${bgTint}1A` : bgTint;
+  return `<div class="drag-node" style="flex:1;min-width:150px;min-height:124px;background:${bgStyle};border:1.5px dashed ${widgetBorder(id)};border-radius:12px;padding:14px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;cursor:grab;" draggable="true" data-widget-drag="${id}">
+    <span class="muted" style="font-size:12px;">+ empty</span>
+  </div>`;
+}
+const WIDGET_ICONS = {
+  folder: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`,
+  check: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>`,
+  calendar: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
+  block: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.5 5.5l13 13"/></svg>`,
+};
+// The Workspace Dashboard's widgets — live, computed fresh on every render from
+// computeWorkstreamWidgetMetrics(), never cached. Rendered in whichever order is
+// currently stored in settings, so a rearrangement sticks between visits, and
+// draggable for everyone, not just admins — this is each person's own view of
+// their dashboard, not shared workspace structure.
+function renderWorkstreamWidgets(m){
+  const widgetsById = {
+    wg_active: widgetCard({
+      id:'wg_active', iconSvg: WIDGET_ICONS.folder('#4C8DFF'), iconColor:'#4C8DFF', label:'Active Workstreams', value: m.activeCount,
+      lines: [
+        `<div style="font-size:11.5px;color:var(--paper-dim);font-weight:500;margin-top:3px;">${m.avgDurationLabel}</div>`,
+        `<div style="font-size:11.5px;font-weight:600;color:${m.quarterTrendIsImprovement===null?'var(--paper-dim)':m.quarterTrendIsImprovement?'var(--green)':'var(--red)'};">${m.quarterTrendLabel}</div>`,
+      ],
+    }),
+    wg_ontrack: widgetCard({
+      id:'wg_ontrack', iconSvg: WIDGET_ICONS.check('var(--green)'), iconColor:'var(--green)', label:'On Track', value: m.onTrackCount,
+      lines: [
+        `<div style="font-size:11.5px;color:var(--green);font-weight:600;margin-top:3px;margin-bottom:4px;">${m.onTrackPct}% of total</div>`,
+        `<div style="height:5px;background:var(--line);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${m.onTrackPct}%;background:var(--green);"></div></div>`,
+      ],
+    }),
+    wg_overdue: widgetCard({
+      id:'wg_overdue', iconSvg: WIDGET_ICONS.calendar('var(--red)'), iconColor:'var(--red)', label:'Overdue Tasks', value: m.overdueCount,
+      lines: [],
+    }),
+    wg_blocked: widgetCard({
+      id:'wg_blocked', iconSvg: WIDGET_ICONS.block('var(--blocker)'), iconColor:'var(--blocker)', label:'Blocked Tasks', value: m.blockedCount,
+      lines: [],
+    }),
+    wg_empty1: emptyWidgetCard('wg_empty1'), wg_empty2: emptyWidgetCard('wg_empty2'),
+    wg_empty3: emptyWidgetCard('wg_empty3'), wg_empty4: emptyWidgetCard('wg_empty4'),
+    wg_empty5: emptyWidgetCard('wg_empty5'), wg_empty6: emptyWidgetCard('wg_empty6'),
+  };
+  const order = state.settings.dashboardWidgetOrder;
+  const orderedHtml = order.map(id=>widgetsById[id]).filter(Boolean);
+  const row1 = orderedHtml.slice(0,5).join('');
+  const row2 = orderedHtml.slice(5,10).join('');
+  return `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;">${row1}</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;">${row2}</div>
+  `;
+}
+
 function canAccessProject(projectId){
   const ids = accessibleProjectIds();
   return ids===null || ids.includes(projectId);
@@ -1886,35 +2098,41 @@ function renderFocusAreaHome(){
     return { p, tl, tasks };
   });
 
-  const allScopedTasks = allProjects.flatMap(p=>projectTasks(p.id));
-  const dueTodayTasks = allScopedTasks.filter(t=>t.status!=='closed' && effectiveEndDate(t)===today);
-  const delayedOpenTasks = allScopedTasks.filter(t=>t.status!=='closed' && isTaskDelayed(t));
-  const blockedOpenTasks = allScopedTasks.filter(t=>t.status!=='closed' && t.blockedByTeamId);
-
   const onTrack = summaries.filter(s=>!s.tl.isRed).length;
   const delayed = summaries.filter(s=>s.tl.isRed).length;
   const tasksTracked = summaries.reduce((sum,s)=>sum+s.tasks.length, 0);
 
   const roots = rootFeatureNodesVisible();
+  const wsMetrics = computeWorkstreamWidgetMetrics();
   const featureBoxes = roots.map(f=>{
+    if(f.id==='feat_workspace_search'){
+      return `
+      <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;" draggable="true" data-drag-node="${f.id}">
+        <div style="text-align:center;">
+          <div class="section-title" style="margin-bottom:10px;">Workspace Search</div>
+          <div style="position:relative;max-width:280px;margin:0 auto;">
+            <input type="text" id="workspaceSearchInput" autocomplete="off" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;text-align:center;">
+            <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>
+          </div>
+        </div>
+      </div>`;
+    }
     const childCount = featureChildren(f.id).length;
     const isSystem = !!f.systemView;
     const defaultText = isSystem ? (f.systemView==='portfolio' ? 'All workstreams and their timelines' : f.systemView==='assignments' ? 'Who is working on what, and until when' : 'Delay history and patterns') : (childCount ? `${childCount} item${childCount===1?'':'s'}` : '');
     const subtitle = f.description ? f.description : defaultText;
     return `
-    <div class="card feature-box" style="margin-bottom:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div data-open-feature="${f.id}" style="cursor:pointer;flex:1;">
+    <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;cursor:pointer;" data-open-feature="${f.id}" draggable="true" data-drag-node="${f.id}">
+      <div style="display:flex;justify-content:center;align-items:center;gap:12px;position:relative;">
+        <div style="text-align:center;">
           <div style="font-family:var(--f-display);font-size:22px;font-weight:600;">${f.name}</div>
           <div class="muted" style="font-size:12px;margin-top:2px;">${subtitle || '<span style="color:var(--paper-faint);">No description yet</span>'}</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          ${childCount ? `<button class="btn btn-sm btn-ghost" data-browse-feature="${f.id}">Browse content (${childCount})</button>` : ''}
-          ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description">✎</button>` : ''}
-        </div>
+        ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description" style="position:absolute;right:0;top:50%;transform:translateY(-50%);">✎</button>` : ''}
       </div>
     </div>`;
   }).join('');
+  const workstreamWidgetsCard = `<div class="card" style="margin-bottom:14px;">${renderWorkstreamWidgets(wsMetrics)}</div>`;
 
   const cu = currentUser();
   const myBlockNotices = cu ? state.tasks.filter(t=>t.status!=='closed' && t.blockedByUserId===cu.id) : [];
@@ -1928,32 +2146,18 @@ function renderFocusAreaHome(){
 
   return `
     <div class="eyebrow">Focus Area</div>
-    <h1 class="page-title" style="margin-bottom:16px;">Everything for your focus, in one place.</h1>
-
-    <div class="card" style="margin-bottom:22px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">
-        <div>
-          <div class="section-title" style="margin-bottom:10px;">Today — ${fmtDate(today)}</div>
-          <div style="font-size:14px;color:var(--paper-dim);margin-bottom:10px;">Workstream Snapshot</div>
-          <div style="display:flex;gap:20px;flex-wrap:wrap;">
-            <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--paper);">${dueTodayTasks.length}</b> <span class="muted">due today</span></span>
-            <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--red);">${delayedOpenTasks.length}</b> <span class="muted">currently delayed</span></span>
-            <span style="font-size:13px;"><b style="font-family:var(--f-mono);color:var(--blocker);">${blockedOpenTasks.length}</b> <span class="muted">blocked</span></span>
-          </div>
-        </div>
-        <div style="min-width:260px;">
-          <div class="section-title" style="margin-bottom:10px;text-align:center;">Workspace Search</div>
-          <div style="position:relative;max-width:280px;">
-            <input type="text" id="workspaceSearchInput" autocomplete="off" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;">
-            <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>
-          </div>
-        </div>
-      </div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:2px;">
+      <h1 class="page-title" style="margin-bottom:0;">Everything for your focus, in one place.</h1>
+      <div class="section-title" style="white-space:nowrap;">Today — ${fmtDate(today)}</div>
     </div>
+
+    ${workstreamWidgetsCard}
 
     ${blockNoticesHtml}
 
-    ${featureBoxes}
+    <div style="display:flex;flex-wrap:wrap;gap:14px;">
+      ${featureBoxes}
+    </div>
   `;
 }
 
@@ -2083,6 +2287,8 @@ function bindFocusAreaHome(){
       render();
     });
   });
+  bindDragReorder();
+  bindDashboardWidgetDrag();
   document.querySelectorAll('[data-browse-feature]').forEach(el=>{
     el.addEventListener('click', (e)=>{ e.stopPropagation(); ui.view='feature'; ui.featureNodeId = el.dataset.browseFeature; render(); });
   });
@@ -3225,6 +3431,32 @@ function bindDragReorder(){
     });
   });
 }
+// Same pattern as bindDragReorder, but for dashboard widgets specifically — kept
+// separate (own attribute, own tracking variable) so the two drag systems never
+// interfere with each other, since a widget and a module could in principle both
+// be on screen at once.
+let dragSourceWidgetId = null;
+function bindDashboardWidgetDrag(){
+  document.querySelectorAll('[data-widget-drag]').forEach(el=>{
+    el.addEventListener('dragstart', (e)=>{
+      dragSourceWidgetId = el.dataset.widgetDrag;
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); });
+    el.addEventListener('dragover', (e)=>{ e.preventDefault(); el.classList.add('drag-over'); });
+    el.addEventListener('dragleave', ()=>{ el.classList.remove('drag-over'); });
+    el.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      el.classList.remove('drag-over');
+      const targetId = el.dataset.widgetDrag;
+      if(dragSourceWidgetId && dragSourceWidgetId!==targetId){
+        reorderDashboardWidgets(dragSourceWidgetId, targetId);
+      }
+      dragSourceWidgetId = null;
+    });
+  });
+}
 // Moves draggedId to sit where targetId currently is among its siblings, then
 // renumbers everyone's order sequentially. Only ever reorders within the same
 // parent — Headings reorder among Headings, Features reorder among Features.
@@ -3236,6 +3468,19 @@ function reorderSiblings(parentId, draggedId, targetId){
   const [moved] = siblings.splice(draggedIdx,1);
   siblings.splice(targetIdx,0,moved);
   siblings.forEach((s,i)=>{ s.order = i+1; });
+  persist(); render();
+}
+// Same reordering logic as reorderSiblings, but for Workspace Dashboard widgets —
+// these aren't feature nodes, just a plain ordered list of IDs in settings, so this
+// works directly on that array instead. Open to everyone, not just admins — this is
+// each person's own view of the dashboard, not shared workspace structure.
+function reorderDashboardWidgets(draggedId, targetId){
+  const order = state.settings.dashboardWidgetOrder;
+  const draggedIdx = order.indexOf(draggedId);
+  const targetIdx = order.indexOf(targetId);
+  if(draggedIdx===-1 || targetIdx===-1 || draggedIdx===targetIdx) return;
+  const [moved] = order.splice(draggedIdx,1);
+  order.splice(targetIdx,0,moved);
   persist(); render();
 }
 

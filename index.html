@@ -543,14 +543,35 @@ const DASHBOARD_WIDGET_COLORS = {
   wg_ontrack: '#33A85C',
   wg_overdue: '#DD5147',
   wg_blocked: '#CC5500',
-  wg_empty1:  '#9B59B6',
+  wg_attendance: '#9B59B6',
   wg_empty2:  '#16A085',
   wg_empty3:  '#E91E8C',
   wg_empty4:  '#F5A623',
   wg_empty5:  '#17A2C4',
   wg_empty6:  '#5C6BC0',
 };
-const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_empty1','wg_empty2','wg_empty3','wg_empty4','wg_empty5','wg_empty6'];
+const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_attendance','wg_empty2','wg_empty3','wg_empty4','wg_empty5','wg_empty6'];
+// One source of truth for every widget's name, which Module it draws from, and a
+// plain-language explanation of what it shows and how — used both for the small
+// label inside each widget and the fuller listing on My Account, so the two never
+// drift out of sync with each other.
+const DASHBOARD_WIDGET_META = {
+  wg_active: { label:'Active Workstreams', module:'Workstreams', moduleId:'feat_workstream',
+    description:'Shows how many of your visible, active workstreams there are right now, plus the average time it takes a workstream to go from open to closed, and whether that average is trending up or down compared to last quarter.' },
+  wg_ontrack: { label:'On Track', module:'Workstreams', moduleId:'feat_workstream',
+    description:'Shows how many of your visible, active workstreams currently have no delay, and what percentage that is out of the total.' },
+  wg_overdue: { label:'Overdue Tasks', module:'Workstreams', moduleId:'feat_workstream',
+    description:'Shows how many open tasks, across the workstreams you can see, are past their deadline right now.' },
+  wg_blocked: { label:'Blocked Tasks', module:'Workstreams', moduleId:'feat_workstream',
+    description:'Shows how many open tasks, across the workstreams you can see, are currently marked as blocked.' },
+  wg_attendance: { label:"Today's Attendance", module:'Attendance', moduleId:'h_attendance_v3',
+    description:"Shows what percentage of employees are marked present today. Only Leave and Holiday count against the percentage — working from home still counts as present. On a weekly off day, this shows \"WO\" instead of a percentage, since attendance isn't tracked the same way on days off." },
+  wg_empty2: { label:'Reserved Slot 2', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
+  wg_empty3: { label:'Reserved Slot 3', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
+  wg_empty4: { label:'Reserved Slot 4', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
+  wg_empty5: { label:'Reserved Slot 5', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
+  wg_empty6: { label:'Reserved Slot 6', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
+};
 /* ============================================================================ */
 
 const STORAGE_KEY = 'controlroom_state_v1';
@@ -964,6 +985,34 @@ function normalizeState(s){
     if(wsNode && wsNode.name==='Workstream') wsNode.name = 'Workstreams';
     s._workstreamModuleRenamed = true;
   }
+  // Dashboard widgets are personal to each person now — their own order, their own
+  // on/off choices — not a single shared arrangement for everyone. Reconciled on
+  // every load rather than gated by a one-time flag, so a brand new user always
+  // starts with sensible defaults, and if the widget set itself grows later, any
+  // newly-added widget gets appended for people who haven't seen it yet, without
+  // disturbing whatever they've already arranged.
+  const knownWidgetIds = new Set(DEFAULT_DASHBOARD_WIDGET_ORDER);
+  (s.users || []).forEach(u=>{
+    if(!Array.isArray(u.dashboardWidgetOrder)){
+      u.dashboardWidgetOrder = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
+    } else {
+      u.dashboardWidgetOrder = u.dashboardWidgetOrder.filter(id=>knownWidgetIds.has(id));
+      DEFAULT_DASHBOARD_WIDGET_ORDER.forEach(id=>{
+        if(!u.dashboardWidgetOrder.includes(id)){
+          u.dashboardWidgetOrder.push(id);
+          // A genuinely new widget this person hasn't seen before — default it to
+          // on, same as anyone else's default. Only for widgets newly appended
+          // here, never re-enabling something they'd already seen and turned off.
+          if(Array.isArray(u.dashboardWidgetsEnabled) && !u.dashboardWidgetsEnabled.includes(id)){
+            u.dashboardWidgetsEnabled.push(id);
+          }
+        }
+      });
+    }
+    if(!Array.isArray(u.dashboardWidgetsEnabled)){
+      u.dashboardWidgetsEnabled = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
+    }
+  });
   // Give everyone the new Summary module specifically — the general Access grandfather
   // migration below only ever runs once, so a brand new module added afterward would
   // otherwise be invisible to everyone until an admin manually ticks it.
@@ -1358,6 +1407,28 @@ function computeWorkstreamWidgetMetrics(){
   };
 }
 
+// Today's Attendance widget — reuses the exact same "who counts as an employee"
+// scope (state.users, excluding viewers) and the exact same Weekly Off definition
+// (isWeekendISO) the real Attendance page itself already uses, rather than
+// inventing separate rules that could quietly drift out of sync with it. Only
+// Leave and Holiday count as absent here — WFH still counts as present, since
+// someone working from home is still working, not away.
+function computeTodaysAttendanceWidget(){
+  const todayIso = todayISO();
+  if(isWeekendISO(todayIso)) return { isWeeklyOff: true, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
+  const employees = state.users.filter(u=>u.role!=='viewer');
+  if(!employees.length) return { isWeeklyOff: false, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
+  const onLeave = [], onHoliday = [];
+  employees.forEach(u=>{
+    const rec = getAttendance(u.id, todayIso);
+    if(rec==='L') onLeave.push(u.name);
+    else if(rec==='H') onHoliday.push(u.name);
+  });
+  const presentCount = employees.length - onLeave.length - onHoliday.length;
+  const pct = Math.round((presentCount / employees.length) * 100);
+  return { isWeeklyOff:false, pct, totalEmployees: employees.length, presentCount, onLeave, onHoliday };
+}
+
 // A single widget card, matching the reference layout: a large icon on the left,
 // vertically centered against a text column on the right (label, number, trend),
 // the whole composition centered together rather than stacked top-to-bottom.
@@ -1368,13 +1439,18 @@ function widgetBorder(id){
   // background tint so it reads clearly, complementing the glow around it.
   return `${c}80`;
 }
-function widgetCard({id, iconSvg, iconColor, label, value, lines}){
+function moduleSourceLabel(id){
+  const meta = DASHBOARD_WIDGET_META[id];
+  if(!meta || !meta.module) return '';
+  return `<div class="widget-source-label" data-widget-source="${meta.moduleId}" title="From the ${meta.module} module — click to open it" style="position:absolute;bottom:6px;right:10px;font-size:9.5px;font-weight:600;color:var(--paper-faint);cursor:pointer;text-decoration:underline dotted;">${meta.module}</div>`;
+}
+function widgetCard({id, iconSvg, iconColor, label, value, lines, tooltip}){
   const bgTint = DASHBOARD_WIDGET_COLORS[id] || 'var(--panel-raised)';
   // Appending 1A to a hex color gives roughly 10% opacity (26/255 ≈ 10.2%) — a
   // tint that reads clearly as color without ever competing with the text on top.
   const bgStyle = bgTint.startsWith('#') ? `${bgTint}1A` : bgTint;
   return `
-    <div class="drag-node" style="flex:1;min-width:150px;background:${bgStyle};border:1.5px solid ${widgetBorder(id)};border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;cursor:grab;" draggable="true" data-widget-drag="${id}">
+    <div class="drag-node" style="position:relative;flex:1;min-width:150px;background:${bgStyle};border:1.5px solid ${widgetBorder(id)};border-radius:12px;padding:14px;padding-bottom:22px;display:flex;align-items:center;gap:12px;cursor:grab;" draggable="true" data-widget-drag="${id}" ${tooltip?`title="${tooltip.replace(/"/g,'&quot;')}"`:''} ${(DASHBOARD_WIDGET_META[id]&&DASHBOARD_WIDGET_META[id].moduleId)?`data-widget-navigate="${DASHBOARD_WIDGET_META[id].moduleId}"`:''}>
       <div style="width:56px;height:56px;border-radius:50%;background:${iconColor}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
         ${iconSvg}
       </div>
@@ -1383,6 +1459,7 @@ function widgetCard({id, iconSvg, iconColor, label, value, lines}){
         <div style="font-family:var(--f-display);font-size:32px;font-weight:700;color:var(--paper);line-height:1.1;">${value}</div>
         ${(lines||[]).join('')}
       </div>
+      ${moduleSourceLabel(id)}
     </div>`;
 }
 function emptyWidgetCard(id){
@@ -1397,13 +1474,14 @@ const WIDGET_ICONS = {
   check: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>`,
   calendar: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
   block: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.5 5.5l13 13"/></svg>`,
+  team: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="${c}"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="5" cy="9" r="2.2" opacity=".7"/><path d="M0.5 19c0-2.4 1.9-4.4 4.5-4.9" opacity=".7"/><circle cx="19" cy="9" r="2.2" opacity=".7"/><path d="M23.5 19c0-2.4-1.9-4.4-4.5-4.9" opacity=".7"/></svg>`,
 };
 // The Workspace Dashboard's widgets — live, computed fresh on every render from
-// computeWorkstreamWidgetMetrics(), never cached. Rendered in whichever order is
-// currently stored in settings, so a rearrangement sticks between visits, and
-// draggable for everyone, not just admins — this is each person's own view of
-// their dashboard, not shared workspace structure.
+// computeWorkstreamWidgetMetrics(), never cached. Rendered using this specific
+// person's own order and their own on/off choices — personal to them, not a
+// shared arrangement — and draggable for everyone, not just admins.
 function renderWorkstreamWidgets(m){
+  const cu = currentUser();
   const widgetsById = {
     wg_active: widgetCard({
       id:'wg_active', iconSvg: WIDGET_ICONS.folder('#4C8DFF'), iconColor:'#4C8DFF', label:'Active Workstreams', value: m.activeCount,
@@ -1427,17 +1505,41 @@ function renderWorkstreamWidgets(m){
       id:'wg_blocked', iconSvg: WIDGET_ICONS.block('var(--blocker)'), iconColor:'var(--blocker)', label:'Blocked Tasks', value: m.blockedCount,
       lines: [],
     }),
-    wg_empty1: emptyWidgetCard('wg_empty1'), wg_empty2: emptyWidgetCard('wg_empty2'),
+    wg_attendance: (()=>{
+      const att = computeTodaysAttendanceWidget();
+      const displayValue = att.isWeeklyOff ? 'WO' : (att.pct===null ? '—' : `${att.pct}%`);
+      const subLine = att.isWeeklyOff
+        ? `<div style="font-size:11.5px;color:var(--paper-dim);font-weight:500;">Weekly off — not tracked today</div>`
+        : att.pct===null
+          ? `<div style="font-size:11.5px;color:var(--paper-dim);font-weight:500;">No employees to track yet</div>`
+          : '';
+      let tooltip = '';
+      if(!att.isWeeklyOff && att.pct!==null){
+        const parts = [];
+        if(att.onLeave.length) parts.push(`On Leave: ${att.onLeave.join(', ')}`);
+        if(att.onHoliday.length) parts.push(`On Holiday: ${att.onHoliday.join(', ')}`);
+        tooltip = parts.length ? parts.join('\n') : 'Everyone is present today';
+      }
+      return widgetCard({
+        id:'wg_attendance', iconSvg: WIDGET_ICONS.team('#9B59B6'), iconColor:'#9B59B6', label:"Today's Attendance", value: displayValue,
+        lines: subLine ? [subLine] : [], tooltip,
+      });
+    })(),
+    wg_empty2: emptyWidgetCard('wg_empty2'),
     wg_empty3: emptyWidgetCard('wg_empty3'), wg_empty4: emptyWidgetCard('wg_empty4'),
     wg_empty5: emptyWidgetCard('wg_empty5'), wg_empty6: emptyWidgetCard('wg_empty6'),
   };
-  const order = state.settings.dashboardWidgetOrder;
-  const orderedHtml = order.map(id=>widgetsById[id]).filter(Boolean);
+  const order = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
+  const enabled = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
+  const orderedHtml = order.filter(id=>enabled.has(id)).map(id=>widgetsById[id]).filter(Boolean);
+  if(!orderedHtml.length){
+    return `<div class="muted" style="font-size:13px;padding:20px;text-align:center;">All widgets are turned off. Turn some back on from My Account &gt; Widgets.</div>`;
+  }
   const row1 = orderedHtml.slice(0,5).join('');
   const row2 = orderedHtml.slice(5,10).join('');
   return `
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;">${row1}</div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;">${row2}</div>
+    ${row2 ? `<div style="display:flex;gap:14px;flex-wrap:wrap;">${row2}</div>` : ''}
   `;
 }
 
@@ -3489,6 +3591,18 @@ function bindDashboardWidgetDrag(){
       dragSourceWidgetId = null;
     });
   });
+  // Click anywhere on a real widget (not the empty/reserved ones) to open the
+  // Module it draws its data from — same dual behavior as module boxes, which
+  // are both draggable and clickable at once without conflicting with each other.
+  document.querySelectorAll('[data-widget-navigate]').forEach(el=>{
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', ()=>{
+      const node = featureNode(el.dataset.widgetNavigate);
+      if(!node) return;
+      if(node.systemView){ ui.view = node.systemView; } else { ui.view = 'feature'; ui.featureNodeId = node.id; }
+      render();
+    });
+  });
 }
 // Moves draggedId to sit where targetId currently is among its siblings, then
 // renumbers everyone's order sequentially. Only ever reorders within the same
@@ -3504,11 +3618,14 @@ function reorderSiblings(parentId, draggedId, targetId){
   persist(); render();
 }
 // Same reordering logic as reorderSiblings, but for Workspace Dashboard widgets —
-// these aren't feature nodes, just a plain ordered list of IDs in settings, so this
-// works directly on that array instead. Open to everyone, not just admins — this is
-// each person's own view of the dashboard, not shared workspace structure.
+// these aren't feature nodes, just a plain ordered list of IDs kept on each
+// person's own user record, so this works directly on that array instead. Open to
+// everyone, not just admins — this is each person's own personal arrangement of
+// their own dashboard, never shared with or applied to anyone else.
 function reorderDashboardWidgets(draggedId, targetId){
-  const order = state.settings.dashboardWidgetOrder;
+  const cu = currentUser();
+  if(!cu || !Array.isArray(cu.dashboardWidgetOrder)) return;
+  const order = cu.dashboardWidgetOrder;
   const draggedIdx = order.indexOf(draggedId);
   const targetIdx = order.indexOf(targetId);
   if(draggedIdx===-1 || targetIdx===-1 || draggedIdx===targetIdx) return;
@@ -5340,10 +5457,27 @@ function renderMyAccount(){
     {id:'dark', name:'Dark', desc:'The original theme.'},
     {id:'light', name:'ImproveID Theme', desc:'A clean, bright look.'}
   ];
+  const widgetOrder = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
+  const enabledSet = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
+  const widgetRows = widgetOrder.map(id=>{
+    const meta = DASHBOARD_WIDGET_META[id] || {};
+    const isOn = enabledSet.has(id);
+    return `
+    <div class="drag-node" draggable="true" data-widget-drag="${id}" style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:14px 0;border-bottom:1px solid var(--line);cursor:grab;">
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:600;color:var(--paper);">${meta.label || id}${meta.module ? ` <span class="muted" style="font-size:11px;font-weight:500;">— from ${meta.module}</span>` : ''}</div>
+        <div class="muted" style="font-size:12px;margin-top:3px;line-height:1.5;">${meta.description || ''}</div>
+      </div>
+      <label class="toggle-switch" style="flex-shrink:0;margin-top:2px;">
+        <input type="checkbox" data-widget-toggle="${id}" ${isOn?'checked':''}>
+        <div class="toggle-track"></div>
+      </label>
+    </div>`;
+  }).join('');
   return `
     <div class="eyebrow">My Account</div>
     <h1 class="page-title" style="margin-bottom:20px;">${cu ? cu.name : ''}</h1>
-    <div class="card">
+    <div class="card" style="margin-bottom:16px;">
       <div class="section-title" style="margin-bottom:4px;">Theme</div>
       <div class="muted" style="font-size:12px;margin-bottom:14px;">Choose how the workspace looks for you — this is personal and only changes what you see.</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;">
@@ -5353,6 +5487,16 @@ function renderMyAccount(){
             <div><div style="font-weight:600;color:var(--paper);">${t.name}</div><div class="muted" style="font-size:11px;">${t.desc}</div></div>
           </label>`).join('')}
       </div>
+    </div>
+    <div class="card">
+      <div class="section-title" style="margin-bottom:4px;">Widgets</div>
+      <div class="muted" style="font-size:12px;margin-bottom:14px;">
+        These appear on your Workspace Dashboard, on the Focus Area page. Turn any of them on or off — this only
+        affects what you see, not anyone else. Drag a row to reorder it; your dashboard will match. Currently 10
+        exist; as more get built, admins will choose which ones are on by default for anyone who hasn't customized
+        their own set yet.
+      </div>
+      ${widgetRows}
     </div>
   `;
 }
@@ -5367,6 +5511,21 @@ function bindMyAccount(){
       render();
     });
   });
+  document.querySelectorAll('[data-widget-toggle]').forEach(input=>{
+    input.addEventListener('change', ()=>{
+      const cu = currentUser();
+      if(!cu) return;
+      const id = input.dataset.widgetToggle;
+      if(!Array.isArray(cu.dashboardWidgetsEnabled)) cu.dashboardWidgetsEnabled = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
+      if(input.checked){
+        if(!cu.dashboardWidgetsEnabled.includes(id)) cu.dashboardWidgetsEnabled.push(id);
+      } else {
+        cu.dashboardWidgetsEnabled = cu.dashboardWidgetsEnabled.filter(w=>w!==id);
+      }
+      persist(); render();
+    });
+  });
+  bindDashboardWidgetDrag();
 }
 
 function renderAdmin(){

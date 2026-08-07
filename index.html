@@ -546,12 +546,12 @@ const DASHBOARD_WIDGET_COLORS = {
   wg_blocked: '#CC5500',
   wg_attendance: '#9B59B6',
   wg_reminders: '#16A085',
-  wg_empty3:  '#E91E8C',
+  wg_capacity: '#E91E8C',
   wg_empty4:  '#F5A623',
   wg_empty5:  '#17A2C4',
   wg_empty6:  '#5C6BC0',
 };
-const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_attendance','wg_reminders','wg_empty3','wg_empty4','wg_empty5','wg_empty6'];
+const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_attendance','wg_reminders','wg_capacity','wg_empty4','wg_empty5','wg_empty6'];
 // One source of truth for every widget's name, which Module it draws from, and a
 // plain-language explanation of what it shows and how — used both for the small
 // label inside each widget and the fuller listing on My Account, so the two never
@@ -569,7 +569,8 @@ const DASHBOARD_WIDGET_META = {
     description:"Shows what percentage of employees are marked present today. Only Leave and Holiday count against the percentage — working from home still counts as present. On a weekly off day, this shows \"WO\" instead of a percentage, since attendance isn't tracked the same way on days off." },
   wg_reminders: { label:'Reminders', module:'Reminders', moduleId:'h_reminders',
     description:"Shows the titles of your upcoming active reminders — as many as fit neatly, usually 2-3. Hovering shows all of them with full details; clicking takes you to your Reminders page." },
-  wg_empty3: { label:'Reserved Slot 3', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
+  wg_capacity: { label:'Team Capacity', module:'Active Assignments', moduleId:'feat_assignments',
+    description:"Shows how many Members currently have no open task (free) versus how many have at least one (occupied). HODs are excluded, since they aren't usually assigned tasks directly and would misleadingly always show as free." },
   wg_empty4: { label:'Reserved Slot 4', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
   wg_empty5: { label:'Reserved Slot 5', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
   wg_empty6: { label:'Reserved Slot 6', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
@@ -920,7 +921,7 @@ function seedState(){
   const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent');
   const userAccess = {};
   users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
-  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {}, reminders: [] };
+  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {}, reminders: [], roles: [] };
 }
 
 function withTimeout(promise, ms){
@@ -1153,6 +1154,7 @@ function normalizeState(s){
   }
   if(!s.summaryShownLog || typeof s.summaryShownLog !== 'object' || Array.isArray(s.summaryShownLog)) s.summaryShownLog = {};
   if(!Array.isArray(s.reminders)) s.reminders = [];
+  if(!Array.isArray(s.roles)) s.roles = [];
   if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
   if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
@@ -1518,6 +1520,31 @@ function computeTodaysAttendanceWidget(){
   return { isWeeklyOff:false, pct, totalEmployees: employees.length, presentCount, onLeave, onHoliday };
 }
 
+// Team Capacity widget — computed independently from activeAssignmentsData()
+// rather than reusing it directly, because that function also restricts a regular
+// Member to seeing only their own row (appropriate for a page showing everyone's
+// detailed task list, not appropriate here) — an aggregate count of how many
+// people are occupied vs free isn't the same privacy concern as seeing someone
+// else's individual assignments. Still respects the same workstream-visibility
+// scope (accessibleProjectIds) as every other widget, and the same "openCount"
+// definition of occupied the real Active Assignments page uses.
+// HODs are deliberately excluded: they aren't usually assigned tasks directly, so
+// counting them would make everyone assume they have spare capacity when they're
+// actually busy managing — the opposite of what this widget is for.
+function computeTeamCapacityWidget(){
+  const accessIds = accessibleProjectIds();
+  const scopedTasks = accessIds===null ? state.tasks : state.tasks.filter(t=>accessIds.includes(t.projectId));
+  const staff = state.users.filter(u=>u.role==='member');
+  const freeNames = [], occupiedNames = [];
+  staff.forEach(u=>{
+    const openCount = scopedTasks.filter(t=>
+      t.status!=='closed' && ((t.assignedType==='user' && t.assignedId===u.id) || (t.assignedType==='team' && t.assignedId===u.teamId))
+    ).length;
+    (openCount===0 ? freeNames : occupiedNames).push(u.name);
+  });
+  return { total: staff.length, freeCount: freeNames.length, occupiedCount: occupiedNames.length, freeNames, occupiedNames };
+}
+
 // A single widget card, matching the reference layout: a large icon on the left,
 // vertically centered against a text column on the right (label, number, trend),
 // the whole composition centered together rather than stacked top-to-bottom.
@@ -1565,6 +1592,7 @@ const WIDGET_ICONS = {
   block: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.5 5.5l13 13"/></svg>`,
   team: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="${c}"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="5" cy="9" r="2.2" opacity=".7"/><path d="M0.5 19c0-2.4 1.9-4.4 4.5-4.9" opacity=".7"/><circle cx="19" cy="9" r="2.2" opacity=".7"/><path d="M23.5 19c0-2.4-1.9-4.4-4.5-4.9" opacity=".7"/></svg>`,
   bell: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`,
+  gauge: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle cx="12" cy="15" r="1.2" fill="${c}" stroke="none"/></svg>`,
 };
 // The Workspace Dashboard's widgets — live, computed fresh on every render from
 // computeWorkstreamWidgetMetrics(), never cached. Rendered using this specific
@@ -1640,7 +1668,25 @@ function renderWorkstreamWidgets(m){
           ${moduleSourceLabel('wg_reminders')}
         </div>`;
     })(),
-    wg_empty3: emptyWidgetCard('wg_empty3'), wg_empty4: emptyWidgetCard('wg_empty4'),
+    wg_capacity: (()=>{
+      const cap = computeTeamCapacityWidget();
+      const tooltip = cap.total
+        ? `Free: ${cap.freeNames.join(', ') || '(none)'}\nOccupied: ${cap.occupiedNames.join(', ') || '(none)'}`
+        : 'No Members to track yet';
+      const pct = cap.total ? Math.round((cap.occupiedCount / cap.total) * 100) : null;
+      return widgetCard({
+        id:'wg_capacity', iconSvg: WIDGET_ICONS.gauge('#E91E8C'), iconColor:'#E91E8C', label:'Team Capacity',
+        value: pct===null ? '—' : `${pct}%`,
+        lines: cap.total ? [
+          `<div style="font-size:11.5px;color:var(--paper-dim);font-weight:500;">${cap.occupiedCount} Occupied</div>`,
+          `<div style="font-size:11.5px;color:var(--paper-dim);font-weight:500;">${cap.freeCount} Available</div>`,
+        ] : [
+          `<div style="font-size:11.5px;color:var(--paper-dim);font-weight:500;">No Members to track yet</div>`,
+        ],
+        tooltip,
+      });
+    })(),
+    wg_empty4: emptyWidgetCard('wg_empty4'),
     wg_empty5: emptyWidgetCard('wg_empty5'), wg_empty6: emptyWidgetCard('wg_empty6'),
   };
   const order = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
@@ -1672,7 +1718,7 @@ function isTaggedToProject(projectId){
 function canSeeAssignmentsPage(){
   const u = currentUser();
   if(!u) return false;
-  if(u.role==='admin' || u.role==='member') return true;
+  if(u.role==='admin' || u.role==='member' || u.role==='hod') return true;
   if(u.role==='viewer') return !!u.viewerCanSeeAssignments;
   return false;
 }
@@ -4877,7 +4923,7 @@ function openBlockerModal(taskId){
 /* ============================== TASK MODALS ============================== */
 
 function assigneeOptions(selectedType, selectedId){
-  return state.users.filter(u=>u.role==='member').map(u=>{
+  return state.users.filter(u=>u.role==='member' || u.role==='hod').map(u=>{
     const tm = u.teamId ? state.teams.find(x=>x.id===u.teamId) : null;
     const label = tm ? `${u.name} — ${tm.name}` : `${u.name} (no team)`;
     return `<option value="user:${u.id}" ${selectedType==='user'&&selectedId===u.id?'selected':''}>${label}</option>`;
@@ -5617,8 +5663,8 @@ function activeAssignmentsData(){
   const accessIds = accessibleProjectIds();
   const scopedTasks = accessIds===null ? state.tasks : state.tasks.filter(t=>accessIds.includes(t.projectId));
   const cu = currentUser();
-  let members = state.users.filter(u=>u.role==='member');
-  if(cu && cu.role==='member') members = members.filter(u=>u.id===cu.id); // members only ever see themselves here
+  let members = state.users.filter(u=>u.role==='member' || u.role==='hod');
+  if(cu && cu.role==='member') members = members.filter(u=>u.id===cu.id); // members only ever see themselves here; HODs see everyone, matching their monitoring role
 
   return members.map(u=>{
     const myTasks = scopedTasks.filter(t=>
@@ -6046,12 +6092,13 @@ function renderAdmin(){
     <h1 class="page-title" style="margin-bottom:20px;">Users, teams &amp; workstreams</h1>
     <div class="tabs">
       <button class="tab ${ui.adminTab==='users'?'active':''}" data-tab="users">Users</button>
+      <button class="tab ${ui.adminTab==='roles'?'active':''}" data-tab="roles">Roles</button>
       <button class="tab ${ui.adminTab==='teams'?'active':''}" data-tab="teams">Teams</button>
       <button class="tab ${ui.adminTab==='projects'?'active':''}" data-tab="projects">Workstreams</button>
       <button class="tab ${ui.adminTab==='settings'?'active':''}" data-tab="settings">Admin</button>
       <button class="tab ${ui.adminTab==='copilotAnalytics'?'active':''}" data-tab="copilotAnalytics">Copilot Analytics</button>
     </div>
-    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='settings' ? renderAdminSettings() : ui.adminTab==='copilotAnalytics' ? renderCopilotAnalytics() : renderAdminProjects()}
+    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='roles' ? renderAdminRoles() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='settings' ? renderAdminSettings() : ui.adminTab==='copilotAnalytics' ? renderCopilotAnalytics() : renderAdminProjects()}
   `;
 }
 
@@ -6063,7 +6110,11 @@ function renderAdminUsers(){
     return `<tr>
       <td><div class="userchip"><div class="initials">${initials(u.name)}</div>${u.name}</div></td>
       <td class="mono" style="font-size:12px;">${u.username}</td>
-      <td>${isViewer ? pill('amber','Viewer') : pill('green','Member')}</td>
+      <td>${isViewer ? pill('amber','Viewer') : `
+        <select data-user-role="${u.id}">
+          <option value="member" ${u.role==='member'?'selected':''}>Member</option>
+          <option value="hod" ${u.role==='hod'?'selected':''}>HOD</option>
+        </select>`}</td>
       <td>
         ${isViewer ? `<span class="mono" style="font-size:12px;">${accessLabel}</span>` : `
         <select data-user-team="${u.id}">
@@ -6073,6 +6124,7 @@ function renderAdminUsers(){
       </td>
       <td><button class="btn btn-sm" data-manage-node-access="${u.id}">Access</button></td>
       <td><div class="row-actions">
+        <button class="btn btn-sm" data-edit-role-title="${u.id}">Job title</button>
         ${isViewer ? `<button class="btn btn-sm" data-edit-access="${u.id}">Edit access</button>` : ''}
         ${u.phone ? `<a class="btn btn-sm" href="${waLink(u.phone, `Hi ${u.name.split(' ')[0]},`)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
         <button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button>
@@ -6248,6 +6300,22 @@ function renderCopilotAnalytics(){
   `;
 }
 
+function renderAdminRoles(){
+  const rows = state.roles.map(r=>{
+    const count = state.users.filter(u=>u.roleTitleId===r.id).length;
+    return `<tr><td>${r.name}</td><td class="mono" style="font-size:12px;">${count} user${count===1?'':'s'}</td><td><div class="row-actions"><button class="btn btn-sm btn-danger" data-del-role="${r.id}">Remove</button></div></td></tr>`;
+  }).join('');
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Job Titles</div>
+        <button class="btn btn-primary btn-sm" data-add-role>+ Create job title</button>
+      </div>
+      <table><thead><tr><th>Job Title</th><th>Users</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="empty-state">No job titles yet.</td></tr>`}</tbody></table>
+      <div class="footnote">Assigned to each person the same way Teams are — pick one when creating a user, or change it later from their row.</div>
+    </div>`;
+}
+
 function renderAdminTeams(){
   const rows = state.teams.map(t=>{
     const count = state.users.filter(u=>u.teamId===t.id).length;
@@ -6301,6 +6369,12 @@ function bindAdmin(){
     sel.addEventListener('change', ()=>{
       const u = state.users.find(x=>x.id===sel.dataset.userTeam);
       u.teamId = sel.value || null; persist(); render();
+    });
+  });
+  document.querySelectorAll('[data-user-role]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const u = state.users.find(x=>x.id===sel.dataset.userRole);
+      if(u) { u.role = sel.value; persist(); render(); }
     });
   });
   document.querySelectorAll('[data-del-user]').forEach(b=>b.addEventListener('click', ()=>{
@@ -6392,6 +6466,20 @@ function bindAdmin(){
 
   const addTeam = document.querySelector('[data-add-team]');
   if(addTeam) addTeam.addEventListener('click', openAddTeamModal);
+  const addRole = document.querySelector('[data-add-role]');
+  if(addRole) addRole.addEventListener('click', openAddRoleModal);
+  document.querySelectorAll('[data-edit-role-title]').forEach(b=>b.addEventListener('click', ()=>{
+    openEditRoleTitleModal(b.dataset.editRoleTitle);
+  }));
+  document.querySelectorAll('[data-del-role]').forEach(b=>b.addEventListener('click', ()=>{
+    const r = state.roles.find(x=>x.id===b.dataset.delRole);
+    const name = r ? r.name : 'this job title';
+    openConfirmDelete('Remove this job title?', `This will permanently remove "${name}". Anyone assigned to it will become unassigned. This can't be undone.`, ()=>{
+      state.roles = state.roles.filter(x=>x.id!==b.dataset.delRole);
+      state.users.forEach(u=>{ if(u.roleTitleId===b.dataset.delRole) u.roleTitleId=null; });
+      persist(); render();
+    }, 'Remove');
+  }));
   document.querySelectorAll('[data-del-team]').forEach(b=>b.addEventListener('click', ()=>{
     const tm = state.teams.find(x=>x.id===b.dataset.delTeam);
     const name = tm ? tm.name : 'this team';
@@ -6571,11 +6659,22 @@ function openAddUserModal(){
         <form id="userForm">
           <div class="field"><label>Full name</label><input id="uName" required></div>
           <div class="field"><label>Employee ID (optional)</label><input id="uEmployeeId" placeholder="e.g. EMP-1042"></div>
+          <div class="field"><label>Job title (optional)</label>
+            <select id="uJobTitle">
+              <option value="">None</option>
+              ${state.roles.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Responsibilities (optional)</label>
+            <input id="uResponsibilities" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
+            <div class="hint">Separate each one with a semicolon (;). Workspace CoPilot can answer "who's responsible for X" from this.</div>
+          </div>
           <div class="field"><label>WhatsApp number (optional)</label><input id="uPhone" placeholder="e.g. +1 555 123 4567"><div class="hint">Include the country code. Used only for a "Message on WhatsApp" link — nothing is sent automatically.</div></div>
           <div class="field"><label>Username</label><input id="uUsername" required></div>
           <div class="field"><label>Role</label>
             <select id="uRole">
               <option value="member">Member — assigned to a team, works on tasks</option>
+              <option value="hod">HOD — monitors a team's work, not usually assigned tasks directly</option>
               <option value="viewer">Viewer — read-only, no task assignments</option>
             </select>
           </div>
@@ -6617,7 +6716,9 @@ function openAddUserModal(){
     const userEl = document.getElementById('uUsername');
     if(!nameEl.value.trim() || !userEl.value.trim()){ (nameEl.value.trim()?userEl:nameEl).focus(); return; }
     const isViewer = roleSel.value==='viewer';
-    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null) };
+    const responsibilitiesRaw = document.getElementById('uResponsibilities').value.trim();
+    const responsibilities = responsibilitiesRaw ? responsibilitiesRaw.split(';').map(s=>s.trim()).filter(Boolean) : [];
+    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null), roleTitleId: document.getElementById('uJobTitle').value || null, responsibilities };
     if(isViewer){
       u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
       u.viewerCanSeeAssignments = document.getElementById('uCanSeeAssignments').checked;
@@ -6829,6 +6930,65 @@ function openChangePasswordModal(userId){
     if(!p1 || p1.length<4){ document.getElementById('pwNew').focus(); return; }
     if(p1!==p2){ document.getElementById('pwConfirm').focus(); return; }
     u.password = p1;
+    persist(); closeModal(); render();
+  });
+}
+
+function openEditRoleTitleModal(userId){
+  if(!isAdmin()) return;
+  const u = state.users.find(x=>x.id===userId);
+  if(!u) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>${u.name} — job title &amp; responsibilities</h3>
+        <form id="roleTitleForm">
+          <div class="field"><label>Job title</label>
+            <select id="ertJobTitle">
+              <option value="">None</option>
+              ${state.roles.map(r=>`<option value="${r.id}" ${u.roleTitleId===r.id?'selected':''}>${r.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Responsibilities</label>
+            <input id="ertResponsibilities" value="${(u.responsibilities||[]).join('; ').replace(/"/g,'&quot;')}" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
+            <div class="hint">Separate each one with a semicolon (;). Workspace CoPilot can answer "who's responsible for X" from this.</div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="roleTitleSubmitBtn" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('roleTitleForm', 'roleTitleSubmitBtn', ()=>{
+    const raw = document.getElementById('ertResponsibilities').value.trim();
+    u.roleTitleId = document.getElementById('ertJobTitle').value || null;
+    u.responsibilities = raw ? raw.split(';').map(s=>s.trim()).filter(Boolean) : [];
+    persist(); closeModal(); render();
+  });
+}
+
+function openAddRoleModal(){
+  if(!isAdmin()) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Create job title</h3>
+        <form id="roleForm">
+          <div class="field"><label>Job title</label><input id="rName" required placeholder="e.g. Software Developer"></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="roleSubmitBtn" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('roleForm', 'roleSubmitBtn', ()=>{
+    const nameEl = document.getElementById('rName');
+    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    state.roles.push({ id: uid('role'), name: nameEl.value.trim() });
     persist(); closeModal(); render();
   });
 }

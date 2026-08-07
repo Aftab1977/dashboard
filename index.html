@@ -4152,32 +4152,46 @@ document.addEventListener('click', (e)=>{
 
 function renderReminders(node){
   const list = myReminders();
-  const cards = list.map(r=>{
-    const dt = reminderDisplayDateTime({ dateISO: r.nextDueISO || r.dateISO, time: r.nextDueTime || r.time });
-    const contentPreview = !r.content ? '' :
-      r.content.type==='text' ? `<div class="muted" style="font-size:12.5px;margin-top:4px;">${r.content.text.length>140?r.content.text.slice(0,140)+'…':r.content.text}</div>` :
-      r.content.type==='link' ? `<div style="font-size:12.5px;margin-top:4px;"><a href="${r.content.url}" target="_blank" rel="noopener">${r.content.url}</a></div>` :
-      r.content.type==='image' ? `<img src="${r.content.fileUrl}" style="max-width:160px;border-radius:6px;margin-top:6px;display:block;">` :
-      `<div style="font-size:12.5px;margin-top:4px;"><a href="${r.content.fileUrl}" target="_blank" rel="noopener">${r.content.fileName}</a></div>`;
+  const todayIso = todayISO();
+  const rows = list.map((r,i)=>{
+    const dueISO = r.nextDueISO || r.dateISO;
+    const dueTime = r.nextDueTime || r.time;
+    const dt = reminderDisplayDateTime({ dateISO: dueISO, time: dueTime });
+    const isOverdue = r.active && reminderDueDateObj(dueISO, dueTime) < nowIST() && dueISO !== todayIso;
+    const isToday = dueISO === todayIso;
+    const [, mo, da] = dueISO.split('-').map(Number);
+    const monthAbbr = new Date(dueISO+'T00:00:00').toLocaleDateString('en-US',{month:'short'});
+    const dateBadge = isOverdue
+      ? `<div style="font-size:13px;font-weight:700;color:var(--red);">Now!</div>`
+      : isToday
+        ? `<div style="font-size:13px;font-weight:700;color:var(--amber);">Today</div>`
+        : `<div style="text-align:center;"><div style="font-size:20px;font-weight:700;line-height:1;color:var(--paper);">${String(da).padStart(2,'0')}</div><div style="font-size:10px;color:var(--paper-faint);text-transform:uppercase;">${monthAbbr}</div></div>`;
+    const contentLine = r.content
+      ? (r.content.type==='text' ? r.content.text.length>80?r.content.text.slice(0,80)+'…':r.content.text
+        : r.content.type==='link' ? r.content.url
+        : r.content.type==='image' ? 'Image attached'
+        : r.content.fileName)
+      : null;
     return `
-    <div class="card" style="margin-bottom:12px;${r.active?'':'opacity:.5;'}">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-        <div style="flex:1;">
-          <div style="font-size:15px;font-weight:600;">${r.title}${r.active?'':' <span class="muted" style="font-weight:400;font-size:11.5px;">(deactivated)</span>'}</div>
-          ${contentPreview}
-          <div style="display:flex;gap:14px;margin-top:8px;font-size:11.5px;color:var(--paper-dim);font-family:var(--f-mono);">
-            <span>${dt.date}</span><span>${dt.time}</span><span>${REMINDER_REPEAT_LABELS[r.repeat]}</span>
-          </div>
-        </div>
-        <button class="btn btn-sm btn-danger" data-delete-reminder="${r.id}">Delete</button>
+    <div style="display:flex;align-items:center;gap:16px;padding:14px 18px;${i<list.length-1?'border-bottom:1px solid var(--line-soft);':''}${r.active?'':'opacity:.5;'}">
+      <div style="width:4px;align-self:stretch;background:var(--amber);border-radius:3px;flex-shrink:0;"></div>
+      <div style="width:44px;flex-shrink:0;">${dateBadge}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:14.5px;font-weight:700;color:var(--amber);">${r.title}${r.active?'':' <span class="muted" style="font-weight:400;font-size:11.5px;">(deactivated)</span>'}</div>
+        ${contentLine ? `<div class="muted" style="font-size:12px;margin-top:2px;">${contentLine}</div>` : ''}
+        <div class="muted" style="font-size:12px;margin-top:1px;">Repeats: ${REMINDER_REPEAT_LABELS[r.repeat]}</div>
       </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-family:var(--f-mono);font-size:12.5px;color:var(--paper-dim);">${dt.time}</div>
+      </div>
+      <button class="btn btn-sm btn-danger" data-delete-reminder="${r.id}" style="flex-shrink:0;">Delete</button>
     </div>`;
   }).join('');
   return `
     <div class="eyebrow">Heading</div>
     <h1 class="page-title" style="margin-bottom:20px;">Reminders</h1>
     <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addReminderBtn">+</button>
-    ${cards || `<div class="empty-state"><div class="et">No reminders yet</div></div>`}
+    ${rows ? `<div class="card" style="padding:0;overflow:hidden;">${rows}</div>` : `<div class="empty-state"><div class="et">No reminders yet</div></div>`}
   `;
 }
 function bindReminders(){

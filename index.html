@@ -1155,6 +1155,21 @@ function normalizeState(s){
   if(!s.summaryShownLog || typeof s.summaryShownLog !== 'object' || Array.isArray(s.summaryShownLog)) s.summaryShownLog = {};
   if(!Array.isArray(s.reminders)) s.reminders = [];
   if(!Array.isArray(s.roles)) s.roles = [];
+  // One-time migration: Job Title used to be a dropdown referencing a managed
+  // list (s.roles); it's now a plain text field on the user directly. Resolve
+  // any existing roleTitleId to its real name before it becomes orphaned, so
+  // nobody's already-entered job title is silently lost in the switch.
+  if(!s._jobTitleMigratedToText){
+    const roleNameById = {};
+    s.roles.forEach(r=>{ roleNameById[r.id] = r.name; });
+    (s.users||[]).forEach(u=>{
+      if(u.roleTitleId && !u.jobTitle){
+        u.jobTitle = roleNameById[u.roleTitleId] || '';
+      }
+      delete u.roleTitleId;
+    });
+    s._jobTitleMigratedToText = true;
+  }
   if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
   if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
@@ -1566,7 +1581,7 @@ function widgetCard({id, iconSvg, iconColor, label, value, lines, tooltip}){
   // tint that reads clearly as color without ever competing with the text on top.
   const bgStyle = bgTint.startsWith('#') ? `${bgTint}1A` : bgTint;
   return `
-    <div class="drag-node" style="position:relative;flex:1;min-width:150px;background:${bgStyle};border:1.5px solid ${widgetBorder(id)};border-radius:12px;padding:14px;padding-bottom:22px;display:flex;align-items:center;gap:12px;cursor:grab;" draggable="true" data-widget-drag="${id}" ${tooltip?`title="${tooltip.replace(/"/g,'&quot;')}"`:''} ${(DASHBOARD_WIDGET_META[id]&&DASHBOARD_WIDGET_META[id].moduleId)?`data-widget-navigate="${DASHBOARD_WIDGET_META[id].moduleId}"`:''}>
+    <div class="drag-node" style="position:relative;flex:1;min-width:150px;min-height:132px;box-sizing:border-box;background:${bgStyle};border:1.5px solid ${widgetBorder(id)};border-radius:12px;padding:14px;padding-bottom:22px;display:flex;align-items:center;gap:12px;cursor:grab;" draggable="true" data-widget-drag="${id}" ${tooltip?`title="${tooltip.replace(/"/g,'&quot;')}"`:''} ${(DASHBOARD_WIDGET_META[id]&&DASHBOARD_WIDGET_META[id].moduleId)?`data-widget-navigate="${DASHBOARD_WIDGET_META[id].moduleId}"`:''}>
       <div style="width:56px;height:56px;border-radius:50%;background:${iconColor}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
         ${iconSvg}
       </div>
@@ -1581,7 +1596,7 @@ function widgetCard({id, iconSvg, iconColor, label, value, lines, tooltip}){
 function emptyWidgetCard(id){
   const bgTint = DASHBOARD_WIDGET_COLORS[id] || 'var(--panel-raised)';
   const bgStyle = bgTint.startsWith('#') ? `${bgTint}1A` : bgTint;
-  return `<div class="drag-node" style="flex:1;min-width:150px;min-height:124px;background:${bgStyle};border:1.5px dashed ${widgetBorder(id)};border-radius:12px;padding:14px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;cursor:grab;" draggable="true" data-widget-drag="${id}">
+  return `<div class="drag-node" style="flex:1;min-width:150px;min-height:132px;background:${bgStyle};border:1.5px dashed ${widgetBorder(id)};border-radius:12px;padding:14px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;cursor:grab;" draggable="true" data-widget-drag="${id}">
     <span class="muted" style="font-size:12px;">+ empty</span>
   </div>`;
 }
@@ -1657,7 +1672,7 @@ function renderWorkstreamWidgets(m){
         : 'No active reminders';
       const bg = `${DASHBOARD_WIDGET_COLORS.wg_reminders}1A`;
       return `
-        <div class="drag-node" style="position:relative;flex:1;min-width:150px;background:${bg};border:1.5px solid ${widgetBorder('wg_reminders')};border-radius:12px;padding:14px;padding-bottom:22px;cursor:grab;" draggable="true" data-widget-drag="wg_reminders" data-widget-navigate="h_reminders" title="${tooltip.replace(/"/g,'&quot;')}">
+        <div class="drag-node" style="position:relative;flex:1;min-width:150px;min-height:132px;box-sizing:border-box;background:${bg};border:1.5px solid ${widgetBorder('wg_reminders')};border-radius:12px;padding:14px;padding-bottom:22px;cursor:grab;" draggable="true" data-widget-drag="wg_reminders" data-widget-navigate="h_reminders" title="${tooltip.replace(/"/g,'&quot;')}">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
             <div style="width:40px;height:40px;border-radius:50%;background:${DASHBOARD_WIDGET_COLORS.wg_reminders}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
               ${WIDGET_ICONS.bell(DASHBOARD_WIDGET_COLORS.wg_reminders)}
@@ -2490,9 +2505,9 @@ function renderFocusAreaHome(){
     if(f.id==='feat_workspace_search'){
       return `
       <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;" draggable="true" data-drag-node="${f.id}">
-        <div style="text-align:center;">
+        <div style="text-align:center;width:100%;">
           <div style="font-family:var(--f-display);font-size:22px;font-weight:600;margin-bottom:10px;">Workspace Search</div>
-          <div style="position:relative;max-width:280px;margin:0 auto;">
+          <div style="position:relative;max-width:420px;margin:0 auto;">
             <input type="text" id="workspaceSearchInput" autocomplete="off" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;text-align:center;">
             <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>
           </div>
@@ -6092,13 +6107,13 @@ function renderAdmin(){
     <h1 class="page-title" style="margin-bottom:20px;">Users, teams &amp; workstreams</h1>
     <div class="tabs">
       <button class="tab ${ui.adminTab==='users'?'active':''}" data-tab="users">Users</button>
-      <button class="tab ${ui.adminTab==='roles'?'active':''}" data-tab="roles">Roles</button>
+      <button class="tab ${ui.adminTab==='permRoles'?'active':''}" data-tab="permRoles">Roles</button>
       <button class="tab ${ui.adminTab==='teams'?'active':''}" data-tab="teams">Teams</button>
       <button class="tab ${ui.adminTab==='projects'?'active':''}" data-tab="projects">Workstreams</button>
       <button class="tab ${ui.adminTab==='settings'?'active':''}" data-tab="settings">Admin</button>
       <button class="tab ${ui.adminTab==='copilotAnalytics'?'active':''}" data-tab="copilotAnalytics">Copilot Analytics</button>
     </div>
-    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='roles' ? renderAdminRoles() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='settings' ? renderAdminSettings() : ui.adminTab==='copilotAnalytics' ? renderCopilotAnalytics() : renderAdminProjects()}
+    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='permRoles' ? renderAdminPermRoles() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='settings' ? renderAdminSettings() : ui.adminTab==='copilotAnalytics' ? renderCopilotAnalytics() : renderAdminProjects()}
   `;
 }
 
@@ -6124,7 +6139,7 @@ function renderAdminUsers(){
       </td>
       <td><button class="btn btn-sm" data-manage-node-access="${u.id}">Access</button></td>
       <td><div class="row-actions">
-        <button class="btn btn-sm" data-edit-role-title="${u.id}">Job title</button>
+        <button class="btn btn-sm" data-edit-user="${u.id}">Edit</button>
         ${isViewer ? `<button class="btn btn-sm" data-edit-access="${u.id}">Edit access</button>` : ''}
         ${u.phone ? `<a class="btn btn-sm" href="${waLink(u.phone, `Hi ${u.name.split(' ')[0]},`)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
         <button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button>
@@ -6300,20 +6315,43 @@ function renderCopilotAnalytics(){
   `;
 }
 
-function renderAdminRoles(){
-  const rows = state.roles.map(r=>{
-    const count = state.users.filter(u=>u.roleTitleId===r.id).length;
-    return `<tr><td>${r.name}</td><td class="mono" style="font-size:12px;">${count} user${count===1?'':'s'}</td><td><div class="row-actions"><button class="btn btn-sm btn-danger" data-del-role="${r.id}">Remove</button></div></td></tr>`;
+// The real, system-defined permission roles — Admin, HOD, Member, Viewer. These
+// control what a person can actually do and see throughout the app, unlike Job
+// Titles (which are just a label). Shown here as an honest reference for now,
+// with real counts and real descriptions of current behavior — not yet editable,
+// since these four are still hardcoded into how access works everywhere in the
+// app. Assigning specific features/permissions per role is a real next step, just
+// not built yet — this page is deliberately honest about that rather than
+// offering controls that wouldn't actually do anything.
+function renderAdminPermRoles(){
+  const ROLE_INFO = [
+    { id:'admin', name:'Admin', desc:'Full access to everything — every workstream, all settings, user/team/role management, Appraisal, the employee directory, and Copilot Analytics.' },
+    { id:'hod', name:'HOD', desc:"Monitors a team's work rather than being assigned tasks directly — sees the full Active Assignments view (not just their own row), and can still be assigned a task if needed. Excluded from the Team Capacity widget's occupied/free count, since counting them would misrepresent who actually has spare capacity." },
+    { id:'member', name:'Member', desc:"Assigned to a team, works on tasks directly. Sees only their own row on Active Assignments, and only the workstreams they (or their team) actually have a task in." },
+    { id:'viewer', name:'Viewer', desc:'Read-only — never assigned tasks. Sees specific workstreams (or all of them) exactly as an admin has granted, and can optionally be given visibility into Active Assignments.' },
+  ];
+  const rows = ROLE_INFO.map(r=>{
+    const count = state.users.filter(u=>u.role===r.id).length;
+    return `
+    <div class="card" style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <div style="font-size:15px;font-weight:600;">${r.name}</div>
+        <div class="mono muted" style="font-size:12px;">${count} user${count===1?'':'s'}</div>
+      </div>
+      <div class="muted" style="font-size:13px;margin-top:6px;line-height:1.5;">${r.desc}</div>
+    </div>`;
   }).join('');
   return `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-        <div class="section-title" style="margin-bottom:0;">Job Titles</div>
-        <button class="btn btn-primary btn-sm" data-add-role>+ Create job title</button>
+    <div style="margin-bottom:14px;">
+      <div class="section-title" style="margin-bottom:4px;">Roles</div>
+      <div class="muted" style="font-size:12px;">
+        These are the real permission roles the app uses — not editable yet, since all four are currently
+        built directly into how access works throughout the app. The plan to assign specific features and
+        functions per role is a real next step, just not built yet — this page will grow into that once it is.
       </div>
-      <table><thead><tr><th>Job Title</th><th>Users</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="empty-state">No job titles yet.</td></tr>`}</tbody></table>
-      <div class="footnote">Assigned to each person the same way Teams are — pick one when creating a user, or change it later from their row.</div>
-    </div>`;
+    </div>
+    ${rows}
+  `;
 }
 
 function renderAdminTeams(){
@@ -6466,19 +6504,8 @@ function bindAdmin(){
 
   const addTeam = document.querySelector('[data-add-team]');
   if(addTeam) addTeam.addEventListener('click', openAddTeamModal);
-  const addRole = document.querySelector('[data-add-role]');
-  if(addRole) addRole.addEventListener('click', openAddRoleModal);
-  document.querySelectorAll('[data-edit-role-title]').forEach(b=>b.addEventListener('click', ()=>{
-    openEditRoleTitleModal(b.dataset.editRoleTitle);
-  }));
-  document.querySelectorAll('[data-del-role]').forEach(b=>b.addEventListener('click', ()=>{
-    const r = state.roles.find(x=>x.id===b.dataset.delRole);
-    const name = r ? r.name : 'this job title';
-    openConfirmDelete('Remove this job title?', `This will permanently remove "${name}". Anyone assigned to it will become unassigned. This can't be undone.`, ()=>{
-      state.roles = state.roles.filter(x=>x.id!==b.dataset.delRole);
-      state.users.forEach(u=>{ if(u.roleTitleId===b.dataset.delRole) u.roleTitleId=null; });
-      persist(); render();
-    }, 'Remove');
+  document.querySelectorAll('[data-edit-user]').forEach(b=>b.addEventListener('click', ()=>{
+    openEditUserModal(b.dataset.editUser);
   }));
   document.querySelectorAll('[data-del-team]').forEach(b=>b.addEventListener('click', ()=>{
     const tm = state.teams.find(x=>x.id===b.dataset.delTeam);
@@ -6659,12 +6686,7 @@ function openAddUserModal(){
         <form id="userForm">
           <div class="field"><label>Full name</label><input id="uName" required></div>
           <div class="field"><label>Employee ID (optional)</label><input id="uEmployeeId" placeholder="e.g. EMP-1042"></div>
-          <div class="field"><label>Job title (optional)</label>
-            <select id="uJobTitle">
-              <option value="">None</option>
-              ${state.roles.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}
-            </select>
-          </div>
+          <div class="field"><label>Job title (optional)</label><input id="uJobTitle" placeholder="e.g. Software Developer"></div>
           <div class="field"><label>Responsibilities (optional)</label>
             <input id="uResponsibilities" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
             <div class="hint">Separate each one with a semicolon (;). Workspace CoPilot can answer "who's responsible for X" from this.</div>
@@ -6718,7 +6740,7 @@ function openAddUserModal(){
     const isViewer = roleSel.value==='viewer';
     const responsibilitiesRaw = document.getElementById('uResponsibilities').value.trim();
     const responsibilities = responsibilitiesRaw ? responsibilitiesRaw.split(';').map(s=>s.trim()).filter(Boolean) : [];
-    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null), roleTitleId: document.getElementById('uJobTitle').value || null, responsibilities };
+    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null), jobTitle: document.getElementById('uJobTitle').value.trim(), responsibilities };
     if(isViewer){
       u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
       u.viewerCanSeeAssignments = document.getElementById('uCanSeeAssignments').checked;
@@ -6934,61 +6956,40 @@ function openChangePasswordModal(userId){
   });
 }
 
-function openEditRoleTitleModal(userId){
+function openEditUserModal(userId){
   if(!isAdmin()) return;
   const u = state.users.find(x=>x.id===userId);
   if(!u) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
-        <h3>${u.name} — job title &amp; responsibilities</h3>
-        <form id="roleTitleForm">
-          <div class="field"><label>Job title</label>
-            <select id="ertJobTitle">
-              <option value="">None</option>
-              ${state.roles.map(r=>`<option value="${r.id}" ${u.roleTitleId===r.id?'selected':''}>${r.name}</option>`).join('')}
-            </select>
-          </div>
-          <div class="field"><label>Responsibilities</label>
-            <input id="ertResponsibilities" value="${(u.responsibilities||[]).join('; ').replace(/"/g,'&quot;')}" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
+        <h3>Edit ${u.name}</h3>
+        <form id="editUserForm">
+          <div class="field"><label>Full name</label><input id="euName" value="${u.name.replace(/"/g,'&quot;')}" required></div>
+          <div class="field"><label>Employee ID (optional)</label><input id="euEmployeeId" value="${(u.employeeId||'').replace(/"/g,'&quot;')}" placeholder="e.g. EMP-1042"></div>
+          <div class="field"><label>WhatsApp number (optional)</label><input id="euPhone" value="${(u.phone||'').replace(/"/g,'&quot;')}" placeholder="e.g. +1 555 123 4567"></div>
+          <div class="field"><label>Job title (optional)</label><input id="euJobTitle" value="${(u.jobTitle||'').replace(/"/g,'&quot;')}" placeholder="e.g. Software Developer"></div>
+          <div class="field"><label>Responsibilities (optional)</label>
+            <input id="euResponsibilities" value="${(u.responsibilities||[]).join('; ').replace(/"/g,'&quot;')}" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
             <div class="hint">Separate each one with a semicolon (;). Workspace CoPilot can answer "who's responsible for X" from this.</div>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
-            <button type="button" id="roleTitleSubmitBtn" class="btn btn-primary">Save</button>
+            <button type="button" id="editUserSubmitBtn" class="btn btn-primary">Save</button>
           </div>
         </form>
       </div>
     </div>`;
   bindModalClose();
-  runOnClickAndEnter('roleTitleForm', 'roleTitleSubmitBtn', ()=>{
-    const raw = document.getElementById('ertResponsibilities').value.trim();
-    u.roleTitleId = document.getElementById('ertJobTitle').value || null;
-    u.responsibilities = raw ? raw.split(';').map(s=>s.trim()).filter(Boolean) : [];
-    persist(); closeModal(); render();
-  });
-}
-
-function openAddRoleModal(){
-  if(!isAdmin()) return;
-  document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-backdrop" data-backdrop>
-      <div class="modal">
-        <h3>Create job title</h3>
-        <form id="roleForm">
-          <div class="field"><label>Job title</label><input id="rName" required placeholder="e.g. Software Developer"></div>
-          <div class="modal-actions">
-            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
-            <button type="button" id="roleSubmitBtn" class="btn btn-primary">Create</button>
-          </div>
-        </form>
-      </div>
-    </div>`;
-  bindModalClose();
-  runOnClickAndEnter('roleForm', 'roleSubmitBtn', ()=>{
-    const nameEl = document.getElementById('rName');
+  runOnClickAndEnter('editUserForm', 'editUserSubmitBtn', ()=>{
+    const nameEl = document.getElementById('euName');
     if(!nameEl.value.trim()){ nameEl.focus(); return; }
-    state.roles.push({ id: uid('role'), name: nameEl.value.trim() });
+    const raw = document.getElementById('euResponsibilities').value.trim();
+    u.name = nameEl.value.trim();
+    u.employeeId = document.getElementById('euEmployeeId').value.trim();
+    u.phone = document.getElementById('euPhone').value.trim();
+    u.jobTitle = document.getElementById('euJobTitle').value.trim();
+    u.responsibilities = raw ? raw.split(';').map(s=>s.trim()).filter(Boolean) : [];
     persist(); closeModal(); render();
   });
 }

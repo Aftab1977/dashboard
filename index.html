@@ -159,20 +159,20 @@
 
   /* ---------- buttons ---------- */
   .btn{
-    display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:7px;
+    display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:9px;
     border:1px solid var(--line);background:var(--panel-raised);color:var(--paper);
     font-size:13px;font-weight:600;transition:all .15s ease;
   }
   .btn:hover{background:var(--panel-hi);border-color:var(--paper-faint);}
   .btn-primary{background:var(--paper);color:var(--ink);border-color:var(--paper);}
   .btn-primary:hover{background:#fff;}
-  [data-theme="light"] .btn-primary{background:var(--amber);color:#fff;border-color:var(--amber);}
+  [data-theme="light"] .btn-primary{background:var(--amber);color:#fff;border-color:var(--amber);box-shadow:0 2px 8px var(--amber-glow);}
   [data-theme="light"] .btn-primary:hover{background:#2857BB;}
   .btn-danger{background:var(--red-soft);color:var(--red);border-color:rgba(221,81,71,.35);}
   .btn-danger:hover{background:rgba(221,81,71,.22);}
   .btn-ghost{background:transparent;border-color:transparent;color:var(--paper-dim);}
   .btn-ghost:hover{color:var(--paper);background:var(--panel-raised);}
-  .btn-sm{padding:6px 11px;font-size:12px;border-radius:6px;}
+  .btn-sm{padding:6px 11px;font-size:12px;border-radius:7px;}
   .btn:disabled{opacity:.4;cursor:not-allowed;}
 
   /* ---------- cards & grids ---------- */
@@ -300,11 +300,14 @@
   .gauge .gfrac{font-family:var(--f-mono);font-size:10px;color:var(--paper-dim);}
 
   /* ---------- table ---------- */
-  table{width:100%;border-collapse:collapse;font-size:13px;}
+  table{width:100%;border-collapse:separate;border-spacing:0 6px;font-size:13px;}
   thead th{
-    text-align:left;font-family:var(--f-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;
-    color:var(--paper-faint);padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;
+    text-align:left;font-family:var(--f-mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+    color:#fff;background:var(--amber);padding:10px 12px;font-weight:700;border:none;
   }
+  thead th:first-child{border-radius:8px 0 0 8px;}
+  thead th:last-child{border-radius:0 8px 8px 0;}
+  thead tr th:only-child{border-radius:8px;}
   tbody td{padding:12px;border-bottom:1px solid var(--line-soft);vertical-align:middle;}
   tbody tr:hover{background:var(--panel-raised);}
   .task-title{font-weight:600;}
@@ -322,25 +325,29 @@
     display:flex;align-items:center;justify-content:center;z-index:50;padding:20px;
   }
   .modal{
-    background:var(--panel);border:1px solid var(--line);border-radius:14px;
-    width:100%;max-width:480px;max-height:88vh;overflow-y:auto;padding:24px;
+    background:var(--panel);border:1px solid rgba(30,35,60,.07);border-radius:16px;
+    width:100%;max-width:480px;max-height:88vh;overflow-y:auto;padding:26px;
+    box-shadow:0 2px 4px rgba(30,35,60,.06), 0 12px 32px rgba(30,35,60,.12);
   }
-  .modal h3{font-size:22px;margin-bottom:4px;}
-  .modal .modal-sub{color:var(--paper-dim);font-size:12px;margin-bottom:18px;}
-  .field{margin-bottom:14px;}
+  .modal h3{font-size:22px;margin-bottom:6px;}
+  .modal .modal-sub{color:var(--paper-dim);font-size:12px;margin-bottom:20px;}
+  .field{margin-bottom:16px;}
   .field label{display:block;font-family:var(--f-mono);font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--paper-faint);margin-bottom:6px;}
   .field input,.field select,.field textarea{
-    width:100%;background:var(--ink);border:1px solid var(--line);border-radius:7px;
-    padding:9px 11px;color:var(--paper);font-size:13px;
+    width:100%;background:var(--ink);border:1.5px solid rgba(30,35,60,.1);border-radius:9px;
+    padding:10px 13px;color:var(--paper);font-size:13px;transition:border-color .15s ease,box-shadow .15s ease;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{
+    outline:none;border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-glow);
   }
   .field textarea{resize:vertical;min-height:64px;font-family:var(--f-body);}
   .field input:disabled{opacity:.5;}
   .field-row{display:flex;gap:10px;}
   .field-row .field{flex:1;}
-  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;}
   .hint{font-size:11px;color:var(--paper-faint);margin-top:4px;}
   .credential-box{
-    background:var(--ink);border:1px dashed var(--paper-faint);border-radius:8px;padding:14px;
+    background:var(--ink);border:1px dashed var(--paper-faint);border-radius:9px;padding:14px;
     font-family:var(--f-mono);font-size:13px;margin-top:6px;display:flex;justify-content:space-between;align-items:center;
   }
 
@@ -488,24 +495,28 @@
   .ci-text{font-size:13px;color:var(--paper-dim);line-height:1.6;}
   .ci-link{font-size:13px;color:var(--amber);text-decoration:none;}
   .ci-link:hover{text-decoration:underline;}
-  .att-wrap{overflow-x:auto;border:1px solid #000;}
-  /* Shared grid/table convention — reuse this exact pattern (.att-table plus these
-     cell classes) for any future table-style feature, so font and alignment stay
-     consistent everywhere: one font family, one size, one color, everything centered
-     including headers/titles. */
-  .att-table{border-collapse:collapse;font-family:var(--f-mono);font-size:11px;background:#fff;width:100%;table-layout:auto;}
-  .att-table th, .att-table td{border:1px solid #000;padding:0;text-align:center;background:#fff;color:#000;font-family:var(--f-mono);font-size:11px;}
-  .att-name-col{position:sticky;left:0;z-index:2;background:#fff;text-align:center;padding:10px 12px !important;font-family:var(--f-mono);font-size:11px;color:#000;font-weight:700;white-space:nowrap;}
-  .att-daycol{padding:6px 0;color:#000;font-weight:700;min-width:24px;font-family:var(--f-mono);font-size:11px;text-align:center;}
-  .att-weekend-col{background:#fff;}
-  .att-name{position:sticky;left:0;z-index:1;background:#fff;text-align:center;padding:8px 12px !important;font-family:var(--f-mono);font-size:11px;color:#000;font-weight:600;border-right:1px solid #000;white-space:nowrap;}
-  .att-cell{width:24px;height:26px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;}
-  .att-cell.att-weekend{background:#fff;color:#000;}
+  /* Shared grid/table convention, redesigned: rounded, colored pill headers and
+     row labels (our own theme color, not a hard black border), real spacing
+     between every cell instead of a collapsed grid, and zebra-striped rows for
+     readability at a glance. Reused by both Attendance and Appraisal so both
+     get this treatment consistently from one shared set of rules. */
+  .att-wrap{overflow-x:auto;padding:2px;}
+  .att-table{border-collapse:separate;border-spacing:4px 6px;font-family:var(--f-mono);font-size:11px;width:100%;table-layout:auto;}
+  .att-table th{background:var(--amber);color:#fff;font-weight:700;padding:10px 14px;border-radius:8px;white-space:nowrap;}
+  .att-table td{padding:9px 14px;text-align:center;background:var(--panel-raised);color:var(--paper);font-family:var(--f-mono);font-size:11px;border-radius:8px;}
+  .att-table tbody tr:nth-child(even) td{background:var(--panel-hi);}
+  .att-name-col{position:sticky;left:0;z-index:2;text-align:center;font-family:var(--f-mono);font-size:11px;white-space:nowrap;}
+  .att-daycol{min-width:26px;text-align:center;padding:10px 4px;}
+  .att-weekend-col{background:var(--amber-glow) !important;}
+  .att-name{position:sticky;left:0;z-index:1;background:var(--amber) !important;color:#fff !important;text-align:center;font-weight:700;white-space:nowrap;border-radius:8px;}
+  .att-cell{width:26px;height:28px;text-align:center;}
+  .att-cell.att-weekend{background:rgba(0,96,191,.07) !important;}
   .att-cell.att-clickable{cursor:pointer;}
-  .att-cell.att-clickable:hover{outline:1px solid #000;outline-offset:-1px;}
-  .appraisal-cell{padding:10px 12px !important;text-align:center;color:#000;font-family:var(--f-mono);font-size:11px;}
+  .att-cell.att-clickable:hover{outline:1.5px solid var(--amber);outline-offset:-1.5px;}
+  .appraisal-cell{text-align:center;font-family:var(--f-mono);font-size:11px;}
   .appraisal-overdue{color:var(--red) !important;font-weight:600;}
-  tr[data-appraisal-row]:hover .att-name, tr[data-appraisal-row]:hover .appraisal-cell{background:#F0F0F0;}
+  tr[data-appraisal-row]:hover .att-name{background:var(--amber) !important;filter:brightness(1.1);}
+  tr[data-appraisal-row]:hover .appraisal-cell{background:var(--amber-soft) !important;}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
 <script>
@@ -556,6 +567,18 @@ const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','w
 // plain-language explanation of what it shows and how — used both for the small
 // label inside each widget and the fuller listing on My Account, so the two never
 // drift out of sync with each other.
+// The real, system-defined permission roles — single source of truth for both
+// the Roles admin page and every role dropdown in Users, so a role only ever
+// needs describing in one place. Admin is deliberately excluded from
+// USER_ASSIGNABLE_ROLES below — it's a protected role, never handed out through
+// the normal create/edit-user flow.
+const ROLE_INFO = [
+  { id:'admin', name:'Admin', short:'full access to everything', desc:'Full access to everything — every workstream, all settings, user/team/role management, Appraisal, the employee directory, and Copilot Analytics.' },
+  { id:'hod', name:'HOD', short:"monitors a team's work, not usually assigned tasks directly", desc:"Monitors a team's work rather than being assigned tasks directly — sees the full Active Assignments view (not just their own row), and can still be assigned a task if needed. Excluded from the Team Capacity widget's occupied/free count, since counting them would misrepresent who actually has spare capacity." },
+  { id:'member', name:'Member', short:'assigned to a team, works on tasks', desc:"Assigned to a team, works on tasks directly. Sees only their own row on Active Assignments, and only the workstreams they (or their team) actually have a task in." },
+  { id:'viewer', name:'Viewer', short:'read-only, no task assignments', desc:'Read-only — never assigned tasks. Sees specific workstreams (or all of them) exactly as an admin has granted, and can optionally be given visibility into Active Assignments.' },
+];
+const USER_ASSIGNABLE_ROLES = ROLE_INFO.filter(r=>r.id!=='admin');
 const DASHBOARD_WIDGET_META = {
   wg_active: { label:'Active Workstreams', module:'Workstreams', moduleId:'feat_workstream',
     description:'Shows how many of your visible, active workstreams there are right now, plus the average time it takes a workstream to go from open to closed, and whether that average is trending up or down compared to last quarter.' },
@@ -3005,7 +3028,7 @@ function renderAttendanceSheet(node){
       const cls = `att-cell${weekend?' att-weekend':''}${admin?' att-clickable':''}`;
       return `<td class="${cls}" style="${style}"${clickAttr}>${label}</td>`;
     }).join('');
-    return `<tr><td style="padding:8px 6px;width:70px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
+    return `<tr><td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
   }).join('');
 
   const legend = Object.entries(ATT_STATUS).map(([code,v])=>
@@ -3027,7 +3050,7 @@ function renderAttendanceSheet(node){
 
     <div class="att-wrap">
       <table class="att-table">
-        <thead><tr><th style="padding:8px 6px;width:70px;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
+        <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
         <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
@@ -3177,7 +3200,7 @@ function renderAppraisalSheet(node){
       : '';
     return `
       <tr data-appraisal-row="${u.id}" style="cursor:pointer;">
-        <td style="padding:8px 6px;width:70px;color:#000;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">${u.employeeId||''}</td>
+        <td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td>
         <td class="att-name">${u.name}</td>
         <td class="appraisal-cell">${rec.designation||''}</td>
         <td class="appraisal-cell mono">${rec.doj?fmtDate(rec.doj):''}</td>
@@ -3197,7 +3220,7 @@ function renderAppraisalSheet(node){
     <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>
     <div class="att-wrap">
       <table class="att-table" style="font-size:12px;">
-        <thead><tr><th style="padding:8px 6px;width:70px;font-family:var(--f-mono);font-size:11px;text-align:center;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
+        <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
         <tbody>${bodyRows || `<tr><td colspan="${cols.length+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
@@ -6127,8 +6150,7 @@ function renderAdminUsers(){
       <td class="mono" style="font-size:12px;">${u.username}</td>
       <td>${isViewer ? pill('amber','Viewer') : `
         <select data-user-role="${u.id}">
-          <option value="member" ${u.role==='member'?'selected':''}>Member</option>
-          <option value="hod" ${u.role==='hod'?'selected':''}>HOD</option>
+          ${USER_ASSIGNABLE_ROLES.filter(r=>r.id!=='viewer').map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${r.name}</option>`).join('')}
         </select>`}</td>
       <td>
         ${isViewer ? `<span class="mono" style="font-size:12px;">${accessLabel}</span>` : `
@@ -6324,12 +6346,6 @@ function renderCopilotAnalytics(){
 // not built yet — this page is deliberately honest about that rather than
 // offering controls that wouldn't actually do anything.
 function renderAdminPermRoles(){
-  const ROLE_INFO = [
-    { id:'admin', name:'Admin', desc:'Full access to everything — every workstream, all settings, user/team/role management, Appraisal, the employee directory, and Copilot Analytics.' },
-    { id:'hod', name:'HOD', desc:"Monitors a team's work rather than being assigned tasks directly — sees the full Active Assignments view (not just their own row), and can still be assigned a task if needed. Excluded from the Team Capacity widget's occupied/free count, since counting them would misrepresent who actually has spare capacity." },
-    { id:'member', name:'Member', desc:"Assigned to a team, works on tasks directly. Sees only their own row on Active Assignments, and only the workstreams they (or their team) actually have a task in." },
-    { id:'viewer', name:'Viewer', desc:'Read-only — never assigned tasks. Sees specific workstreams (or all of them) exactly as an admin has granted, and can optionally be given visibility into Active Assignments.' },
-  ];
   const rows = ROLE_INFO.map(r=>{
     const count = state.users.filter(u=>u.role===r.id).length;
     return `
@@ -6695,9 +6711,7 @@ function openAddUserModal(){
           <div class="field"><label>Username</label><input id="uUsername" required></div>
           <div class="field"><label>Role</label>
             <select id="uRole">
-              <option value="member">Member — assigned to a team, works on tasks</option>
-              <option value="hod">HOD — monitors a team's work, not usually assigned tasks directly</option>
-              <option value="viewer">Viewer — read-only, no task assignments</option>
+              ${USER_ASSIGNABLE_ROLES.map(r=>`<option value="${r.id}">${r.name} — ${r.short}</option>`).join('')}
             </select>
           </div>
           <div class="field" id="uTeamField"><label>Team</label><select id="uTeam"><option value="">Unassigned</option>${state.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div>
@@ -6740,7 +6754,7 @@ function openAddUserModal(){
     const isViewer = roleSel.value==='viewer';
     const responsibilitiesRaw = document.getElementById('uResponsibilities').value.trim();
     const responsibilities = responsibilitiesRaw ? responsibilitiesRaw.split(';').map(s=>s.trim()).filter(Boolean) : [];
-    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: isViewer?'viewer':'member', teamId: isViewer ? null : (document.getElementById('uTeam').value || null), jobTitle: document.getElementById('uJobTitle').value.trim(), responsibilities };
+    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: roleSel.value, teamId: isViewer ? null : (document.getElementById('uTeam').value || null), jobTitle: document.getElementById('uJobTitle').value.trim(), responsibilities };
     if(isViewer){
       u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
       u.viewerCanSeeAssignments = document.getElementById('uCanSeeAssignments').checked;

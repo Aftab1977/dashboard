@@ -2528,9 +2528,9 @@ function renderFocusAreaHome(){
     if(f.id==='feat_workspace_search'){
       return `
       <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;border-left:4px solid var(--amber);" draggable="true" data-drag-node="${f.id}">
-        <div style="text-align:center;width:100%;">
-          <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Workspace Search</div>
-          <div style="position:relative;max-width:420px;margin:0 auto;">
+        <div style="text-align:left;width:100%;">
+          <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Workspace Search</div>
+          <div style="position:relative;max-width:420px;margin:0;">
             <input type="text" id="workspaceSearchInput" autocomplete="off" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;text-align:center;">
             <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>
           </div>
@@ -2542,10 +2542,10 @@ function renderFocusAreaHome(){
     const defaultText = isSystem ? (f.systemView==='portfolio' ? 'All workstreams and their timelines' : f.systemView==='assignments' ? 'Who is working on what, and until when' : 'Delay history and patterns') : (childCount ? `${childCount} item${childCount===1?'':'s'}` : '');
     const subtitle = f.description ? f.description : defaultText;
     return `
-    <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-left:4px solid var(--amber);" data-open-feature="${f.id}" draggable="true" data-drag-node="${f.id}">
-      <div style="display:flex;justify-content:center;align-items:center;gap:12px;position:relative;">
-        <div style="text-align:center;">
-          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">${f.name}</div>
+    <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:flex-start;cursor:pointer;border-left:4px solid var(--amber);" data-open-feature="${f.id}" draggable="true" data-drag-node="${f.id}">
+      <div style="display:flex;justify-content:flex-start;align-items:center;gap:12px;position:relative;width:100%;">
+        <div style="text-align:left;">
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">${f.name}</div>
           <div class="muted" style="font-size:12px;margin-top:2px;">${subtitle || '<span style="color:var(--paper-faint);">No description yet</span>'}</div>
         </div>
         ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description" style="position:absolute;right:0;top:50%;transform:translateY(-50%);">✎</button>` : ''}

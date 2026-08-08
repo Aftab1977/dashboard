@@ -944,7 +944,7 @@ function seedState(){
   const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent');
   const userAccess = {};
   users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
-  return { teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {}, reminders: [], roles: [] };
+  return normalizeState({ teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {}, reminders: [], roles: [] });
 }
 
 function withTimeout(promise, ms){
@@ -2527,9 +2527,9 @@ function renderFocusAreaHome(){
   const featureBoxes = roots.map(f=>{
     if(f.id==='feat_workspace_search'){
       return `
-      <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;" draggable="true" data-drag-node="${f.id}">
+      <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;border-left:4px solid var(--amber);" draggable="true" data-drag-node="${f.id}">
         <div style="text-align:center;width:100%;">
-          <div style="font-family:var(--f-display);font-size:22px;font-weight:600;margin-bottom:10px;">Workspace Search</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Workspace Search</div>
           <div style="position:relative;max-width:420px;margin:0 auto;">
             <input type="text" id="workspaceSearchInput" autocomplete="off" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;text-align:center;">
             <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>
@@ -2542,10 +2542,10 @@ function renderFocusAreaHome(){
     const defaultText = isSystem ? (f.systemView==='portfolio' ? 'All workstreams and their timelines' : f.systemView==='assignments' ? 'Who is working on what, and until when' : 'Delay history and patterns') : (childCount ? `${childCount} item${childCount===1?'':'s'}` : '');
     const subtitle = f.description ? f.description : defaultText;
     return `
-    <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;cursor:pointer;" data-open-feature="${f.id}" draggable="true" data-drag-node="${f.id}">
+    <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-left:4px solid var(--amber);" data-open-feature="${f.id}" draggable="true" data-drag-node="${f.id}">
       <div style="display:flex;justify-content:center;align-items:center;gap:12px;position:relative;">
         <div style="text-align:center;">
-          <div style="font-family:var(--f-display);font-size:22px;font-weight:600;">${f.name}</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">${f.name}</div>
           <div class="muted" style="font-size:12px;margin-top:2px;">${subtitle || '<span style="color:var(--paper-faint);">No description yet</span>'}</div>
         </div>
         ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description" style="position:absolute;right:0;top:50%;transform:translateY(-50%);">✎</button>` : ''}
@@ -3520,7 +3520,7 @@ function renderSummaryCalendar(node){
 
   return `
     <div class="eyebrow">Summary Calendar</div>
-    <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
+    <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">${node.name}</h1>
     <div class="hint" style="margin-bottom:14px;">Click a highlighted date to see the summary that appeared that day.</div>
     <div class="sumcal-grid">
       ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="sumcal-dow">${d}</div>`).join('')}
@@ -3588,13 +3588,13 @@ function renderHeadingBox(h, showHandle){
   const subtitle = h.description ? h.description : (label || (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet'));
   const handle = (showHandle && isAdmin()) ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : '';
   return `
-    <div class="card drag-node" style="margin-bottom:14px;" ${isAdmin()?`draggable="true" data-drag-node="${h.id}"`:''}>
+    <div class="card drag-node" style="margin-bottom:14px;border-left:4px solid var(--amber);" ${isAdmin()?`draggable="true" data-drag-node="${h.id}"`:''}>
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
           ${handle}
           <div>
-            <div class="heading-name">${h.name}</div>
-            <div class="muted" style="font-size:12px;margin-top:2px;">${subtitle}</div>
+            <div class="heading-name" style="display:inline-block;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${h.name}</div>
+            <div class="muted" style="font-size:12px;margin-top:6px;">${subtitle}</div>
           </div>
         </div>
         ${isAdmin() ? `<div style="display:flex;gap:8px;">
@@ -3610,11 +3610,11 @@ function renderHeadingBox(h, showHandle){
 function renderSubHeadingCollapsible(h, depth){
   if(h.specialView){
     return `
-    <div class="card drag-node" style="margin-bottom:14px;margin-left:${depth*20}px;">
+    <div class="card drag-node" style="margin-bottom:14px;margin-left:${depth*20}px;border-left:4px solid var(--amber);">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;">
-          <div class="heading-name">${h.name}</div>
-          <div class="muted" style="font-size:12px;margin-top:2px;">${h.description || 'Click to open'}</div>
+          <div class="heading-name" style="display:inline-block;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${h.name}</div>
+          <div class="muted" style="font-size:12px;margin-top:6px;">${h.description || 'Click to open'}</div>
         </div>
         ${isAdmin() ? `<button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>` : ''}
       </div>
@@ -3633,7 +3633,7 @@ function renderSubHeadingCollapsible(h, depth){
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <div data-toggle-heading="${h.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
           <span id="harrow-${h.id}" class="collapse-arrow">${forceOpen?'▾':'▸'}</span>
-          <div class="heading-name">${h.name}</div>
+          <div class="heading-name" style="display:inline-block;background:var(--amber);color:#fff;padding:5px 13px;border-radius:7px;font-size:13px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${h.name}</div>
         </div>
         ${isAdmin() ? `<div class="row-actions">
           <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
@@ -3668,7 +3668,7 @@ function renderHeadingPageBody(h){
     <div class="heading-card" style="margin-left:0;">
       <div data-toggle-heading="${h.id}_own" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
         <span id="harrow-${h.id}_own" class="collapse-arrow">${(ui.expandNodeIds||[]).includes(h.id)?'▾':'▸'}</span>
-        <div class="heading-name">Content</div>
+        <div class="heading-name" style="display:inline-block;background:var(--amber);color:#fff;padding:5px 13px;border-radius:7px;font-size:13px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">Content</div>
       </div>
       <div id="hcontent-${h.id}_own" class="hcontent${(ui.expandNodeIds||[]).includes(h.id)?'':' collapsed'}" style="margin-top:8px;">
         ${itemsHtml}
@@ -3698,7 +3698,7 @@ function renderFeatureNode(){
   if(node.nodeType==='heading' || node.nodeType==='subheading'){
     return `
       <div class="eyebrow">${node.nodeType==='heading'?'Heading':'Sub Heading'}</div>
-      <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
+      <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">${node.name}</h1>
       <div class="card">${renderHeadingPageBody(node)}</div>
     `;
   }
@@ -3711,13 +3711,13 @@ function renderFeatureNode(){
     const cnt = featureChildren(sf.id).length;
     const subtitle = sf.description ? sf.description : (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet');
     return `
-    <div class="card drag-node" style="margin-bottom:14px;" ${isAdmin()?`draggable="true" data-drag-node="${sf.id}"`:''}>
+    <div class="card drag-node" style="margin-bottom:14px;border-left:4px solid var(--amber);" ${isAdmin()?`draggable="true" data-drag-node="${sf.id}"`:''}>
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div data-open-feature="${sf.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
           ${isAdmin() ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : ''}
           <div>
-            <div style="font-family:var(--f-display);font-size:18px;font-weight:600;">${sf.name}</div>
-            <div class="muted" style="font-size:12px;">${subtitle}</div>
+            <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${sf.name}</div>
+            <div class="muted" style="font-size:12px;margin-top:6px;">${subtitle}</div>
           </div>
         </div>
         ${isAdmin() ? `<div style="display:flex;gap:8px;">
@@ -6069,44 +6069,59 @@ function renderMyAccount(){
   ];
   const widgetOrder = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
   const enabledSet = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
-  const widgetRows = widgetOrder.map(id=>{
+  const widgetCards = widgetOrder.map(id=>{
     const meta = DASHBOARD_WIDGET_META[id] || {};
     const isOn = enabledSet.has(id);
+    const color = DASHBOARD_WIDGET_COLORS[id] || 'var(--amber)';
     return `
-    <div class="drag-node" draggable="true" data-widget-drag="${id}" style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:14px 0;border-bottom:1px solid var(--line);cursor:grab;">
-      <div style="flex:1;">
-        <div style="font-size:14px;font-weight:600;color:var(--paper);">${meta.label || id}${meta.module ? ` <span class="muted" style="font-size:11px;font-weight:500;">— from ${meta.module}</span>` : ''}</div>
-        <div class="muted" style="font-size:12px;margin-top:3px;line-height:1.5;">${meta.description || ''}</div>
+    <div class="drag-node" draggable="true" data-widget-drag="${id}" style="flex:0 0 275px;width:275px;min-height:225px;display:flex;flex-direction:column;background:var(--panel);border:1px solid rgba(30,35,60,.16);border-radius:12px;box-shadow:var(--card-shadow);overflow:hidden;cursor:grab;">
+      <div style="height:4px;background:${color};flex-shrink:0;"></div>
+      <div style="padding:14px;display:flex;flex-direction:column;flex:1;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">
+          ${meta.module ? `<div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;"></span><span class="muted" style="font-size:11px;font-weight:600;">${meta.module}</span></div>` : `<span></span>`}
+          <label class="toggle-switch" style="flex-shrink:0;">
+            <input type="checkbox" data-widget-toggle="${id}" ${isOn?'checked':''}>
+            <div class="toggle-track"></div>
+          </label>
+        </div>
+        <div style="font-size:14.5px;font-weight:700;color:var(--paper);margin-bottom:6px;">${meta.label || id}</div>
+        <div class="muted" style="font-size:12px;line-height:1.55;">${meta.description || ''}</div>
       </div>
-      <label class="toggle-switch" style="flex-shrink:0;margin-top:2px;">
-        <input type="checkbox" data-widget-toggle="${id}" ${isOn?'checked':''}>
-        <div class="toggle-track"></div>
-      </label>
     </div>`;
   }).join('');
   return `
     <div class="eyebrow">My Account</div>
     <h1 class="page-title" style="margin-bottom:20px;">${cu ? cu.name : ''}</h1>
     <div class="card" style="margin-bottom:16px;">
-      <div class="section-title" style="margin-bottom:4px;">Theme</div>
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Theme</div>
       <div class="muted" style="font-size:12px;margin-bottom:14px;">Choose how the workspace looks for you — this is personal and only changes what you see.</div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        ${themes.map(t=>`
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;border:1px solid ${current===t.id?'var(--amber-border)':'var(--line)'};border-radius:8px;padding:10px 16px;cursor:pointer;${current===t.id?'background:var(--amber-soft);':''}">
-            <input type="radio" name="themeChoice" value="${t.id}" ${current===t.id?'checked':''}>
-            <div><div style="font-weight:600;color:var(--paper);">${t.name}</div><div class="muted" style="font-size:11px;">${t.desc}</div></div>
-          </label>`).join('')}
+      <div style="display:flex;gap:14px;flex-wrap:wrap;">
+        ${themes.map(t=>{
+          const tColor = t.id==='dark' ? '#3D4451' : 'var(--amber)';
+          const isSelected = current===t.id;
+          return `
+          <label style="flex:0 0 275px;width:275px;min-height:112px;display:flex;flex-direction:column;background:var(--panel);border:1px solid ${isSelected?tColor:'rgba(30,35,60,.16)'};border-radius:12px;box-shadow:var(--card-shadow);overflow:hidden;cursor:pointer;text-transform:none;letter-spacing:normal;">
+            <div style="height:4px;background:${tColor};flex-shrink:0;"></div>
+            <div style="padding:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex:1;">
+              <div>
+                <div style="font-size:14.5px;font-weight:700;color:var(--paper);margin-bottom:6px;">${t.name}</div>
+                <div class="muted" style="font-size:12px;line-height:1.55;">${t.desc}</div>
+              </div>
+              <input type="radio" name="themeChoice" value="${t.id}" ${isSelected?'checked':''} style="flex-shrink:0;margin-top:2px;width:16px;height:16px;accent-color:${tColor};">
+            </div>
+          </label>`;
+        }).join('')}
       </div>
     </div>
     <div class="card">
-      <div class="section-title" style="margin-bottom:4px;">Widgets</div>
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Widgets</div>
       <div class="muted" style="font-size:12px;margin-bottom:14px;">
         These appear on your Workspace Dashboard, on the Focus Area page. Turn any of them on or off — this only
         affects what you see, not anyone else. Drag a row to reorder it; your dashboard will match. Currently 10
         exist; as more get built, admins will choose which ones are on by default for anyone who hasn't customized
         their own set yet.
       </div>
-      ${widgetRows}
+      <div style="display:flex;flex-wrap:wrap;gap:14px;">${widgetCards}</div>
     </div>
   `;
 }
@@ -6200,29 +6215,29 @@ function renderAdminUsers(){
 function renderAdminSettings(){
   const admin = currentUser();
   return `
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <div class="section-title" style="margin-bottom:2px;">Your account</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Your account</div>
           <div class="muted" style="font-size:12px;">${admin ? admin.name+' · '+admin.username : ''}</div>
         </div>
         <button class="btn btn-sm" data-change-password="${admin?admin.id:''}">Change my password</button>
       </div>
     </div>
     ${(HAS_CLAUDE_STORAGE && !supaClient) ? `
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <div class="section-title" style="margin-bottom:2px;">Data recovery</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Data recovery</div>
           <div class="muted" style="font-size:12px;">Check for data stranded in an older storage location and load it in.</div>
         </div>
         <button class="btn btn-sm" id="recoverLegacyBtn">Check for legacy data</button>
       </div>
     </div>` : ''}
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
         <div>
-          <div class="section-title" style="margin-bottom:2px;">Login page logo</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Login page logo</div>
           <div class="muted" style="font-size:12px;">Shows above the title on the sign-in page, for everyone. Best as a wide rectangle — it'll be scaled to fit.</div>
           ${state.settings && state.settings.logoUrl ? `<div style="margin-top:10px;"><img src="${state.settings.logoUrl}" alt="Current logo" style="max-width:180px;max-height:60px;object-fit:contain;border:1px solid var(--line);border-radius:6px;padding:6px;background:#fff;"></div>` : ''}
         </div>
@@ -6234,10 +6249,10 @@ function renderAdminSettings(){
       </div>
       <div class="login-error" id="logoUploadError"></div>
     </div>
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">
         <div>
-          <div class="section-title" style="margin-bottom:2px;">Content upload limit</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Content upload limit</div>
           <div class="muted" style="font-size:12px;">The largest file size allowed for images, documents, and videos added to any Module.</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
@@ -6247,9 +6262,9 @@ function renderAdminSettings(){
         </div>
       </div>
     </div>
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div class="section-title" style="margin-bottom:0;">Workspace Copilot Details</div>
+        <div class="section-title" style="display:inline-block;margin-bottom:0;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Workspace Copilot Details</div>
         <label class="toggle-switch" title="${state.settings.aiCopilotEnabled ? 'Turn off for everyone' : 'Turn on for everyone with access'}">
           <input type="checkbox" id="aiCopilotToggle" ${state.settings.aiCopilotEnabled?'checked':''}>
           <div class="toggle-track"></div>
@@ -6267,8 +6282,8 @@ function renderAdminSettings(){
           : `Checking which AI service is currently in use…`}
       </div>
     </div>
-    <div class="card" style="border-color:var(--red);">
-      <div class="section-title" style="margin-bottom:2px;color:var(--red);">Danger zone</div>
+    <div class="card" style="border-left:4px solid var(--red);border-color:var(--red);">
+      <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--red);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--red-glow);">Danger zone</div>
       <div class="muted" style="font-size:12px;margin-bottom:12px;">This permanently erases every workstream, task, user, and record in the app and replaces it with starter demo data. This cannot be undone.</div>
       <button class="btn btn-sm btn-danger" id="dangerResetBtn">Reset all app data</button>
     </div>
@@ -6319,8 +6334,8 @@ function renderCopilotAnalytics(){
   `).join('');
 
   return `
-    <div class="card" style="margin-bottom:16px;">
-      <div class="section-title" style="margin-bottom:8px;">Overview</div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Overview</div>
       <div style="display:flex;gap:32px;flex-wrap:wrap;">
         <div><div style="font-size:22px;font-weight:700;color:var(--paper);">${logs.length}</div><div class="muted" style="font-size:11px;">total questions</div></div>
         <div><div style="font-size:22px;font-weight:700;color:var(--paper);">$${totalCost.toFixed(4)}</div><div class="muted" style="font-size:11px;">total cost</div></div>
@@ -6329,22 +6344,22 @@ function renderCopilotAnalytics(){
       </div>
       <div class="muted" style="font-size:11px;margin-top:10px;">Costs shown are calculated based on <b>${provider}, model ${model}</b> — if that ever changes, only figures from after the change reflect the new provider; earlier numbers stay as they were.</div>
     </div>
-    <div class="card" style="margin-bottom:16px;">
-      <div class="section-title" style="margin-bottom:8px;">Usage by month</div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Usage by month</div>
       <table class="ai-msg-table" style="width:100%;">
         <tr><th>Month</th><th>Questions</th><th>Total cost</th><th>Summary feature cost</th><th>Unhelpful</th></tr>
         ${monthRows}
       </table>
     </div>
-    <div class="card" style="margin-bottom:16px;">
-      <div class="section-title" style="margin-bottom:8px;">Questions per person</div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Questions per person</div>
       <table class="ai-msg-table" style="width:100%;">
         <tr><th>Person</th><th>Questions asked</th></tr>
         ${userRows}
       </table>
     </div>
-    <div class="card">
-      <div class="section-title" style="margin-bottom:4px;">Recent unhelpful responses</div>
+    <div class="card" style="border-left:4px solid var(--amber);">
+      <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Recent unhelpful responses</div>
       <div class="muted" style="font-size:12px;margin-bottom:8px;">Real questions and answers flagged as likely unhelpful — a good place to look for actual gaps worth fixing.</div>
       ${unhelpfulRows || '<div class="muted" style="font-size:13px;">None found — nothing flagged as unhelpful yet.</div>'}
     </div>
@@ -6360,27 +6375,27 @@ function renderCopilotAnalytics(){
 // not built yet — this page is deliberately honest about that rather than
 // offering controls that wouldn't actually do anything.
 function renderAdminPermRoles(){
-  const rows = ROLE_INFO.map(r=>{
+  const cards = ROLE_INFO.map(r=>{
     const count = state.users.filter(u=>u.role===r.id).length;
     return `
-    <div class="card" style="margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;">
-        <div style="font-size:15px;font-weight:600;">${r.name}</div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div class="section-title" style="display:inline-block;margin-bottom:0;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">${r.name}</div>
         <div class="mono muted" style="font-size:12px;">${count} user${count===1?'':'s'}</div>
       </div>
-      <div class="muted" style="font-size:13px;margin-top:6px;line-height:1.5;">${r.desc}</div>
+      <div class="muted" style="font-size:12px;margin-top:10px;line-height:1.55;">${r.desc}</div>
     </div>`;
   }).join('');
   return `
     <div style="margin-bottom:14px;">
-      <div class="section-title" style="margin-bottom:4px;">Roles</div>
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Roles</div>
       <div class="muted" style="font-size:12px;">
         These are the real permission roles the app uses — not editable yet, since all four are currently
         built directly into how access works throughout the app. The plan to assign specific features and
         functions per role is a real next step, just not built yet — this page will grow into that once it is.
       </div>
     </div>
-    ${rows}
+    ${cards}
   `;
 }
 

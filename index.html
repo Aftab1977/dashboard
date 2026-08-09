@@ -6,6 +6,7 @@
 <title>ImproveID Workspace — Workstream Timeline Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/dseg7-modern@5.2.5/index.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root, [data-theme="dark"]{
@@ -558,11 +559,11 @@ const DASHBOARD_WIDGET_COLORS = {
   wg_attendance: '#9B59B6',
   wg_reminders: '#16A085',
   wg_capacity: '#E91E8C',
-  wg_empty4:  '#F5A623',
+  wg_worldclock: '#F5A623',
   wg_empty5:  '#17A2C4',
   wg_empty6:  '#5C6BC0',
 };
-const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_attendance','wg_reminders','wg_capacity','wg_empty4','wg_empty5','wg_empty6'];
+const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_attendance','wg_reminders','wg_capacity','wg_worldclock','wg_empty5','wg_empty6'];
 // One source of truth for every widget's name, which Module it draws from, and a
 // plain-language explanation of what it shows and how — used both for the small
 // label inside each widget and the fuller listing on My Account, so the two never
@@ -594,7 +595,8 @@ const DASHBOARD_WIDGET_META = {
     description:"Shows the titles of your upcoming active reminders — as many as fit neatly, usually 2-3. Hovering shows all of them with full details; clicking takes you to your Reminders page." },
   wg_capacity: { label:'Team Capacity', module:'Active Assignments', moduleId:'feat_assignments',
     description:"Shows how many Members currently have no open task (free) versus how many have at least one (occupied). HODs are excluded, since they aren't usually assigned tasks directly and would misleadingly always show as free." },
-  wg_empty4: { label:'Reserved Slot 4', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
+  wg_worldclock: { label:'World Clock', module:'Essentials', moduleId:'h_world_clock',
+    description:"Shows the current time in up to 3 cities you choose. Click the widget to search for and pick any major city — adding a new one when you already have 3 replaces the oldest. Drag within the picker to set your priority order." },
   wg_empty5: { label:'Reserved Slot 5', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
   wg_empty6: { label:'Reserved Slot 6', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
 };
@@ -933,12 +935,13 @@ function seedState(){
     {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
     {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
     {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
-    {id:'feat_fai', name:'Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
+    {id:'feat_fai', name:'Essentials', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
     {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
     {id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:1, contentItems:[], description:'', specialView:'attendance'},
     {id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:2, contentItems:[], description:'', specialView:'appraisal'},
     {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
-    {id:'h_reminders', name:'Reminders', nodeType:'heading', parentId:'feat_hr', order:4, contentItems:[], description:'', specialView:'reminders'},
+    {id:'h_reminders', name:'Reminders', nodeType:'heading', parentId:'feat_fai', order:1, contentItems:[], description:'', specialView:'reminders'},
+    {id:'h_world_clock', name:'World Clock', nodeType:'heading', parentId:'feat_fai', order:2, contentItems:[], description:'', specialView:'worldClock'},
   ];
 
   const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent');
@@ -978,12 +981,13 @@ function normalizeState(s){
       {id:'feat_assignments', name:'Active Assignments', nodeType:'feature', parentId:null, systemView:'assignments', order:2, contentItems:[], description:''},
       {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
       {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
-      {id:'feat_fai', name:'Frequently Asked Information', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
+      {id:'feat_fai', name:'Essentials', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
       {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
       {id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:1, contentItems:[], description:'', specialView:'attendance'},
       {id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:2, contentItems:[], description:'', specialView:'appraisal'},
       {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
-      {id:'h_reminders', name:'Reminders', nodeType:'heading', parentId:'feat_hr', order:4, contentItems:[], description:'', specialView:'reminders'},
+      {id:'h_reminders', name:'Reminders', nodeType:'heading', parentId:'feat_fai', order:1, contentItems:[], description:'', specialView:'reminders'},
+    {id:'h_world_clock', name:'World Clock', nodeType:'heading', parentId:'feat_fai', order:2, contentItems:[], description:'', specialView:'worldClock'},
     ];
   } else {
     // migrate feature nodes already saved by an earlier version of this app
@@ -1042,16 +1046,36 @@ function normalizeState(s){
       const nextOrder4 = hrKids4.length ? Math.max(...hrKids4.map(n=>n.order||0))+1 : 1;
       s.featureNodes.push({id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:nextOrder4, contentItems:[], description:'', specialView:null});
     }
-    // One-time addition: Reminders under HR, granted to everyone by default (not
+    // One-time addition: Reminders, granted to everyone by default (not
     // admin-restricted, unlike Workspace CoPilot) since it's personal to whoever
-    // uses it, same spirit as the other HR headings.
-    if(!s.featureNodes.some(n=>n.id==='h_reminders') && s.featureNodes.some(n=>n.id==='feat_hr')){
-      const hrKids5 = s.featureNodes.filter(n=>n.parentId==='feat_hr');
-      const nextOrder5 = hrKids5.length ? Math.max(...hrKids5.map(n=>n.order||0))+1 : 1;
-      s.featureNodes.push({id:'h_reminders', name:'Reminders', nodeType:'heading', parentId:'feat_hr', order:nextOrder5, contentItems:[], description:'', specialView:'reminders'});
+    // uses it, same spirit as the other headings it sits alongside.
+    if(!s.featureNodes.some(n=>n.id==='h_reminders') && s.featureNodes.some(n=>n.id==='feat_fai')){
+      const essKids5 = s.featureNodes.filter(n=>n.parentId==='feat_fai');
+      const nextOrder5 = essKids5.length ? Math.max(...essKids5.map(n=>n.order||0))+1 : 1;
+      s.featureNodes.push({id:'h_reminders', name:'Reminders', nodeType:'heading', parentId:'feat_fai', order:nextOrder5, contentItems:[], description:'', specialView:'reminders'});
       s.users.forEach(u=>{
         if(u.role!=='admin' && Array.isArray(s.userAccess[u.id]) && !s.userAccess[u.id].includes('h_reminders')){
           s.userAccess[u.id].push('h_reminders');
+        }
+      });
+    }
+    // One-time move: Reminders used to live under HR — moved to Essentials
+    // alongside World Clock. Only moves it if it's still exactly where it
+    // started, leaving any deliberate admin reorganization alone.
+    if(!s._remindersMovedToEssentials){
+      const remNode = s.featureNodes.find(n=>n.id==='h_reminders');
+      if(remNode && remNode.parentId==='feat_hr') remNode.parentId = 'feat_fai';
+      s._remindersMovedToEssentials = true;
+    }
+    // One-time addition: World Clock heading under Essentials, granted to
+    // everyone by default — this is where the widget's picker now lives.
+    if(!s.featureNodes.some(n=>n.id==='h_world_clock') && s.featureNodes.some(n=>n.id==='feat_fai')){
+      const essKids6 = s.featureNodes.filter(n=>n.parentId==='feat_fai');
+      const nextOrder6 = essKids6.length ? Math.max(...essKids6.map(n=>n.order||0))+1 : 1;
+      s.featureNodes.push({id:'h_world_clock', name:'World Clock', nodeType:'heading', parentId:'feat_fai', order:nextOrder6, contentItems:[], description:'', specialView:'worldClock'});
+      s.users.forEach(u=>{
+        if(u.role!=='admin' && Array.isArray(s.userAccess[u.id]) && !s.userAccess[u.id].includes('h_world_clock')){
+          s.userAccess[u.id].push('h_world_clock');
         }
       });
     }
@@ -1097,6 +1121,14 @@ function normalizeState(s){
     if(faiNode && faiNode.name==='FAI — Frequently Asked Information') faiNode.name = 'Frequently Asked Information';
     s._faiModuleRenamed = true;
   }
+  // One-time rename: "Frequently Asked Information" -> "Essentials". Same care as
+  // every other module rename — only touches it if it's still exactly the
+  // previous default name, leaving any deliberate admin customization alone.
+  if(!s._faiRenamedToEssentials){
+    const essNode = s.featureNodes.find(n=>n.id==='feat_fai');
+    if(essNode && essNode.name==='Frequently Asked Information') essNode.name = 'Essentials';
+    s._faiRenamedToEssentials = true;
+  }
   // Dashboard widgets are personal to each person now — their own order, their own
   // on/off choices — not a single shared arrangement for everyone. Reconciled on
   // every load rather than gated by a one-time flag, so a brand new user always
@@ -1123,6 +1155,9 @@ function normalizeState(s){
     }
     if(!Array.isArray(u.dashboardWidgetsEnabled)){
       u.dashboardWidgetsEnabled = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
+    }
+    if(!Array.isArray(u.worldClockCities) || !u.worldClockCities.length){
+      u.worldClockCities = DEFAULT_WORLD_CLOCK_CITIES.slice();
     }
   });
   // Give everyone the new Summary module specifically — the general Access grandfather
@@ -1583,6 +1618,68 @@ function computeTeamCapacityWidget(){
   return { total: staff.length, freeCount: freeNames.length, occupiedCount: occupiedNames.length, freeNames, occupiedNames };
 }
 
+// ---- World Clock ----
+// City name + real IANA time zone identifier — the browser's own Intl API
+// computes the actual current time for each from this, including daylight
+// saving automatically, so nothing here needs manual upkeep as seasons change.
+const WORLD_CITIES = [
+  {id:'washington_dc', name:'Washington, DC', country:'USA', tz:'America/New_York'},
+  {id:'santo_domingo', name:'Santo Domingo', country:'Dominican Republic', tz:'America/Santo_Domingo'},
+  {id:'london', name:'London', country:'UK', tz:'Europe/London'},
+  {id:'new_york', name:'New York', country:'USA', tz:'America/New_York'},
+  {id:'los_angeles', name:'Los Angeles', country:'USA', tz:'America/Los_Angeles'},
+  {id:'chicago', name:'Chicago', country:'USA', tz:'America/Chicago'},
+  {id:'toronto', name:'Toronto', country:'Canada', tz:'America/Toronto'},
+  {id:'mexico_city', name:'Mexico City', country:'Mexico', tz:'America/Mexico_City'},
+  {id:'sao_paulo', name:'São Paulo', country:'Brazil', tz:'America/Sao_Paulo'},
+  {id:'buenos_aires', name:'Buenos Aires', country:'Argentina', tz:'America/Argentina/Buenos_Aires'},
+  {id:'dublin', name:'Dublin', country:'Ireland', tz:'Europe/Dublin'},
+  {id:'paris', name:'Paris', country:'France', tz:'Europe/Paris'},
+  {id:'berlin', name:'Berlin', country:'Germany', tz:'Europe/Berlin'},
+  {id:'madrid', name:'Madrid', country:'Spain', tz:'Europe/Madrid'},
+  {id:'rome', name:'Rome', country:'Italy', tz:'Europe/Rome'},
+  {id:'moscow', name:'Moscow', country:'Russia', tz:'Europe/Moscow'},
+  {id:'istanbul', name:'Istanbul', country:'Turkey', tz:'Europe/Istanbul'},
+  {id:'cairo', name:'Cairo', country:'Egypt', tz:'Africa/Cairo'},
+  {id:'johannesburg', name:'Johannesburg', country:'South Africa', tz:'Africa/Johannesburg'},
+  {id:'lagos', name:'Lagos', country:'Nigeria', tz:'Africa/Lagos'},
+  {id:'nairobi', name:'Nairobi', country:'Kenya', tz:'Africa/Nairobi'},
+  {id:'dubai', name:'Dubai', country:'UAE', tz:'Asia/Dubai'},
+  {id:'mumbai', name:'Mumbai', country:'India', tz:'Asia/Kolkata'},
+  {id:'delhi', name:'Delhi', country:'India', tz:'Asia/Kolkata'},
+  {id:'bangkok', name:'Bangkok', country:'Thailand', tz:'Asia/Bangkok'},
+  {id:'jakarta', name:'Jakarta', country:'Indonesia', tz:'Asia/Jakarta'},
+  {id:'singapore', name:'Singapore', country:'Singapore', tz:'Asia/Singapore'},
+  {id:'hong_kong', name:'Hong Kong', country:'China', tz:'Asia/Hong_Kong'},
+  {id:'shanghai', name:'Shanghai', country:'China', tz:'Asia/Shanghai'},
+  {id:'beijing', name:'Beijing', country:'China', tz:'Asia/Shanghai'},
+  {id:'manila', name:'Manila', country:'Philippines', tz:'Asia/Manila'},
+  {id:'tokyo', name:'Tokyo', country:'Japan', tz:'Asia/Tokyo'},
+  {id:'seoul', name:'Seoul', country:'South Korea', tz:'Asia/Seoul'},
+  {id:'sydney', name:'Sydney', country:'Australia', tz:'Australia/Sydney'},
+  {id:'melbourne', name:'Melbourne', country:'Australia', tz:'Australia/Melbourne'},
+  {id:'auckland', name:'Auckland', country:'New Zealand', tz:'Pacific/Auckland'},
+];
+const DEFAULT_WORLD_CLOCK_CITIES = ['washington_dc','santo_domingo','london'];
+function worldCityById(id){ return WORLD_CITIES.find(c=>c.id===id); }
+// Computes each selected city's real current time and, if its calendar date
+// differs from the viewer's own local date, a "+1 day" / "-1 day" note — the
+// kind of thing that actually matters when comparing far-apart time zones.
+function computeWorldClockTimes(cityIds){
+  const now = new Date();
+  const localDateStr = now.toLocaleDateString('en-CA');
+  return (cityIds||[]).map(id=>{
+    const city = worldCityById(id);
+    if(!city) return null;
+    const timeStr = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone: city.tz }).format(now);
+    const cityDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: city.tz }).format(now);
+    let dayNote = '';
+    if(cityDateStr > localDateStr) dayNote = '+1 day';
+    else if(cityDateStr < localDateStr) dayNote = '-1 day';
+    return { id, name: city.name, country: city.country, time: timeStr, dayNote };
+  }).filter(Boolean);
+}
+
 // A single widget card, matching the reference layout: a large icon on the left,
 // vertically centered against a text column on the right (label, number, trend),
 // the whole composition centered together rather than stacked top-to-bottom.
@@ -1631,6 +1728,7 @@ const WIDGET_ICONS = {
   team: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="${c}"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="5" cy="9" r="2.2" opacity=".7"/><path d="M0.5 19c0-2.4 1.9-4.4 4.5-4.9" opacity=".7"/><circle cx="19" cy="9" r="2.2" opacity=".7"/><path d="M23.5 19c0-2.4-1.9-4.4-4.5-4.9" opacity=".7"/></svg>`,
   bell: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`,
   gauge: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle cx="12" cy="15" r="1.2" fill="${c}" stroke="none"/></svg>`,
+  clock: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>`,
 };
 // The Workspace Dashboard's widgets — live, computed fresh on every render from
 // computeWorkstreamWidgetMetrics(), never cached. Rendered using this specific
@@ -1724,7 +1822,27 @@ function renderWorkstreamWidgets(m){
         tooltip,
       });
     })(),
-    wg_empty4: emptyWidgetCard('wg_empty4'),
+    wg_worldclock: (()=>{
+      const cityIds = (cu && cu.worldClockCities && cu.worldClockCities.length) ? cu.worldClockCities : DEFAULT_WORLD_CLOCK_CITIES;
+      const times = computeWorldClockTimes(cityIds);
+      const rows = times.length
+        ? times.map(t=>`<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+            <span style="font-size:12px;color:var(--paper);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;">${t.name}</span>
+            <span style="font-family:'DSEG7 Modern',var(--f-mono);font-size:15px;color:var(--paper-dim);">${t.time}${t.dayNote?` <span style="font-family:var(--f-mono);font-size:9px;color:var(--paper-faint);">${t.dayNote}</span>`:''}</span>
+          </div>`).join('')
+        : `<div class="muted" style="font-size:12px;margin-top:2px;">No cities selected</div>`;
+      const bg = `${DASHBOARD_WIDGET_COLORS.wg_worldclock}1A`;
+      return `
+        <div class="drag-node" style="position:relative;flex:1;min-width:150px;background:${bg};border:1.5px solid ${widgetBorder('wg_worldclock')};border-radius:12px;padding:14px;padding-bottom:22px;cursor:grab;" draggable="true" data-widget-drag="wg_worldclock" data-widget-navigate="h_world_clock">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <div style="width:40px;height:40px;border-radius:50%;background:${DASHBOARD_WIDGET_COLORS.wg_worldclock}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              ${WIDGET_ICONS.clock(DASHBOARD_WIDGET_COLORS.wg_worldclock)}
+            </div>
+            <div style="font-size:13px;font-weight:600;color:var(--paper);">World Clock</div>
+          </div>
+          ${rows}
+        </div>`;
+    })(),
     wg_empty5: emptyWidgetCard('wg_empty5'), wg_empty6: emptyWidgetCard('wg_empty6'),
   };
   const order = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
@@ -2184,22 +2302,23 @@ function renderReminderPopup(){
     root.innerHTML = `
       <div style="position:fixed;top:24px;right:24px;z-index:200;width:320px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.24);padding:18px;">
         <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Close it, or snooze it?</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-          <button class="btn btn-sm btn-ghost" data-snooze="15">Snooze 15m</button>
-          <button class="btn btn-sm btn-ghost" data-snooze="30">Snooze 30m</button>
-          <button class="btn btn-sm btn-ghost" data-snooze="60">Snooze 1h</button>
-          <button class="btn btn-sm btn-ghost" data-snooze="180">Snooze 3h</button>
+        <div style="margin-bottom:12px;">
+          <select id="remPopupSnoozeSelect" style="width:100%;">
+            <option value="" selected disabled>Snooze for...</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="180">3 hours</option>
+          </select>
         </div>
         <div style="display:flex;justify-content:flex-end;">
           <button class="btn btn-sm btn-primary" id="remPopupFinalCloseBtn">Close</button>
         </div>
       </div>`;
-    root.querySelectorAll('[data-snooze]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        snoozeReminder(r, Number(btn.dataset.snooze));
-        reminderPopupShowing = null;
-        advanceReminderPopupQueue();
-      });
+    document.getElementById('remPopupSnoozeSelect').addEventListener('change', (e)=>{
+      snoozeReminder(r, Number(e.target.value));
+      reminderPopupShowing = null;
+      advanceReminderPopupQueue();
     });
     document.getElementById('remPopupFinalCloseBtn').addEventListener('click', ()=>{
       advanceReminderPastDue(r);
@@ -2210,6 +2329,10 @@ function renderReminderPopup(){
   }
 }
 setInterval(checkDueReminders, 20000);
+// Keeps the World Clock widget's displayed times genuinely live — only re-renders
+// when the person is actually looking at the dashboard where it lives, so this
+// doesn't cause needless work anywhere else in the app.
+setInterval(()=>{ if(ui.view==='home') render(); }, 60000);
 
 function bindAiAgentWidget(){
   const bubble = document.getElementById('aiBubbleBtn');
@@ -3465,9 +3588,9 @@ function checkAndShowSummaryPopup(){
 
 function renderSummaryBlocks(workstreams){
   return workstreams.map(w=>`
-    <div style="padding:14px 0;border-top:1px solid var(--line-soft);">
-      <div style="font-weight:600;font-size:15px;color:var(--paper);">${w.title}</div>
-      <div class="hint" style="margin-top:4px;">${w.status}</div>
+    <div class="card" style="margin-bottom:12px;border-left:3px solid var(--amber);padding:12px 14px;">
+      <div style="display:inline-block;background:var(--amber);color:#fff;padding:4px 12px;border-radius:7px;font-size:12.5px;font-weight:700;">${w.title}</div>
+      <div class="hint" style="margin-top:8px;">${w.status}</div>
       <div class="hint" style="margin-top:4px;">${w.progress}</div>
       ${w.taskStatusLines.map(l=>`<div class="hint" style="margin-top:4px;">${l}</div>`).join('')}
       ${w.blockerLines.map(l=>`<div class="hint" style="margin-top:4px;color:var(--blocker);">${l}</div>`).join('')}
@@ -3483,8 +3606,8 @@ function openSummaryPopup(kind, summaryData){
   const div = document.createElement('div');
   div.innerHTML = `
     <div class="modal-backdrop" style="z-index:70;">
-      <div class="modal" style="max-width:640px;max-height:80vh;overflow-y:auto;">
-        <h3>${title}</h3>
+      <div class="modal" style="max-width:640px;max-height:80vh;overflow-y:auto;border-left:4px solid var(--amber);">
+        <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);margin-bottom:6px;">${title}</div>
         <div class="modal-sub">${dateLabel}</div>
         ${renderSummaryBlocks(visible)}
         <div class="modal-actions"><button class="btn btn-primary" id="summaryPopupClose">Close</button></div>
@@ -3694,6 +3817,9 @@ function renderFeatureNode(){
   if(node.specialView==='reminders'){
     return renderReminders(node);
   }
+  if(node.specialView==='worldClock'){
+    return renderWorldClockPage(node);
+  }
 
   if(node.nodeType==='heading' || node.nodeType==='subheading'){
     return `
@@ -3763,6 +3889,10 @@ function bindFeatureNode(){
   }
   if(node && node.specialView==='reminders'){
     bindReminders();
+    return;
+  }
+  if(node && node.specialView==='worldClock'){
+    bindWorldClockPage();
     return;
   }
   document.querySelectorAll('[data-open-feature]').forEach(el=>{
@@ -4056,10 +4186,38 @@ function snoozeReminder(r, minutes){
 // either direction, no upper or lower bound on how far out you can go. ----
 let calendarPickerState = { year:0, month:0, onPick:null };
 function openCalendarPicker(anchorId, currentISO, onPick){
+  closeAllReminderPickers();
   calendarPickerAnchorId = anchorId;
   const base = currentISO ? new Date(currentISO+'T00:00:00') : new Date(todayISO()+'T00:00:00');
   calendarPickerState = { year: base.getFullYear(), month: base.getMonth(), onPick };
   renderCalendarPickerInto(anchorId, currentISO);
+}
+// Positions a popup (already in the DOM, position:fixed) directly above its
+// anchor button, using the anchor's real on-screen coordinates rather than CSS
+// bottom/top percentages — this is what lets it escape the modal's own
+// overflow-y:auto clipping entirely, since fixed positioning is relative to the
+// viewport, not any scrolling ancestor. Clamped to a minimum distance from the
+// top of the screen so it's never itself cut off if the anchor sits very high.
+// Closes any of the three date/time/repeat pickers that might currently be
+// open — called at the start of each "open" function so only one is ever
+// visible at a time, regardless of how quickly someone clicks between them.
+function closeAllReminderPickers(){
+  const c = document.getElementById('calendarPickerPop'); if(c) c.remove();
+  const t = document.getElementById('timePickerPop'); if(t) t.remove();
+  const r = document.getElementById('repeatPickerPop'); if(r) r.remove();
+}
+function positionPopupAboveAnchor(popupEl, anchorEl){
+  const rect = anchorEl.getBoundingClientRect();
+  const popRect = popupEl.getBoundingClientRect();
+  const modalEl = anchorEl.closest('.modal');
+  const minTop = modalEl ? modalEl.getBoundingClientRect().top + 12 : 12;
+  let top = rect.top - popRect.height - 6;
+  if(top < minTop) top = minTop;
+  let left = rect.left;
+  if(left + popRect.width > window.innerWidth - 12) left = window.innerWidth - popRect.width - 12;
+  if(left < 12) left = 12;
+  popupEl.style.top = `${top}px`;
+  popupEl.style.left = `${left}px`;
 }
 function renderCalendarPickerInto(anchorId, selectedISO){
   const { year, month } = calendarPickerState;
@@ -4075,7 +4233,7 @@ function renderCalendarPickerInto(anchorId, selectedISO){
     cells += `<div data-cal-day="${iso}" style="text-align:center;padding:6px 0;border-radius:6px;cursor:pointer;font-size:12.5px;${isSelected?'background:var(--amber);color:#fff;font-weight:700;':''}">${d}</div>`;
   }
   const html = `
-    <div id="calendarPickerPop" style="position:absolute;z-index:60;top:calc(100% + 4px);left:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);width:240px;">
+    <div id="calendarPickerPop" style="position:fixed;z-index:200;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);width:240px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <button type="button" class="btn btn-sm btn-ghost" data-cal-prev>‹</button>
         <div style="font-size:13px;font-weight:600;">${monthLabel}</div>
@@ -4090,7 +4248,8 @@ function renderCalendarPickerInto(anchorId, selectedISO){
   if(!anchor) return;
   let pop = document.getElementById('calendarPickerPop');
   if(pop) pop.remove();
-  anchor.insertAdjacentHTML('beforeend', html);
+  document.body.insertAdjacentHTML('beforeend', html);
+  positionPopupAboveAnchor(document.getElementById('calendarPickerPop'), anchor);
   document.getElementById('calendarPickerPop').querySelector('[data-cal-prev]').addEventListener('click', (e)=>{
     e.stopPropagation();
     calendarPickerState.month--; if(calendarPickerState.month<0){ calendarPickerState.month=11; calendarPickerState.year--; }
@@ -4122,15 +4281,17 @@ function timePickerOptions(){
   return opts;
 }
 function openTimePicker(anchorId, currentTime, onPick){
+  closeAllReminderPickers();
   const anchor = document.getElementById(anchorId);
   if(!anchor) return;
   let pop = document.getElementById('timePickerPop');
   if(pop) pop.remove();
   const options = timePickerOptions().map(t=>`<div data-time-opt="${t}" style="padding:6px 12px;cursor:pointer;font-size:12.5px;font-family:var(--f-mono);${t===currentTime?'background:var(--amber);color:#fff;font-weight:700;':''}">${t}</div>`).join('');
-  anchor.insertAdjacentHTML('beforeend', `
-    <div id="timePickerPop" style="position:absolute;z-index:60;top:calc(100% + 4px);left:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);width:110px;max-height:220px;overflow-y:auto;">
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="timePickerPop" style="position:fixed;z-index:200;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);width:110px;max-height:220px;overflow-y:auto;">
       ${options}
     </div>`);
+  positionPopupAboveAnchor(document.getElementById('timePickerPop'), anchor);
   document.getElementById('timePickerPop').querySelectorAll('[data-time-opt]').forEach(el=>{
     el.addEventListener('click', (e)=>{
       e.stopPropagation();
@@ -4148,7 +4309,34 @@ document.addEventListener('click', (e)=>{
   if(!e.target.closest('#timePickerPop') && !e.target.closest('[data-open-time]')){
     const p = document.getElementById('timePickerPop'); if(p) p.remove();
   }
+  if(!e.target.closest('#repeatPickerPop') && !e.target.closest('[data-open-repeat]')){
+    const p = document.getElementById('repeatPickerPop'); if(p) p.remove();
+  }
 });
+// ---- A custom Repeat picker, matching the same button+popup pattern as date and
+// time — all 11 options fit without scrolling, opens upward like the others. ----
+function openRepeatPicker(anchorId, currentValue, onPick){
+  closeAllReminderPickers();
+  const anchor = document.getElementById(anchorId);
+  if(!anchor) return;
+  let pop = document.getElementById('repeatPickerPop');
+  if(pop) pop.remove();
+  const options = Object.entries(REMINDER_REPEAT_LABELS).map(([val,label])=>
+    `<div data-repeat-opt="${val}" style="padding:6px 12px;cursor:pointer;font-size:12.5px;white-space:nowrap;${val===currentValue?'background:var(--amber);color:#fff;font-weight:700;':''}">${label}</div>`
+  ).join('');
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="repeatPickerPop" style="position:fixed;z-index:200;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);width:150px;">
+      ${options}
+    </div>`);
+  positionPopupAboveAnchor(document.getElementById('repeatPickerPop'), anchor);
+  document.getElementById('repeatPickerPop').querySelectorAll('[data-repeat-opt]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      onPick(el.dataset.repeatOpt);
+      document.getElementById('repeatPickerPop').remove();
+    });
+  });
+}
 
 function renderReminders(node){
   const list = myReminders();
@@ -4189,8 +4377,8 @@ function renderReminders(node){
   }).join('');
   return `
     <div class="eyebrow">Heading</div>
-    <h1 class="page-title" style="margin-bottom:20px;">Reminders</h1>
-    <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addReminderBtn">+</button>
+    <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">Reminders</h1>
+    <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addReminderBtn">+ New</button>
     ${rows ? `<div class="card" style="padding:0;overflow:hidden;">${rows}</div>` : `<div class="empty-state"><div class="et">No reminders yet</div></div>`}
   `;
 }
@@ -4200,6 +4388,91 @@ function bindReminders(){
   document.querySelectorAll('[data-delete-reminder]').forEach(el=>{
     el.addEventListener('click', ()=>{ if(confirm('Delete this reminder?')) deleteReminder(el.dataset.deleteReminder); });
   });
+}
+
+function renderWorldClockPage(node){
+  return `
+    <div style="margin-bottom:14px;">
+      <div class="eyebrow">Heading</div>
+      <h1 class="page-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">World Clock</h1>
+      <div class="muted" style="font-size:12px;">Pick up to 3 — personal to you. Adding a 4th replaces the oldest one. Reorder with the arrows to set your priority.</div>
+    </div>
+    <div id="wcCurrentList"></div>
+    <div class="card">
+      <div class="field" style="margin-bottom:0;">
+        <label>Add a city</label>
+        <input id="wcSearchInput" placeholder="Type a city or country..." autocomplete="off">
+      </div>
+      <div id="wcSearchResults" style="max-height:220px;overflow-y:auto;"></div>
+    </div>
+  `;
+}
+function bindWorldClockPage(){
+  const cu = currentUser();
+  if(!cu) return;
+  if(!Array.isArray(cu.worldClockCities) || !cu.worldClockCities.length) cu.worldClockCities = DEFAULT_WORLD_CLOCK_CITIES.slice();
+  renderWorldClockCurrentList();
+  const searchInput = document.getElementById('wcSearchInput');
+  if(searchInput) searchInput.addEventListener('input', renderWorldClockSearchResults);
+}
+function renderWorldClockCurrentList(){
+  const cu = currentUser();
+  const list = document.getElementById('wcCurrentList');
+  if(!list) return;
+  const cities = (cu.worldClockCities||[]).map(id=>worldCityById(id)).filter(Boolean);
+  list.innerHTML = cities.length ? cities.map((c,i)=>`
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${c.name}</div>
+          <div class="muted" style="font-size:12px;margin-top:6px;">${c.country}</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;">
+          <button type="button" class="btn btn-sm btn-ghost" data-wc-up="${c.id}" ${i===0?'disabled':''} title="Move up">↑</button>
+          <button type="button" class="btn btn-sm btn-ghost" data-wc-down="${c.id}" ${i===cities.length-1?'disabled':''} title="Move down">↓</button>
+          <button type="button" class="btn btn-sm btn-danger" data-wc-remove="${c.id}">Remove</button>
+        </div>
+      </div>
+    </div>`).join('') : `<div class="muted" style="font-size:12px;">No cities selected yet — search below to add one.</div>`;
+  list.querySelectorAll('[data-wc-up]').forEach(b=>b.addEventListener('click', ()=>{
+    const id = b.dataset.wcUp;
+    const arr = cu.worldClockCities;
+    const i = arr.indexOf(id);
+    if(i>0){ [arr[i-1],arr[i]] = [arr[i],arr[i-1]]; persist(); renderWorldClockCurrentList(); }
+  }));
+  list.querySelectorAll('[data-wc-down]').forEach(b=>b.addEventListener('click', ()=>{
+    const id = b.dataset.wcDown;
+    const arr = cu.worldClockCities;
+    const i = arr.indexOf(id);
+    if(i>=0 && i<arr.length-1){ [arr[i],arr[i+1]] = [arr[i+1],arr[i]]; persist(); renderWorldClockCurrentList(); }
+  }));
+  list.querySelectorAll('[data-wc-remove]').forEach(b=>b.addEventListener('click', ()=>{
+    cu.worldClockCities = cu.worldClockCities.filter(id=>id!==b.dataset.wcRemove);
+    persist(); renderWorldClockCurrentList();
+  }));
+}
+function renderWorldClockSearchResults(){
+  const cu = currentUser();
+  const q = document.getElementById('wcSearchInput').value.trim().toLowerCase();
+  const results = document.getElementById('wcSearchResults');
+  if(!q){ results.innerHTML = ''; return; }
+  const selected = new Set(cu.worldClockCities||[]);
+  const matches = WORLD_CITIES.filter(c=>!selected.has(c.id) && (c.name.toLowerCase().includes(q) || c.country.toLowerCase().includes(q))).slice(0,8);
+  results.innerHTML = matches.length ? matches.map(c=>`
+    <div class="wc-search-row" data-wc-add="${c.id}" style="padding:8px 4px;cursor:pointer;border-bottom:1px solid var(--line-soft);">
+      <span style="font-size:13px;font-weight:600;">${c.name}</span>
+      <span class="muted" style="font-size:11px;margin-left:6px;">${c.country}</span>
+    </div>`).join('') : `<div class="muted" style="font-size:12px;padding:6px 0;">No matching cities</div>`;
+  results.querySelectorAll('[data-wc-add]').forEach(el=>el.addEventListener('click', ()=>{
+    if(!Array.isArray(cu.worldClockCities)) cu.worldClockCities = [];
+    // Adding a 4th replaces the oldest (first) one, keeping the max at 3.
+    if(cu.worldClockCities.length>=3) cu.worldClockCities.shift();
+    cu.worldClockCities.push(el.dataset.wcAdd);
+    persist();
+    document.getElementById('wcSearchInput').value = '';
+    results.innerHTML = '';
+    renderWorldClockCurrentList();
+  }));
 }
 
 function openReminderModal(){
@@ -4234,23 +4507,11 @@ function openReminderModal(){
             </div>
             <div style="position:relative;" id="remTimeAnchor">
               <label style="display:block;font-size:11px;color:var(--paper-dim);margin-bottom:4px;">Time</label>
-              <button type="button" id="remTimeBtn" data-open-time class="btn btn-sm btn-ghost" style="min-width:80px;">--:--</button>
+              <button type="button" id="remTimeBtn" data-open-time class="btn btn-sm btn-ghost" style="min-width:80px;">00:00</button>
             </div>
-            <div>
+            <div style="position:relative;" id="remRepeatAnchor">
               <label style="display:block;font-size:11px;color:var(--paper-dim);margin-bottom:4px;">Repeat</label>
-              <select id="remRepeat" style="height:30px;">
-                <option value="never">Never</option>
-                <option value="hourly">Hourly</option>
-                <option value="daily">Daily</option>
-                <option value="weekdays">Weekdays</option>
-                <option value="weekends">Weekends</option>
-                <option value="weekly">Weekly</option>
-                <option value="fortnightly">Fortnightly</option>
-                <option value="monthly">Monthly</option>
-                <option value="every3months">Every 3 months</option>
-                <option value="every6months">Every 6 months</option>
-                <option value="yearly">Yearly</option>
-              </select>
+              <button type="button" id="remRepeatBtn" data-open-repeat class="btn btn-sm btn-ghost" style="min-width:90px;">Never</button>
             </div>
           </div>
           <div class="login-error" id="remError"></div>
@@ -4262,9 +4523,10 @@ function openReminderModal(){
       </div>
     </div>`;
   bindModalClose();
-  let pickedDate = todayISO(), pickedTime = nowTimeIST();
+  let pickedDate = todayISO(), pickedTime = '00:00', pickedRepeat = 'never';
   const dateBtn = document.getElementById('remDateBtn');
   const timeBtn = document.getElementById('remTimeBtn');
+  const repeatBtn = document.getElementById('remRepeatBtn');
   dateBtn.addEventListener('click', (e)=>{
     e.stopPropagation();
     openCalendarPicker('remDateAnchor', pickedDate, (iso)=>{ pickedDate = iso; dateBtn.textContent = fmtDate(iso); });
@@ -4272,6 +4534,10 @@ function openReminderModal(){
   timeBtn.addEventListener('click', (e)=>{
     e.stopPropagation();
     openTimePicker('remTimeAnchor', pickedTime, (t)=>{ pickedTime = t; timeBtn.textContent = t; });
+  });
+  repeatBtn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    openRepeatPicker('remRepeatAnchor', pickedRepeat, (r)=>{ pickedRepeat = r; repeatBtn.textContent = REMINDER_REPEAT_LABELS[r]; });
   });
 
   const typeSel = document.getElementById('remContentType');
@@ -4297,7 +4563,6 @@ function openReminderModal(){
     const title = document.getElementById('remTitle').value.trim();
     if(!title){ errEl.textContent = 'Give this reminder a title.'; return; }
     if(dateBtn.textContent==='Choose date'){ errEl.textContent = 'Pick a date.'; return; }
-    if(timeBtn.textContent==='--:--'){ errEl.textContent = 'Pick a time.'; return; }
 
     const cType = typeSel.value;
     let content = null;
@@ -4328,7 +4593,7 @@ function openReminderModal(){
     const cu = currentUser();
     state.reminders.push({
       id: uid('rem'), ownerId: cu.id, title, content,
-      dateISO: pickedDate, time: pickedTime, repeat: document.getElementById('remRepeat').value,
+      dateISO: pickedDate, time: pickedTime, repeat: pickedRepeat,
       active: true, nextDueISO: pickedDate, nextDueTime: pickedTime, snoozedUntil: null,
       createdAt: nowDateTimeIST(),
     });
@@ -4996,8 +5261,8 @@ function openBlankTaskModal(projectId){
   if(!admin && !isTaggedToProject(projectId)) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
-      <div class="modal">
-        <h3>New task</h3>
+      <div class="modal" style="border-left:4px solid var(--amber);">
+        <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);margin-bottom:6px;">New task</div>
         <div class="modal-sub">${admin ? 'Create a blank slot and assign it — the team fills in the rest.' : 'This task will be assigned to you — fill in the rest once it is created.'}</div>
         <form id="blankTaskForm">
           <div class="field"><label>Title</label><input id="btTitle" required placeholder="e.g. Payment gateway integration"></div>
@@ -5182,8 +5447,8 @@ function openTaskModal(taskId){
   const firstTimeSave = !t.datesLocked; // dates are only part of THIS form before they're ever locked
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
-      <div class="modal">
-        <h3>Task details</h3>
+      <div class="modal" style="border-left:4px solid var(--amber);">
+        <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);margin-bottom:6px;">Task details</div>
         <div class="modal-sub">${entityName(t.assignedType,t.assignedId)} · ${state.projects.find(p=>p.id===t.projectId)?.name || ''}</div>
         <form id="taskForm">
           <div class="field"><label>Title</label><input id="tfTitle" value="${t.title.replace(/"/g,'&quot;')}" required></div>
@@ -6635,8 +6900,8 @@ function openEditProjectModal(projectId){
   if(!p) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
-      <div class="modal">
-        <h3>Edit workstream</h3>
+      <div class="modal" style="border-left:4px solid var(--amber);">
+        <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);margin-bottom:6px;">Edit workstream</div>
         <form id="editProjForm">
           <div class="field"><label>Workstream name</label><input id="epName" value="${p.name.replace(/"/g,'&quot;')}" required></div>
           <div class="field"><label>Description</label><textarea id="epDescription" placeholder="Why this workstream exists, what it's for...">${(p.description||'').replace(/</g,'&lt;')}</textarea></div>

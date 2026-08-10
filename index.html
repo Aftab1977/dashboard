@@ -2092,6 +2092,7 @@ function render(){
       <button class="navbtn logout" data-nav="logout">${svgIcon('logout')}Logout</button>
     </div>
     <div class="main">
+      ${(currentUser() && currentUser().themePreference)!=='boardroom' ? `
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:14px;">
           ${ui.view!=='home' ? `<button class="btn btn-sm topbar-accent-btn" data-go-back>← Go Back</button>` : ''}
@@ -2101,7 +2102,7 @@ function render(){
           <div class="today-display mono" title="Today's date & time (IST)">${fmtDate(todayISO())}<div class="today-time" id="topbarTime">${nowTimeIST()} IST</div></div>
           <div class="who"><span>${currentUser() ? currentUser().name : ''}</span><div class="avatar">${currentUser() ? initials(currentUser().name) : ''}</div></div>
         </div>
-      </div>
+      </div>` : ''}
       ${ui.migrationError ? `
       <div style="background:var(--red-soft);border-bottom:1px solid var(--red);padding:10px 28px;display:flex;align-items:center;gap:12px;">
         <span style="color:var(--red);font-size:13px;flex:1;"><b>Heads up:</b> ${ui.migrationError}</span>
@@ -2541,6 +2542,33 @@ function navBtn(view, icon, label){
   return `<button class="navbtn ${ui.view===view?'active':''}" data-nav="${view}">${svgIcon(icon)}${label}</button>`;
 }
 
+// Renders the dark hero card used at the top of every page's own content —
+// same visual treatment as the Focus Area dashboard's hero: rounded card,
+// glowing accent circles, account info above the date/time pill (top-right),
+// and a Go Back button below the title (left) when there's somewhere to go
+// back to. This scrolls away with the page — it is not pinned/sticky.
+function renderPageHero(eyebrowText, titleText){
+  const cu = currentUser();
+  return `
+    <div style="position:relative;overflow:hidden;background:var(--hero-bg);border-radius:16px;padding:24px 32px 28px;margin-bottom:20px;">
+      <div style="position:absolute;top:-60px;right:-40px;width:220px;height:220px;border-radius:50%;background:var(--amber);opacity:.12;pointer-events:none;"></div>
+      <div style="position:absolute;bottom:-70px;right:120px;width:150px;height:150px;border-radius:50%;background:#F5A623;opacity:.1;pointer-events:none;"></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;position:relative;">
+        <div style="flex:1;min-width:0;">
+          <div class="eyebrow" style="color:var(--hero-text-faint);">${eyebrowText}</div>
+          <h1 class="page-title" style="margin-bottom:14px;color:#fff;">${titleText}</h1>
+          ${ui.view!=='home' ? `<button class="btn btn-sm topbar-accent-btn" data-go-back>← Go Back</button>` : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0;">
+          <div class="who" style="color:rgba(255,255,255,.9);"><span>${cu ? cu.name : ''}</span><div class="avatar" style="background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);">${cu ? initials(cu.name) : ''}</div></div>
+          <div class="section-title" style="white-space:nowrap;display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">
+            ${fmtDate(todayISO())}
+            <div style="font-size:10.5px;font-weight:600;opacity:.85;margin-top:2px;text-align:center;">${nowTimeIST()} IST</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
 function breadcrumb(){
   if(ui.view==='home') return 'IMPROVEID WORKSPACE / <b>FOCUS AREA</b>';
   if(ui.view==='portfolio') return 'IMPROVEID WORKSPACE / <b>WORKSTREAM</b>';
@@ -2668,6 +2696,7 @@ function bindLogin(){
 /* ============================== PORTFOLIO ============================== */
 
 function renderFocusAreaHome(){
+  const isBoardroom = (currentUser() && currentUser().themePreference) === 'boardroom';
   const allProjects = visibleProjects();
   const today = todayISO();
   let summaries = allProjects.map(p=>{
@@ -2682,8 +2711,25 @@ function renderFocusAreaHome(){
 
   const roots = rootFeatureNodesVisible();
   const wsMetrics = computeWorkstreamWidgetMetrics();
+  const boardroomModuleColors = {
+    feat_workstream: '#4C8DFF', feat_workspace_search: '#0060BF', feat_assignments: '#E91E8C',
+    feat_summary: '#33A85C', feat_reports: '#CC5500', feat_kr: '#16A085',
+    feat_fai: '#F5A623', feat_hr: '#9B59B6', feat_ai_agent: '#DD5147',
+  };
   const featureBoxes = roots.map(f=>{
+    const modColor = boardroomModuleColors[f.id] || 'var(--amber)';
     if(f.id==='feat_workspace_search'){
+      if(isBoardroom){
+        return `
+        <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:150px;padding:20px;" draggable="true" data-drag-node="${f.id}">
+          <div style="width:44px;height:44px;border-radius:50%;background:${modColor};margin-bottom:14px;"></div>
+          <div style="font-family:var(--f-display);font-size:17px;font-weight:700;color:var(--paper);margin-bottom:10px;">Workspace Search</div>
+          <div style="position:relative;max-width:420px;">
+            <input type="text" id="workspaceSearchInput" autocomplete="off" placeholder="Search everything..." style="width:100%;background:var(--panel-raised);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--paper);font-size:13px;">
+            <div id="workspaceSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;"></div>
+          </div>
+        </div>`;
+      }
       return `
       <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:center;border-left:4px solid var(--amber);" draggable="true" data-drag-node="${f.id}">
         <div style="text-align:left;width:100%;">
@@ -2699,6 +2745,15 @@ function renderFocusAreaHome(){
     const isSystem = !!f.systemView;
     const defaultText = isSystem ? (f.systemView==='portfolio' ? 'All workstreams and their timelines' : f.systemView==='assignments' ? 'Who is working on what, and until when' : 'Delay history and patterns') : (childCount ? `${childCount} item${childCount===1?'':'s'}` : '');
     const subtitle = f.description ? f.description : defaultText;
+    if(isBoardroom){
+      return `
+      <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:150px;padding:20px;cursor:pointer;position:relative;" data-open-feature="${f.id}" draggable="true" data-drag-node="${f.id}">
+        <div style="width:44px;height:44px;border-radius:50%;background:${modColor};margin-bottom:14px;"></div>
+        <div style="font-family:var(--f-display);font-size:17px;font-weight:700;color:var(--paper);margin-bottom:6px;">${f.name}</div>
+        <div class="muted" style="font-size:12.5px;">${subtitle || '<span style="color:var(--paper-faint);">No description yet</span>'}</div>
+        ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description" style="position:absolute;right:14px;top:14px;">✎</button>` : ''}
+      </div>`;
+    }
     return `
     <div class="card feature-box drag-node" style="flex:0 0 calc(50% - 7px);box-sizing:border-box;min-height:113px;display:flex;align-items:center;justify-content:flex-start;cursor:pointer;border-left:4px solid var(--amber);" data-open-feature="${f.id}" draggable="true" data-drag-node="${f.id}">
       <div style="display:flex;justify-content:flex-start;align-items:center;gap:12px;position:relative;width:100%;">
@@ -2722,17 +2777,7 @@ function renderFocusAreaHome(){
     </div>`;
   }).join('');
 
-  const isBoardroom = (currentUser() && currentUser().themePreference) === 'boardroom';
-  const heroHeader = isBoardroom ? `
-    <div style="position:relative;overflow:hidden;background:var(--hero-bg);border-radius:16px;padding:28px 32px;margin-bottom:20px;">
-      <div style="position:absolute;top:-60px;right:-40px;width:220px;height:220px;border-radius:50%;background:var(--amber);opacity:.12;pointer-events:none;"></div>
-      <div style="position:absolute;bottom:-70px;right:120px;width:150px;height:150px;border-radius:50%;background:#F5A623;opacity:.1;pointer-events:none;"></div>
-      <div class="eyebrow" style="color:var(--hero-text-faint);position:relative;">Focus Area</div>
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;position:relative;">
-        <h1 class="page-title" style="margin-bottom:0;color:#fff;">Everything for your focus, in one place.</h1>
-        <div class="section-title" style="white-space:nowrap;display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Today — ${fmtDate(today)}</div>
-      </div>
-    </div>` : `
+  const heroHeader = isBoardroom ? renderPageHero('Focus Area', 'Everything for your focus, in one place.') : `
     <div class="eyebrow">Focus Area</div>
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:2px;">
       <h1 class="page-title" style="margin-bottom:0;">Everything for your focus, in one place.</h1>
@@ -2988,8 +3033,9 @@ function renderPortfolio(){
   }).join('');
 
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Workstream', 'All workstreams, one board') : `
     <div class="eyebrow">Workstream</div>
-    <h1 class="page-title" style="margin-bottom:16px;">All workstreams, one board</h1>
+    <h1 class="page-title" style="margin-bottom:16px;">All workstreams, one board</h1>`}
 
     <div class="stat-strip">
       <div class="stat-chip"><div class="n">${filtered.length}</div><div class="l">Workstreams</div></div>
@@ -3207,6 +3253,7 @@ function renderAttendanceSheet(node){
   ).join('') + `<span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--panel-raised);border:1px dashed var(--paper-faint);margin-right:5px;"></span>WO = Weekly off${admin?' — click to mark Present, click again to revert':''}</span>`;
 
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
     <div class="eyebrow">Heading</div>
     <h1 class="page-title" style="margin-bottom:4px;">${node.name}</h1>
     <div class="muted" style="font-size:15px;font-family:var(--f-display);margin-bottom:16px;">${monthLabelLong(monthKey)}</div>
@@ -3355,6 +3402,7 @@ function renderAppraisalSheet(node){
   const admin = isAdmin();
   if(!admin){
     return `
+      ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
       <div class="eyebrow">Heading</div>
       <h1 class="page-title" style="margin-bottom:16px;">${node.name}</h1>
       <div class="empty-state"><div class="et">Admins only</div>Appraisal and salary details are restricted to admins.</div>
@@ -3386,6 +3434,7 @@ function renderAppraisalSheet(node){
   }).join('');
 
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
     <div class="eyebrow">Heading</div>
     <h1 class="page-title" style="margin-bottom:6px;">${node.name}</h1>
     <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>
@@ -3690,6 +3739,7 @@ function renderSummaryCalendar(node){
   }
 
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
     <div class="eyebrow">Summary Calendar</div>
     <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">${node.name}</h1>
     <div class="hint" style="margin-bottom:14px;">Click a highlighted date to see the summary that appeared that day.</div>
@@ -3870,6 +3920,13 @@ function renderFeatureNode(){
   }
 
   if(node.nodeType==='heading' || node.nodeType==='subheading'){
+    const isBoardroom = (currentUser() && currentUser().themePreference) === 'boardroom';
+    if(isBoardroom){
+      return `
+        ${renderPageHero(node.nodeType==='heading'?'Heading':'Sub Heading', node.name)}
+        <div class="card">${renderHeadingPageBody(node)}</div>
+      `;
+    }
     return `
       <div class="eyebrow">${node.nodeType==='heading'?'Heading':'Sub Heading'}</div>
       <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">${node.name}</h1>
@@ -3905,8 +3962,9 @@ function renderFeatureNode(){
   const headingCards = headings.map(h=>renderHeadingBox(h, true)).join('');
 
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero(node.parentId ? 'Feature' : 'Module', node.name) : `
     <div class="eyebrow">${node.parentId ? 'Feature' : 'Module'}</div>
-    <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>
+    <h1 class="page-title" style="margin-bottom:20px;">${node.name}</h1>`}
     ${node.id==='feat_summary' ? `
       <div class="field" style="max-width:420px;">
         <input type="text" id="summarySearchInput" placeholder="Search past summaries — workstream name, status, blocker...">
@@ -4424,6 +4482,7 @@ function renderReminders(node){
     </div>`;
   }).join('');
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
     <div class="eyebrow">Heading</div>
     <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">Reminders</h1>
     <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addReminderBtn">+ New</button>
@@ -4440,6 +4499,7 @@ function bindReminders(){
 
 function renderWorldClockPage(node){
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
     <div style="margin-bottom:14px;">
       <div class="eyebrow">Heading</div>
       <h1 class="page-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">World Clock</h1>
@@ -5139,6 +5199,7 @@ function renderProject(){
   const switcherOptions = visibleProjects();
 
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom' && ui.view!=='home') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
     <div class="filters" style="margin-bottom:16px;">
       <select id="workstreamSwitcher">
         ${switcherOptions.map(sp=>`<option value="${sp.id}" ${sp.id===p.id?'selected':''}>${sp.name}</option>`).join('')}
@@ -5948,8 +6009,9 @@ function renderReports(){
   }).join('');
 
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Reports', 'Who delivered, who slipped') : `
     <div class="eyebrow">Reports</div>
-    <h1 class="page-title" style="margin-bottom:22px;">Who delivered, who slipped</h1>
+    <h1 class="page-title" style="margin-bottom:22px;">Who delivered, who slipped</h1>`}
 
     <div class="stat-strip">
       <div class="stat-chip"><div class="n">${total}</div><div class="l">Total tasks</div></div>
@@ -6261,8 +6323,9 @@ function renderAssignments(){
   }).join('');
 
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Active Assignments', "Who's working on what, and until when") : `
     <div class="eyebrow">Active Assignments</div>
-    <h1 class="page-title" style="margin-bottom:22px;">Who's working on what, and until when</h1>
+    <h1 class="page-title" style="margin-bottom:22px;">Who's working on what, and until when</h1>`}
 
     <div class="stat-strip">
       <div class="stat-chip"><div class="n">${allRows.length}</div><div class="l">People tracked</div></div>
@@ -6404,8 +6467,9 @@ function renderMyAccount(){
     </div>`;
   }).join('');
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('My Account', cu ? cu.name : '') : `
     <div class="eyebrow">My Account</div>
-    <h1 class="page-title" style="margin-bottom:20px;">${cu ? cu.name : ''}</h1>
+    <h1 class="page-title" style="margin-bottom:20px;">${cu ? cu.name : ''}</h1>`}
     <div class="card" style="margin-bottom:16px;">
       <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Theme</div>
       <div class="muted" style="font-size:12px;margin-bottom:14px;">Choose how the workspace looks for you — this is personal and only changes what you see.</div>
@@ -6469,8 +6533,9 @@ function bindMyAccount(){
 
 function renderAdmin(){
   return `
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Admin', 'Users, teams &amp; workstreams') : `
     <div class="eyebrow">Admin</div>
-    <h1 class="page-title" style="margin-bottom:20px;">Users, teams &amp; workstreams</h1>
+    <h1 class="page-title" style="margin-bottom:20px;">Users, teams &amp; workstreams</h1>`}
     <div class="tabs">
       <button class="tab ${ui.adminTab==='users'?'active':''}" data-tab="users">Users</button>
       <button class="tab ${ui.adminTab==='permRoles'?'active':''}" data-tab="permRoles">Roles</button>

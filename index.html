@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ImproveID Workspace — Workstream Timeline Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/@fontsource/dseg7-modern@5.2.5/index.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Bitter:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root, [data-theme="dark"]{
@@ -68,6 +67,42 @@
     --blocker-glow:rgba(204,85,0,.3);
     --card-shadow:0 1px 3px rgba(30,35,60,.06);
   }
+  [data-theme="boardroom"]{
+    --ink:#E9EBF2;
+    --panel:#FFFFFF;
+    --panel-raised:#F7F8FC;
+    --panel-hi:#EEF0F7;
+    --line:#E3E5EE;
+    --line-soft:#ECEDF4;
+    --paper:#1D2029;
+    --paper-dim:#6B7280;
+    --paper-faint:#9CA3AF;
+    --green:#33A85C;
+    --green-soft:#E6F6EC;
+    --green-glow:rgba(51,168,92,.22);
+    --red:#DD5147;
+    --red-soft:#FCEAE8;
+    --red-glow:rgba(221,81,71,.22);
+    --amber:#0060BF;
+    --amber-soft:#E8F1F9;
+    --amber-border:rgba(0,96,191,.35);
+    --amber-glow:rgba(0,96,191,.3);
+    --blocker:#CC5500;
+    --blocker-soft:#FBEDE3;
+    --blocker-border:rgba(204,85,0,.35);
+    --blocker-glow:rgba(204,85,0,.3);
+    --card-shadow:0 2px 4px rgba(30,35,60,.06), 0 12px 32px rgba(30,35,60,.1);
+    /* Boardroom-specific: the presentation's serif headline + clean sans body
+       pairing (Bookman Old Style and Calibri aren't licensed for the web, so
+       these are close, properly-licensed Google Font equivalents), plus the
+       dark, glowing "title slide" treatment used for the dashboard hero band. */
+    --f-display:'Bitter',serif;
+    --f-body:'Inter',sans-serif;
+    --hero-bg:#0D1316;
+    --hero-bg-soft:#141B1F;
+    --hero-text-dim:#AEB8C4;
+    --hero-text-faint:#6B7684;
+  }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
   body{
@@ -111,7 +146,7 @@
   .navbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;}
   .navbtn:hover{color:var(--paper);background:var(--panel-raised);}
   .navbtn.active{color:var(--ink);background:var(--paper);}
-  [data-theme="light"] .navbtn.active{color:#fff;background:var(--amber);}
+  [data-theme="light"] .navbtn.active, [data-theme="boardroom"] .navbtn.active{color:#fff;background:var(--amber);}
   .navrail .spacer{flex:1;}
   .navbtn.logout{color:var(--red);}
 
@@ -137,14 +172,14 @@
      inside it needs to switch to a light-on-blue treatment instead of its normal
      colors — otherwise the blue-on-blue elements (Go Back, the date pill) would
      disappear into the new background. */
-  [data-theme="light"] .topbar{background:var(--amber);border-bottom:none;}
-  [data-theme="light"] .crumb{color:rgba(255,255,255,.8);}
-  [data-theme="light"] .crumb b{color:#fff;}
-  [data-theme="light"] .topbar-accent-btn{color:#fff;background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.35);box-shadow:none;}
-  [data-theme="light"] .today-display{color:#fff;background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.35);box-shadow:none;}
-  [data-theme="light"] .today-time{color:rgba(255,255,255,.85);}
-  [data-theme="light"] .who{color:rgba(255,255,255,.9);}
-  [data-theme="light"] .who .avatar{background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);}
+  [data-theme="light"] .topbar, [data-theme="boardroom"] .topbar{background:var(--amber);border-bottom:none;}
+  [data-theme="light"] .crumb, [data-theme="boardroom"] .crumb{color:rgba(255,255,255,.8);}
+  [data-theme="light"] .crumb b, [data-theme="boardroom"] .crumb b{color:#fff;}
+  [data-theme="light"] .topbar-accent-btn, [data-theme="boardroom"] .topbar-accent-btn{color:#fff;background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.35);box-shadow:none;}
+  [data-theme="light"] .today-display, [data-theme="boardroom"] .today-display{color:#fff;background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.35);box-shadow:none;}
+  [data-theme="light"] .today-time, [data-theme="boardroom"] .today-time{color:rgba(255,255,255,.85);}
+  [data-theme="light"] .who, [data-theme="boardroom"] .who{color:rgba(255,255,255,.9);}
+  [data-theme="light"] .who .avatar, [data-theme="boardroom"] .who .avatar{background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);}
   .content{padding:28px;max-width:1240px;width:100%;margin:0 auto;flex:1;}
 
   /* ---------- typography ---------- */
@@ -167,8 +202,8 @@
   .btn:hover{background:var(--panel-hi);border-color:var(--paper-faint);}
   .btn-primary{background:var(--paper);color:var(--ink);border-color:var(--paper);}
   .btn-primary:hover{background:#fff;}
-  [data-theme="light"] .btn-primary{background:var(--amber);color:#fff;border-color:var(--amber);box-shadow:0 2px 8px var(--amber-glow);}
-  [data-theme="light"] .btn-primary:hover{background:#2857BB;}
+  [data-theme="light"] .btn-primary, [data-theme="boardroom"] .btn-primary{background:var(--amber);color:#fff;border-color:var(--amber);box-shadow:0 2px 8px var(--amber-glow);}
+  [data-theme="light"] .btn-primary:hover, [data-theme="boardroom"] .btn-primary:hover{background:#2857BB;}
   .btn-danger{background:var(--red-soft);color:var(--red);border-color:rgba(221,81,71,.35);}
   .btn-danger:hover{background:rgba(221,81,71,.22);}
   .btn-ghost{background:transparent;border-color:transparent;color:var(--paper-dim);}
@@ -1828,7 +1863,7 @@ function renderWorkstreamWidgets(m){
       const rows = times.length
         ? times.map(t=>`<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
             <span style="font-size:12px;color:var(--paper);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;">${t.name}</span>
-            <span style="font-family:'DSEG7 Modern',var(--f-mono);font-size:15px;color:var(--paper-dim);">${t.time}${t.dayNote?` <span style="font-family:var(--f-mono);font-size:9px;color:var(--paper-faint);">${t.dayNote}</span>`:''}</span>
+            <span style="font-family:var(--f-mono);font-size:15px;font-weight:700;color:var(--paper-dim);">${t.time}${t.dayNote?` <span style="font-family:var(--f-mono);font-size:9px;color:var(--paper-faint);">${t.dayNote}</span>`:''}</span>
           </div>`).join('')
         : `<div class="muted" style="font-size:12px;margin-top:2px;">No cities selected</div>`;
       const bg = `${DASHBOARD_WIDGET_COLORS.wg_worldclock}1A`;
@@ -2687,12 +2722,25 @@ function renderFocusAreaHome(){
     </div>`;
   }).join('');
 
-  return `
+  const isBoardroom = (currentUser() && currentUser().themePreference) === 'boardroom';
+  const heroHeader = isBoardroom ? `
+    <div style="position:relative;overflow:hidden;background:var(--hero-bg);border-radius:16px;padding:28px 32px;margin-bottom:20px;">
+      <div style="position:absolute;top:-60px;right:-40px;width:220px;height:220px;border-radius:50%;background:var(--amber);opacity:.12;pointer-events:none;"></div>
+      <div style="position:absolute;bottom:-70px;right:120px;width:150px;height:150px;border-radius:50%;background:#F5A623;opacity:.1;pointer-events:none;"></div>
+      <div class="eyebrow" style="color:var(--hero-text-faint);position:relative;">Focus Area</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;position:relative;">
+        <h1 class="page-title" style="margin-bottom:0;color:#fff;">Everything for your focus, in one place.</h1>
+        <div class="section-title" style="white-space:nowrap;display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Today — ${fmtDate(today)}</div>
+      </div>
+    </div>` : `
     <div class="eyebrow">Focus Area</div>
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:2px;">
       <h1 class="page-title" style="margin-bottom:0;">Everything for your focus, in one place.</h1>
       <div class="section-title" style="white-space:nowrap;">Today — ${fmtDate(today)}</div>
-    </div>
+    </div>`;
+
+  return `
+    ${heroHeader}
 
     ${workstreamWidgetsCard}
 
@@ -6330,7 +6378,8 @@ function renderMyAccount(){
   const current = (cu && cu.themePreference) || 'light';
   const themes = [
     {id:'dark', name:'Dark', desc:'The original theme.'},
-    {id:'light', name:'ImproveID Theme', desc:'A clean, bright look.'}
+    {id:'light', name:'ImproveID Theme', desc:'A clean, bright look.'},
+    {id:'boardroom', name:'Boardroom', desc:'The look from our leadership presentation.'}
   ];
   const widgetOrder = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
   const enabledSet = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);

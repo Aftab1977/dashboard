@@ -2650,20 +2650,31 @@ function bindView(){
 function renderLogin(){
   const userCount = (state && Array.isArray(state.users)) ? state.users.length : 0;
   const logoUrl = state && state.settings && state.settings.logoUrl;
+  const theme = getPreLoginTheme();
+  const isDarkPanel = theme !== 'light';
+  const panelBg = isDarkPanel ? '#0D1316' : '#0060BF';
+  const btnColor = isDarkPanel ? '#1A1A1A' : '#0060BF';
+  const headlineFont = isDarkPanel ? "'Bitter',serif" : "'Barlow Condensed',sans-serif";
   return `
-  <div class="login-shell">
-    <div class="login-card">
-      ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="login-logo">` : ''}
-      <div class="login-title">ImproveID Workspace</div>
-      <div class="muted" style="font-size:13px;text-align:center;">Everything for your focus, in one place.</div>
-      <div class="mono" id="loginDateTime" style="font-size:11px;color:var(--paper-faint);margin-top:6px;text-align:center;">${fmtDate(todayISO())} · ${nowTimeIST()} IST</div>
-      <form id="loginForm" style="margin-top:22px;">
-        <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
-        <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" required></div>
-        <button class="btn btn-primary" type="button" id="loginSubmitBtn" style="width:100%;justify-content:center;margin-top:16px;">Sign in</button>
-        <div class="login-error">${ui.loginError}</div>
-      </form>
-      ${userCount === 0 ? `<div style="margin-top:16px;text-align:center;"><button class="btn btn-sm btn-danger" type="button" id="resetDataBtn">Reset &amp; reload demo data</button></div>` : ''}
+  <div class="login-shell" style="display:flex;align-items:stretch;justify-content:stretch;padding:0;">
+    <div style="flex:1 1 75%;position:relative;overflow:hidden;background:${panelBg};display:flex;flex-direction:column;justify-content:center;padding:60px;min-height:100vh;">
+      <div style="position:relative;">
+        <div style="font-family:${headlineFont};font-weight:700;font-size:44px;line-height:1.15;color:#fff;max-width:520px;">Everything for your focus, in one place.</div>
+        <div style="font-family:${headlineFont};font-weight:600;font-size:20px;color:rgba(255,255,255,.75);margin-top:16px;">ImproveID Workspace</div>
+      </div>
+    </div>
+    <div style="flex:1 1 25%;display:flex;align-items:center;justify-content:center;background:#fff;min-height:100vh;padding:20px;">
+      <div class="login-card" style="border:none;box-shadow:none;max-width:360px;">
+        ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="login-logo">` : ''}
+        <div class="mono" id="loginDateTime" style="font-size:11px;color:var(--paper-faint);margin-top:6px;text-align:center;">${fmtDate(todayISO())} · ${nowTimeIST()} IST</div>
+        <form id="loginForm" style="margin-top:22px;">
+          <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
+          <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" required></div>
+          <button class="btn btn-primary" type="button" id="loginSubmitBtn" style="width:100%;justify-content:center;margin-top:16px;background:${btnColor};border-color:${btnColor};">Sign in</button>
+          <div class="login-error">${ui.loginError}</div>
+        </form>
+        ${userCount === 0 ? `<div style="margin-top:16px;text-align:center;"><button class="btn btn-sm btn-danger" type="button" id="resetDataBtn">Reset &amp; reload demo data</button></div>` : ''}
+      </div>
     </div>
   </div>`;
 }
@@ -2696,6 +2707,7 @@ function bindLogin(){
       const match = state.users.find(x=> x.username.toLowerCase()===u && x.password===p);
       if(!match){ ui.loginError = 'Username or password not recognized. Check for extra spaces or try one of the demo logins below.'; render(); return; }
       session.userId = match.id; persistSession();
+      try{ localStorage.setItem('lastLoginTheme', match.themePreference || 'boardroom'); }catch(e){}
       ui.loginError='';
       ui.view='home';
       try{
@@ -5235,7 +5247,7 @@ function renderProject(){
   const switcherOptions = visibleProjects();
 
   return `
-    ${((currentUser() && currentUser().themePreference)==='boardroom' && ui.view!=='home') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Workstream', p.name) : ''}
     <div class="filters" style="margin-bottom:16px;">
       <select id="workstreamSwitcher">
         ${switcherOptions.map(sp=>`<option value="${sp.id}" ${sp.id===p.id?'selected':''}>${sp.name}</option>`).join('')}
@@ -6467,15 +6479,25 @@ function bindAssignments(){
 /* ============================== ADMIN ============================== */
 
 // Applies whichever theme the current user prefers — called on every render so it's
-// always correct regardless of how that render was triggered.
+// always correct regardless of how that render was triggered. Before anyone's
+// signed in, there's no user preference to check yet, so this falls back to
+// whichever theme this browser last saw (see getPreLoginTheme), or Boardroom
+// on a genuinely first-ever visit.
+function getPreLoginTheme(){
+  try{
+    const stored = localStorage.getItem('lastLoginTheme');
+    if(stored === 'boardroom' || stored === 'light' || stored === 'dark') return stored;
+  }catch(e){}
+  return 'boardroom';
+}
 function applyTheme(){
   const cu = currentUser();
-  document.documentElement.setAttribute('data-theme', (cu && cu.themePreference) || 'light');
+  document.documentElement.setAttribute('data-theme', cu ? (cu.themePreference || 'boardroom') : getPreLoginTheme());
 }
 
 function renderMyAccount(){
   const cu = currentUser();
-  const current = (cu && cu.themePreference) || 'light';
+  const current = (cu && cu.themePreference) || 'boardroom';
   const themes = [
     {id:'dark', name:'Dark', desc:'The original theme.'},
     {id:'light', name:'ImproveID Theme', desc:'A clean, bright look.'},
@@ -6547,6 +6569,7 @@ function bindMyAccount(){
       const cu = currentUser();
       if(!cu || !input.checked) return;
       cu.themePreference = input.value;
+      try{ localStorage.setItem('lastLoginTheme', input.value); }catch(e){}
       persist();
       render();
     });

@@ -83,10 +83,10 @@
     --red:#DD5147;
     --red-soft:#FCEAE8;
     --red-glow:rgba(221,81,71,.22);
-    --amber:#0060BF;
-    --amber-soft:#E8F1F9;
-    --amber-border:rgba(0,96,191,.35);
-    --amber-glow:rgba(0,96,191,.3);
+    --amber:#1A1A1A;
+    --amber-soft:#EDEDED;
+    --amber-border:rgba(26,26,26,.35);
+    --amber-glow:rgba(0,0,0,.28);
     --blocker:#CC5500;
     --blocker-soft:#FBEDE3;
     --blocker-border:rgba(204,85,0,.35);
@@ -2547,12 +2547,32 @@ function navBtn(view, icon, label){
 // glowing accent circles, account info above the date/time pill (top-right),
 // and a Go Back button below the title (left) when there's somewhere to go
 // back to. This scrolls away with the page — it is not pinned/sticky.
-function renderPageHero(eyebrowText, titleText){
+// Shared palette for Boardroom's multi-color lists — same colors already used
+// for the dashboard cards and module dots, cycled in order so any list gets
+// visually distinct, consistent colors regardless of how many items it has.
+const BOARDROOM_CYCLE_COLORS = ['#16A085','#F5A623','#E91E8C','#9B59B6','#33A85C','#CC5500','#DD5147','#4C8DFF'];
+function boardroomColor(index){
+  return BOARDROOM_CYCLE_COLORS[index % BOARDROOM_CYCLE_COLORS.length];
+}
+function isBoardroomTheme(){
+  return (currentUser() && currentUser().themePreference) === 'boardroom';
+}
+// Computes the same cycled color for a heading node wherever it's shown — the
+// list view and that heading's own detail page always agree, since both derive
+// the color from the node's position among its sibling headings.
+function headingColorForNode(node){
+  if(!node || !node.parentId) return boardroomColor(0);
+  const siblings = featureChildren(node.parentId).filter(c=>c.nodeType===node.nodeType);
+  const idx = siblings.findIndex(s=>s.id===node.id);
+  return boardroomColor(idx>=0 ? idx : 0);
+}
+function renderPageHero(eyebrowText, titleText, accentColor){
   const cu = currentUser();
+  const c = accentColor || 'var(--amber)';
   return `
     <div style="position:relative;overflow:hidden;background:var(--hero-bg);border-radius:16px;padding:24px 32px 28px;margin-bottom:20px;">
-      <div style="position:absolute;top:-60px;right:-40px;width:220px;height:220px;border-radius:50%;background:var(--amber);opacity:.12;pointer-events:none;"></div>
-      <div style="position:absolute;bottom:-70px;right:120px;width:150px;height:150px;border-radius:50%;background:#F5A623;opacity:.1;pointer-events:none;"></div>
+      <div style="position:absolute;top:-60px;right:-40px;width:220px;height:220px;border-radius:50%;background:${c};opacity:.16;pointer-events:none;"></div>
+      <div style="position:absolute;bottom:-70px;right:120px;width:150px;height:150px;border-radius:50%;background:${c};opacity:.1;pointer-events:none;"></div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;position:relative;">
         <div style="flex:1;min-width:0;">
           <div class="eyebrow" style="color:var(--hero-text-faint);">${eyebrowText}</div>
@@ -2561,7 +2581,7 @@ function renderPageHero(eyebrowText, titleText){
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0;">
           <div class="who" style="color:rgba(255,255,255,.9);"><span>${cu ? cu.name : ''}</span><div class="avatar" style="background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);">${cu ? initials(cu.name) : ''}</div></div>
-          <div class="section-title" style="white-space:nowrap;display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">
+          <div class="section-title" style="white-space:nowrap;display:inline-block;background:${c};color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px rgba(0,0,0,.25);">
             ${fmtDate(todayISO())}
             <div style="font-size:10.5px;font-weight:600;opacity:.85;margin-top:2px;text-align:center;">${nowTimeIST()} IST</div>
           </div>
@@ -3253,10 +3273,11 @@ function renderAttendanceSheet(node){
   ).join('') + `<span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--panel-raised);border:1px dashed var(--paper-faint);margin-right:5px;"></span>WO = Weekly off${admin?' — click to mark Present, click again to revert':''}</span>`;
 
   return `
-    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Heading', node.name, headingColorForNode(node)) : `
     <div class="eyebrow">Heading</div>
     <h1 class="page-title" style="margin-bottom:4px;">${node.name}</h1>
-    <div class="muted" style="font-size:15px;font-family:var(--f-display);margin-bottom:16px;">${monthLabelLong(monthKey)}</div>
+    <div class="muted" style="font-size:15px;font-family:var(--f-display);margin-bottom:16px;">${monthLabelLong(monthKey)}</div>`}
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<div class="muted" style="font-size:14px;font-family:var(--f-display);margin-bottom:16px;">${monthLabelLong(monthKey)}</div>` : ''}
 
     <div class="filters" style="margin-bottom:14px;">
       <select id="attMonthSelect">
@@ -3402,9 +3423,9 @@ function renderAppraisalSheet(node){
   const admin = isAdmin();
   if(!admin){
     return `
-      ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
+      ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Heading', node.name, headingColorForNode(node)) : `
       <div class="eyebrow">Heading</div>
-      <h1 class="page-title" style="margin-bottom:16px;">${node.name}</h1>
+      <h1 class="page-title" style="margin-bottom:16px;">${node.name}</h1>`}
       <div class="empty-state"><div class="et">Admins only</div>Appraisal and salary details are restricted to admins.</div>
     `;
   }
@@ -3434,10 +3455,11 @@ function renderAppraisalSheet(node){
   }).join('');
 
   return `
-    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Heading', node.name, headingColorForNode(node)) : `
     <div class="eyebrow">Heading</div>
     <h1 class="page-title" style="margin-bottom:6px;">${node.name}</h1>
-    <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>
+    <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>`}
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>` : ''}
     <div class="att-wrap">
       <table class="att-table" style="font-size:12px;">
         <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
@@ -3803,18 +3825,21 @@ function renderContentItem(it, headingId){
 // A Heading shown on its parent Module/Feature page — always a simple clickable box
 // that navigates to the Heading's own dedicated page (or its special sheet, if it has
 // one). Never expands inline here.
-function renderHeadingBox(h, showHandle){
+function renderHeadingBox(h, showHandle, index){
   const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : h.specialView==='appraisal' ? 'Appraisal sheet — click to open' : null;
   const cnt = (h.contentItems||[]).length + featureChildren(h.id).length;
   const subtitle = h.description ? h.description : (label || (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet'));
   const handle = (showHandle && isAdmin()) ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : '';
+  const isBoardroom = isBoardroomTheme();
+  const c = isBoardroom ? headingColorForNode(h) : 'var(--amber)';
+  const glow = isBoardroom ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
   return `
-    <div class="card drag-node" style="margin-bottom:14px;border-left:4px solid var(--amber);" ${isAdmin()?`draggable="true" data-drag-node="${h.id}"`:''}>
+    <div class="card drag-node" style="margin-bottom:14px;border-left:4px solid ${c};" ${isAdmin()?`draggable="true" data-drag-node="${h.id}"`:''}>
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
           ${handle}
           <div>
-            <div class="heading-name" style="display:inline-block;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${h.name}</div>
+            <div class="heading-name" style="display:inline-block;background:${c};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${glow};">${h.name}</div>
             <div class="muted" style="font-size:12px;margin-top:6px;">${subtitle}</div>
           </div>
         </div>
@@ -3830,11 +3855,13 @@ function renderHeadingBox(h, showHandle){
 // collapsible, recursively, however deep it goes.
 function renderSubHeadingCollapsible(h, depth){
   if(h.specialView){
+    const shc = isBoardroomTheme() ? headingColorForNode(h) : 'var(--amber)';
+    const shglow = isBoardroomTheme() ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
     return `
-    <div class="card drag-node" style="margin-bottom:14px;margin-left:${depth*20}px;border-left:4px solid var(--amber);">
+    <div class="card drag-node" style="margin-bottom:14px;margin-left:${depth*20}px;border-left:4px solid ${shc};">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;">
-          <div class="heading-name" style="display:inline-block;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${h.name}</div>
+          <div class="heading-name" style="display:inline-block;background:${shc};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${shglow};">${h.name}</div>
           <div class="muted" style="font-size:12px;margin-top:6px;">${h.description || 'Click to open'}</div>
         </div>
         ${isAdmin() ? `<button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>` : ''}
@@ -3849,12 +3876,14 @@ function renderSubHeadingCollapsible(h, depth){
       ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
     </div>`).join('');
   const forceOpen = (ui.expandNodeIds||[]).includes(h.id);
+  const chc = isBoardroomTheme() ? headingColorForNode(h) : 'var(--amber)';
+  const chglow = isBoardroomTheme() ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
   return `
     <div class="heading-card" style="margin-left:${depth*20}px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <div data-toggle-heading="${h.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
           <span id="harrow-${h.id}" class="collapse-arrow">${forceOpen?'▾':'▸'}</span>
-          <div class="heading-name" style="display:inline-block;background:var(--amber);color:#fff;padding:5px 13px;border-radius:7px;font-size:13px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${h.name}</div>
+          <div class="heading-name" style="display:inline-block;background:${chc};color:#fff;padding:5px 13px;border-radius:7px;font-size:13px;font-weight:700;box-shadow:${chglow};">${h.name}</div>
         </div>
         ${isAdmin() ? `<div class="row-actions">
           <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
@@ -3922,8 +3951,9 @@ function renderFeatureNode(){
   if(node.nodeType==='heading' || node.nodeType==='subheading'){
     const isBoardroom = (currentUser() && currentUser().themePreference) === 'boardroom';
     if(isBoardroom){
+      const heroColor = headingColorForNode(node);
       return `
-        ${renderPageHero(node.nodeType==='heading'?'Heading':'Sub Heading', node.name)}
+        ${renderPageHero(node.nodeType==='heading'?'Heading':'Sub Heading', node.name, heroColor)}
         <div class="card">${renderHeadingPageBody(node)}</div>
       `;
     }
@@ -3938,16 +3968,18 @@ function renderFeatureNode(){
   const subFeatures = children.filter(c=>(c.nodeType==='feature'||c.nodeType==='subfeature') && canSeeNode(c.id));
   const headings = children.filter(c=>c.nodeType==='heading' && canSeeNode(c.id));
 
-  const subFeatureBoxes = subFeatures.map(sf=>{
+  const subFeatureBoxes = subFeatures.map((sf,sfi)=>{
     const cnt = featureChildren(sf.id).length;
     const subtitle = sf.description ? sf.description : (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet');
+    const sfc = isBoardroomTheme() ? boardroomColor(sfi) : 'var(--amber)';
+    const sfglow = isBoardroomTheme() ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
     return `
-    <div class="card drag-node" style="margin-bottom:14px;border-left:4px solid var(--amber);" ${isAdmin()?`draggable="true" data-drag-node="${sf.id}"`:''}>
+    <div class="card drag-node" style="margin-bottom:14px;border-left:4px solid ${sfc};" ${isAdmin()?`draggable="true" data-drag-node="${sf.id}"`:''}>
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div data-open-feature="${sf.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
           ${isAdmin() ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : ''}
           <div>
-            <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${sf.name}</div>
+            <div style="display:inline-block;background:${sfc};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${sfglow};">${sf.name}</div>
             <div class="muted" style="font-size:12px;margin-top:6px;">${subtitle}</div>
           </div>
         </div>
@@ -3959,7 +3991,7 @@ function renderFeatureNode(){
     </div>`;
   }).join('');
 
-  const headingCards = headings.map(h=>renderHeadingBox(h, true)).join('');
+  const headingCards = headings.map((h,i)=>renderHeadingBox(h, true, i)).join('');
 
   return `
     ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero(node.parentId ? 'Feature' : 'Module', node.name) : `
@@ -4466,12 +4498,13 @@ function renderReminders(node){
         : r.content.type==='image' ? 'Image attached'
         : r.content.fileName)
       : null;
+    const rowColor = isBoardroomTheme() ? boardroomColor(i) : 'var(--amber)';
     return `
     <div style="display:flex;align-items:center;gap:16px;padding:14px 18px;${i<list.length-1?'border-bottom:1px solid var(--line-soft);':''}${r.active?'':'opacity:.5;'}">
-      <div style="width:4px;align-self:stretch;background:var(--amber);border-radius:3px;flex-shrink:0;"></div>
+      <div style="width:4px;align-self:stretch;background:${rowColor};border-radius:3px;flex-shrink:0;"></div>
       <div style="width:44px;flex-shrink:0;">${dateBadge}</div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:14.5px;font-weight:700;color:var(--amber);">${r.title}${r.active?'':' <span class="muted" style="font-weight:400;font-size:11.5px;">(deactivated)</span>'}</div>
+        <div style="font-size:14.5px;font-weight:700;color:${rowColor};">${r.title}${r.active?'':' <span class="muted" style="font-weight:400;font-size:11.5px;">(deactivated)</span>'}</div>
         ${contentLine ? `<div class="muted" style="font-size:12px;margin-top:2px;">${contentLine}</div>` : ''}
         <div class="muted" style="font-size:12px;margin-top:1px;">Repeats: ${REMINDER_REPEAT_LABELS[r.repeat]}</div>
       </div>
@@ -4481,10 +4514,11 @@ function renderReminders(node){
       <button class="btn btn-sm btn-danger" data-delete-reminder="${r.id}" style="flex-shrink:0;">Delete</button>
     </div>`;
   }).join('');
+  const isBoardroom = (currentUser() && currentUser().themePreference)==='boardroom';
   return `
-    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
+    ${isBoardroom ? renderPageHero('Heading', 'Reminders') : `
     <div class="eyebrow">Heading</div>
-    <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">Reminders</h1>
+    <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">Reminders</h1>`}
     <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addReminderBtn">+ New</button>
     ${rows ? `<div class="card" style="padding:0;overflow:hidden;">${rows}</div>` : `<div class="empty-state"><div class="et">No reminders yet</div></div>`}
   `;
@@ -4498,13 +4532,15 @@ function bindReminders(){
 }
 
 function renderWorldClockPage(node){
+  const isBoardroom = (currentUser() && currentUser().themePreference)==='boardroom';
   return `
-    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
+    ${isBoardroom ? renderPageHero('Heading', 'World Clock') : `
     <div style="margin-bottom:14px;">
       <div class="eyebrow">Heading</div>
       <h1 class="page-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">World Clock</h1>
       <div class="muted" style="font-size:12px;">Pick up to 3 — personal to you. Adding a 4th replaces the oldest one. Reorder with the arrows to set your priority.</div>
-    </div>
+    </div>`}
+    ${isBoardroom ? `<div class="muted" style="font-size:12px;margin-bottom:14px;">Pick up to 3 — personal to you. Adding a 4th replaces the oldest one. Reorder with the arrows to set your priority.</div>` : ''}
     <div id="wcCurrentList"></div>
     <div class="card">
       <div class="field" style="margin-bottom:0;">
@@ -4529,10 +4565,10 @@ function renderWorldClockCurrentList(){
   if(!list) return;
   const cities = (cu.worldClockCities||[]).map(id=>worldCityById(id)).filter(Boolean);
   list.innerHTML = cities.length ? cities.map((c,i)=>`
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${isBoardroomTheme()?boardroomColor(i):'var(--amber)'};">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">
         <div style="flex:1;min-width:0;">
-          <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);">${c.name}</div>
+          <div style="display:inline-block;background:${isBoardroomTheme()?boardroomColor(i):'var(--amber)'};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${isBoardroomTheme()?'0 2px 8px rgba(0,0,0,.2)':'0 2px 8px var(--amber-glow)'};">${c.name}</div>
           <div class="muted" style="font-size:12px;margin-top:6px;">${c.country}</div>
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0;">
@@ -6259,7 +6295,8 @@ function renderAssignments(){
   const showCalendarFor = scoped; // show each scoped card's own calendar, whether it's one person or a whole team
   const availableMonths = monthsInRange(allRows);
 
-  const cards = rows.map(r=>{
+  const cards = rows.map((r,personIdx)=>{
+    const personColor = isBoardroomTheme() ? boardroomColor(personIdx) : null;
     const headerStatus = r.openCount===0
       ? pill('green','Available')
       : (r.openTasks.some(t=>t.blockedByTeamId) ? pill('blocker', 'Blocked')
@@ -6315,7 +6352,7 @@ function renderAssignments(){
       </div>
       ${taskList.length ? `
       <table>
-        <thead><tr><th>Task</th><th>Timeline</th><th>Category</th><th>Closed</th><th>Status</th></tr></thead>
+        <thead><tr>${personColor ? `<th style="background:${personColor};border-radius:8px 0 0 0;">Task</th><th style="background:${personColor};">Timeline</th><th style="background:${personColor};">Category</th><th style="background:${personColor};">Closed</th><th style="background:${personColor};border-radius:0 8px 0 0;">Status</th>` : `<th>Task</th><th>Timeline</th><th>Category</th><th>Closed</th><th>Status</th>`}</tr></thead>
         <tbody>${taskRowsHtml}</tbody>
       </table>` : `<div class="empty-state" style="padding:20px;">${emptyMsg}</div>`}
       ${showCalendarFor ? `<div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft);"><div class="section-title" style="font-size:15px;margin-bottom:10px;">${monthLabel(monthFilter||todayISO().slice(0,7))}</div>${buildCalendarHtml(r, monthFilter||todayISO().slice(0,7), r.current?r.current.id:null)}</div>` : ''}
@@ -6593,30 +6630,36 @@ function renderAdminUsers(){
 
 function renderAdminSettings(){
   const admin = currentUser();
+  const ac0 = isBoardroomTheme() ? boardroomColor(0) : 'var(--amber)';
+  const ac1 = isBoardroomTheme() ? boardroomColor(1) : 'var(--amber)';
+  const ac2 = isBoardroomTheme() ? boardroomColor(2) : 'var(--amber)';
+  const ac3 = isBoardroomTheme() ? boardroomColor(3) : 'var(--amber)';
+  const ac4 = isBoardroomTheme() ? boardroomColor(4) : 'var(--amber)';
+  const acGlow = isBoardroomTheme() ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
   return `
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac0};">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Your account</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:${ac0};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Your account</div>
           <div class="muted" style="font-size:12px;">${admin ? admin.name+' · '+admin.username : ''}</div>
         </div>
         <button class="btn btn-sm" data-change-password="${admin?admin.id:''}">Change my password</button>
       </div>
     </div>
     ${(HAS_CLAUDE_STORAGE && !supaClient) ? `
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac1};">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Data recovery</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:${ac1};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Data recovery</div>
           <div class="muted" style="font-size:12px;">Check for data stranded in an older storage location and load it in.</div>
         </div>
         <button class="btn btn-sm" id="recoverLegacyBtn">Check for legacy data</button>
       </div>
     </div>` : ''}
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac2};">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
         <div>
-          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Login page logo</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:${ac2};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Login page logo</div>
           <div class="muted" style="font-size:12px;">Shows above the title on the sign-in page, for everyone. Best as a wide rectangle — it'll be scaled to fit.</div>
           ${state.settings && state.settings.logoUrl ? `<div style="margin-top:10px;"><img src="${state.settings.logoUrl}" alt="Current logo" style="max-width:180px;max-height:60px;object-fit:contain;border:1px solid var(--line);border-radius:6px;padding:6px;background:#fff;"></div>` : ''}
         </div>
@@ -6628,10 +6671,10 @@ function renderAdminSettings(){
       </div>
       <div class="login-error" id="logoUploadError"></div>
     </div>
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac3};">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">
         <div>
-          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Content upload limit</div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:${ac3};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Content upload limit</div>
           <div class="muted" style="font-size:12px;">The largest file size allowed for images, documents, and videos added to any Module.</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
@@ -6641,9 +6684,9 @@ function renderAdminSettings(){
         </div>
       </div>
     </div>
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac4};">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div class="section-title" style="display:inline-block;margin-bottom:0;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Workspace Copilot Details</div>
+        <div class="section-title" style="display:inline-block;margin-bottom:0;background:${ac4};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Workspace Copilot Details</div>
         <label class="toggle-switch" title="${state.settings.aiCopilotEnabled ? 'Turn off for everyone' : 'Turn on for everyone with access'}">
           <input type="checkbox" id="aiCopilotToggle" ${state.settings.aiCopilotEnabled?'checked':''}>
           <div class="toggle-track"></div>
@@ -6712,9 +6755,14 @@ function renderCopilotAnalytics(){
     </div>
   `).join('');
 
+  const caAc0 = isBoardroomTheme() ? boardroomColor(0) : 'var(--amber)';
+  const caAc1 = isBoardroomTheme() ? boardroomColor(1) : 'var(--amber)';
+  const caAc2 = isBoardroomTheme() ? boardroomColor(2) : 'var(--amber)';
+  const caAc3 = isBoardroomTheme() ? boardroomColor(3) : 'var(--amber)';
+  const caGlow = isBoardroomTheme() ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
   return `
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
-      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Overview</div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${caAc0};">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:${caAc0};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${caGlow};">Overview</div>
       <div style="display:flex;gap:32px;flex-wrap:wrap;">
         <div><div style="font-size:22px;font-weight:700;color:var(--paper);">${logs.length}</div><div class="muted" style="font-size:11px;">total questions</div></div>
         <div><div style="font-size:22px;font-weight:700;color:var(--paper);">$${totalCost.toFixed(4)}</div><div class="muted" style="font-size:11px;">total cost</div></div>
@@ -6723,22 +6771,22 @@ function renderCopilotAnalytics(){
       </div>
       <div class="muted" style="font-size:11px;margin-top:10px;">Costs shown are calculated based on <b>${provider}, model ${model}</b> — if that ever changes, only figures from after the change reflect the new provider; earlier numbers stay as they were.</div>
     </div>
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
-      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Usage by month</div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${caAc1};">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:${caAc1};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${caGlow};">Usage by month</div>
       <table class="ai-msg-table" style="width:100%;">
         <tr><th>Month</th><th>Questions</th><th>Total cost</th><th>Summary feature cost</th><th>Unhelpful</th></tr>
         ${monthRows}
       </table>
     </div>
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
-      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Questions per person</div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${caAc2};">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:${caAc2};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${caGlow};">Questions per person</div>
       <table class="ai-msg-table" style="width:100%;">
         <tr><th>Person</th><th>Questions asked</th></tr>
         ${userRows}
       </table>
     </div>
-    <div class="card" style="border-left:4px solid var(--amber);">
-      <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Recent unhelpful responses</div>
+    <div class="card" style="border-left:4px solid ${caAc3};">
+      <div class="section-title" style="display:inline-block;margin-bottom:6px;background:${caAc3};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${caGlow};">Recent unhelpful responses</div>
       <div class="muted" style="font-size:12px;margin-bottom:8px;">Real questions and answers flagged as likely unhelpful — a good place to look for actual gaps worth fixing.</div>
       ${unhelpfulRows || '<div class="muted" style="font-size:13px;">None found — nothing flagged as unhelpful yet.</div>'}
     </div>
@@ -6754,12 +6802,14 @@ function renderCopilotAnalytics(){
 // not built yet — this page is deliberately honest about that rather than
 // offering controls that wouldn't actually do anything.
 function renderAdminPermRoles(){
-  const cards = ROLE_INFO.map(r=>{
+  const cards = ROLE_INFO.map((r,ri)=>{
+    const rc = isBoardroomTheme() ? boardroomColor(ri) : 'var(--amber)';
+    const rglow = isBoardroomTheme() ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
     const count = state.users.filter(u=>u.role===r.id).length;
     return `
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber);">
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${rc};">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div class="section-title" style="display:inline-block;margin-bottom:0;background:var(--amber);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">${r.name}</div>
+        <div class="section-title" style="display:inline-block;margin-bottom:0;background:${rc};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${rglow};">${r.name}</div>
         <div class="mono muted" style="font-size:12px;">${count} user${count===1?'':'s'}</div>
       </div>
       <div class="muted" style="font-size:12px;margin-top:10px;line-height:1.55;">${r.desc}</div>

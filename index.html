@@ -146,6 +146,21 @@
     opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease;z-index:50;
   }
   .navrail.collapsed .navbtn:hover::after{opacity:1;visibility:visible;}
+  /* Generic site-wide tooltip — same dark style as the sidebar's, used on
+     every hover-info element across the app (widget cards, icon buttons,
+     pills, etc). Positioned above the element by default and wraps for
+     longer content; respects real line breaks in multi-line tooltips. */
+  [data-tooltip]{position:relative;}
+  [data-tooltip]::after{
+    content:attr(data-tooltip);
+    position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);
+    background:#1A1A1A;color:#fff;font-size:12.5px;font-weight:600;font-family:var(--f-body);
+    letter-spacing:normal;text-transform:none;white-space:pre-line;text-align:left;
+    max-width:280px;width:max-content;
+    padding:8px 12px;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.28);
+    opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease;z-index:60;
+  }
+  [data-tooltip]:hover::after{opacity:1;visibility:visible;}
   .navbtn{
     width:52px;height:52px;border-radius:13px;border:1px solid transparent;
     background:transparent;color:var(--paper-dim);display:flex;flex-direction:column;
@@ -1738,7 +1753,7 @@ function widgetBorder(id){
 function moduleSourceLabel(id){
   const meta = DASHBOARD_WIDGET_META[id];
   if(!meta || !meta.module) return '';
-  return `<div class="widget-source-label" data-widget-source="${meta.moduleId}" title="From the ${meta.module} module — click to open it" style="position:absolute;bottom:6px;right:10px;font-size:9.5px;font-weight:600;color:var(--paper-faint);cursor:pointer;text-decoration:underline dotted;">${meta.module}</div>`;
+  return `<div class="widget-source-label" data-widget-source="${meta.moduleId}" data-tooltip="From the ${meta.module} module — click to open it" style="position:absolute;bottom:6px;right:10px;font-size:9.5px;font-weight:600;color:var(--paper-faint);cursor:pointer;text-decoration:underline dotted;">${meta.module}</div>`;
 }
 function widgetCard({id, iconSvg, iconColor, label, value, lines, tooltip}){
   const bgTint = DASHBOARD_WIDGET_COLORS[id] || 'var(--panel-raised)';
@@ -1746,7 +1761,7 @@ function widgetCard({id, iconSvg, iconColor, label, value, lines, tooltip}){
   // tint that reads clearly as color without ever competing with the text on top.
   const bgStyle = bgTint.startsWith('#') ? `${bgTint}1A` : bgTint;
   return `
-    <div class="drag-node" style="position:relative;flex:1;min-width:150px;min-height:132px;box-sizing:border-box;background:${bgStyle};border:1.5px solid ${widgetBorder(id)};border-radius:12px;padding:14px;padding-bottom:22px;display:flex;align-items:center;gap:12px;cursor:grab;" draggable="true" data-widget-drag="${id}" ${tooltip?`title="${tooltip.replace(/"/g,'&quot;')}"`:''} ${(DASHBOARD_WIDGET_META[id]&&DASHBOARD_WIDGET_META[id].moduleId)?`data-widget-navigate="${DASHBOARD_WIDGET_META[id].moduleId}"`:''}>
+    <div class="drag-node" style="position:relative;flex:1;min-width:150px;min-height:132px;box-sizing:border-box;background:${bgStyle};border:1.5px solid ${widgetBorder(id)};border-radius:12px;padding:14px;padding-bottom:22px;display:flex;align-items:center;gap:12px;cursor:grab;" draggable="true" data-widget-drag="${id}" ${tooltip?`data-tooltip="${tooltip.replace(/"/g,'&quot;')}"`:''} ${(DASHBOARD_WIDGET_META[id]&&DASHBOARD_WIDGET_META[id].moduleId)?`data-widget-navigate="${DASHBOARD_WIDGET_META[id].moduleId}"`:''}>
       <div style="width:56px;height:56px;border-radius:50%;background:${iconColor}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
         ${iconSvg}
       </div>
@@ -1838,7 +1853,7 @@ function renderWorkstreamWidgets(m){
         : 'No active reminders';
       const bg = `${DASHBOARD_WIDGET_COLORS.wg_reminders}1A`;
       return `
-        <div class="drag-node" style="position:relative;flex:1;min-width:150px;min-height:132px;box-sizing:border-box;background:${bg};border:1.5px solid ${widgetBorder('wg_reminders')};border-radius:12px;padding:14px;padding-bottom:22px;cursor:grab;" draggable="true" data-widget-drag="wg_reminders" data-widget-navigate="h_reminders" title="${tooltip.replace(/"/g,'&quot;')}">
+        <div class="drag-node" style="position:relative;flex:1;min-width:150px;min-height:132px;box-sizing:border-box;background:${bg};border:1.5px solid ${widgetBorder('wg_reminders')};border-radius:12px;padding:14px;padding-bottom:22px;cursor:grab;" draggable="true" data-widget-drag="wg_reminders" data-widget-navigate="h_reminders" data-tooltip="${tooltip.replace(/"/g,'&quot;')}">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
             <div style="width:40px;height:40px;border-radius:50%;background:${DASHBOARD_WIDGET_COLORS.wg_reminders}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
               ${WIDGET_ICONS.bell(DASHBOARD_WIDGET_COLORS.wg_reminders)}
@@ -2037,7 +2052,7 @@ function donutGradient(pct, colorVar){
 function pill(status, label, tooltip){
   const cls = status==='red' ? 'pill-red' : status==='amber' ? 'pill-amber' : status==='blocker' ? 'pill-blocker' : 'pill-green';
   const pulse = status==='red' ? ' pulse' : '';
-  const titleAttr = tooltip ? ` title="${tooltip.replace(/"/g,'&quot;')}"` : '';
+  const titleAttr = tooltip ? ` data-tooltip="${tooltip.replace(/"/g,'&quot;')}"` : '';
   return `<span class="pill ${cls}"${titleAttr}><span class="dot${pulse}"></span>${label}</span>`;
 }
 
@@ -2110,7 +2125,7 @@ function render(){
           <div class="crumb">${breadcrumb()}</div>
         </div>
         <div style="display:flex;align-items:center;gap:16px;">
-          <div class="today-display mono" title="Today's date & time (IST)">${fmtDate(todayISO())}<div class="today-time" id="topbarTime">${nowTimeIST()} IST</div></div>
+          <div class="today-display mono" data-tooltip="Today's date & time (IST)">${fmtDate(todayISO())}<div class="today-time" id="topbarTime">${nowTimeIST()} IST</div></div>
           <div class="who"><span>${currentUser() ? currentUser().name : ''}</span><div class="avatar">${currentUser() ? initials(currentUser().name) : ''}</div></div>
         </div>
       </div>` : ''}
@@ -2169,7 +2184,7 @@ function renderMarkdownLite(text){
 }
 function applyInlineMd(s){
   const withBold = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-  return withBold.replace(/\[\[est:(.+?)\]\]/g, '<span class="ai-est-flag" title="This figure was calculated or estimated by the AI itself, not pulled directly from your data — worth double-checking.">⚠ $1</span>');
+  return withBold.replace(/\[\[est:(.+?)\]\]/g, '<span class="ai-est-flag" data-tooltip="This figure was calculated or estimated by the AI itself, not pulled directly from your data — worth double-checking.">⚠ $1</span>');
 }
 
 function aiAgentIconSvg(stateClass){
@@ -2214,7 +2229,7 @@ function renderAiAgentWidget(){
 
   root.innerHTML = `
     ${!ui.aiAgentOpen ? `<div class="ai-bubble-label" id="aiBubbleLabel">Workspace CoPilot</div>` : ''}
-    <div class="ai-bubble" id="aiBubbleBtn" title="Workspace CoPilot">
+    <div class="ai-bubble" id="aiBubbleBtn" data-tooltip="Workspace CoPilot">
       <div id="aiBubbleLottie" style="width:67px;height:67px;"></div>
     </div>
     <div class="ai-panel ${ui.aiAgentOpen?'open':''} ${ui.aiAgentMinimized?'minimized':''}" style="height:${ui.aiAgentMinimized?'auto':ui.aiAgentHeightVh+'vh'};">
@@ -2222,11 +2237,11 @@ function renderAiAgentWidget(){
         <div id="aiHeaderLottie" style="width:39px;height:39px;"></div>
         <div class="ai-panel-title">Workspace CoPilot</div>
         ${!ui.aiAgentMinimized ? `
-        <button class="ai-panel-btn" id="aiPanelShrinkBtn" title="Decrease height">−</button>
-        <button class="ai-panel-btn" id="aiPanelGrowBtn" title="Increase height">+</button>
+        <button class="ai-panel-btn" id="aiPanelShrinkBtn" data-tooltip="Decrease height">−</button>
+        <button class="ai-panel-btn" id="aiPanelGrowBtn" data-tooltip="Increase height">+</button>
         ` : ''}
-        <button class="ai-panel-btn" id="aiPanelMinimizeBtn" title="${ui.aiAgentMinimized?'Restore':'Minimize'}">${ui.aiAgentMinimized?'▢':'—'}</button>
-        <button class="ai-panel-close" id="aiPanelCloseBtn" title="Close">✕</button>
+        <button class="ai-panel-btn" id="aiPanelMinimizeBtn" data-tooltip="${ui.aiAgentMinimized?'Restore':'Minimize'}">${ui.aiAgentMinimized?'▢':'—'}</button>
+        <button class="ai-panel-close" id="aiPanelCloseBtn" data-tooltip="Close">✕</button>
       </div>
       ${(!ui.aiAgentMinimized && aiCtx) ? `<div class="ai-panel-context">${aiCtx.label}</div>` : ''}
       <div class="ai-panel-messages" id="aiPanelMessages">${messagesHtml}</div>
@@ -2672,8 +2687,8 @@ function renderLogin(){
   <div class="login-shell" style="display:flex;align-items:stretch;justify-content:stretch;padding:0;">
     <div style="flex:1 1 75%;position:relative;overflow:hidden;background:${panelBg};display:flex;flex-direction:column;justify-content:center;padding:60px;min-height:100vh;">
       <div style="position:relative;">
-        <div style="font-family:${headlineFont};font-weight:700;font-size:44px;line-height:1.15;color:#fff;max-width:520px;">Everything for your focus, in one place.</div>
-        <div style="font-family:${headlineFont};font-weight:600;font-size:20px;color:rgba(255,255,255,.75);margin-top:16px;">ImproveID Workspace</div>
+        <div style="font-family:${headlineFont};font-weight:700;font-size:57px;line-height:1.15;color:#fff;max-width:520px;">Everything for your focus, in one place.</div>
+        <div style="font-family:${headlineFont};font-weight:600;font-size:26px;color:rgba(255,255,255,.75);margin-top:16px;">ImproveID Workspace</div>
       </div>
     </div>
     <div style="flex:1 1 25%;display:flex;align-items:center;justify-content:center;background:#fff;min-height:100vh;padding:20px;">
@@ -2796,7 +2811,7 @@ function renderFocusAreaHome(){
         <div style="width:44px;height:44px;border-radius:50%;background:${modColor};margin-bottom:14px;"></div>
         <div style="font-family:var(--f-display);font-size:17px;font-weight:700;color:var(--paper);margin-bottom:6px;">${f.name}</div>
         <div class="muted" style="font-size:12.5px;">${subtitle || '<span style="color:var(--paper-faint);">No description yet</span>'}</div>
-        ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description" style="position:absolute;right:14px;top:14px;">✎</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" data-tooltip="Rename or add a description" style="position:absolute;right:14px;top:14px;">✎</button>` : ''}
       </div>`;
     }
     return `
@@ -2806,7 +2821,7 @@ function renderFocusAreaHome(){
           <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">${f.name}</div>
           <div class="muted" style="font-size:12px;margin-top:2px;">${subtitle || '<span style="color:var(--paper-faint);">No description yet</span>'}</div>
         </div>
-        ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" title="Rename or add a description" style="position:absolute;right:0;top:50%;transform:translateY(-50%);">✎</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-sm btn-ghost" data-edit-feature-desc="${f.id}" data-tooltip="Rename or add a description" style="position:absolute;right:0;top:50%;transform:translateY(-50%);">✎</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -3068,7 +3083,7 @@ function renderPortfolio(){
       ${lastClosedDate ? `<div class="proj-meta" style="margin-top:4px;"><span>CLOSED <b style="color:var(--paper);">${fmtDate(lastClosedDate)}</b></span></div>` : ''}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
         ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
-        ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" title="${blockedDetailForProject(s.p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+        ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" data-tooltip="${blockedDetailForProject(s.p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
       </div>
       <div class="proj-meta" style="margin-top:14px;">
         <span>${s.pct}% PROGRESS</span>
@@ -3854,7 +3869,7 @@ function renderHeadingBox(h, showHandle, index){
   const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : h.specialView==='appraisal' ? 'Appraisal sheet — click to open' : null;
   const cnt = (h.contentItems||[]).length + featureChildren(h.id).length;
   const subtitle = h.description ? h.description : (label || (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet'));
-  const handle = (showHandle && isAdmin()) ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : '';
+  const handle = (showHandle && isAdmin()) ? `<span class="drag-handle" data-tooltip="Drag to reorder">⠿</span>` : '';
   const isBoardroom = isBoardroomTheme();
   const c = isBoardroom ? headingColorForNode(h) : 'var(--amber)';
   const glow = isBoardroom ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
@@ -3869,7 +3884,7 @@ function renderHeadingBox(h, showHandle, index){
           </div>
         </div>
         ${isAdmin() ? `<div style="display:flex;gap:8px;">
-          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${h.id}" title="Rename or add a description">✎</button>
+          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${h.id}" data-tooltip="Rename or add a description">✎</button>
           <button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>
         </div>` : ''}
       </div>
@@ -3898,7 +3913,7 @@ function renderSubHeadingCollapsible(h, depth){
   const itemsHtml = items.map(it=>`
     <div style="position:relative;">
       ${renderContentItem(it, h.id)}
-      ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
+      ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" data-tooltip="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
     </div>`).join('');
   const forceOpen = (ui.expandNodeIds||[]).includes(h.id);
   const chc = isBoardroomTheme() ? headingColorForNode(h) : 'var(--amber)';
@@ -3913,7 +3928,7 @@ function renderSubHeadingCollapsible(h, depth){
         ${isAdmin() ? `<div class="row-actions">
           <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
           <button class="btn btn-sm btn-ghost" data-add-subheading="${h.id}">+ Add sub heading</button>
-          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${h.id}" title="Rename or add a description">✎</button>
+          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${h.id}" data-tooltip="Rename or add a description">✎</button>
           <button class="btn btn-sm btn-danger" data-delete-node="${h.id}">Delete</button>
         </div>` : ''}
       </div>
@@ -3932,7 +3947,7 @@ function renderHeadingPageBody(h){
   const itemsHtml = items.map(it=>`
     <div style="position:relative;">
       ${renderContentItem(it, h.id)}
-      ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
+      ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" data-tooltip="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
     </div>`).join('');
   return `
     ${isAdmin() ? `<div class="row-actions" style="margin-bottom:16px;">
@@ -4002,14 +4017,14 @@ function renderFeatureNode(){
     <div class="card drag-node" style="margin-bottom:14px;border-left:4px solid ${sfc};" ${isAdmin()?`draggable="true" data-drag-node="${sf.id}"`:''}>
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div data-open-feature="${sf.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
-          ${isAdmin() ? `<span class="drag-handle" title="Drag to reorder">⠿</span>` : ''}
+          ${isAdmin() ? `<span class="drag-handle" data-tooltip="Drag to reorder">⠿</span>` : ''}
           <div>
             <div style="display:inline-block;background:${sfc};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${sfglow};">${sf.name}</div>
             <div class="muted" style="font-size:12px;margin-top:6px;">${subtitle}</div>
           </div>
         </div>
         ${isAdmin() ? `<div style="display:flex;gap:8px;">
-          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${sf.id}" title="Rename or add a description">✎</button>
+          <button class="btn btn-sm btn-ghost" data-edit-feature-desc="${sf.id}" data-tooltip="Rename or add a description">✎</button>
           <button class="btn btn-sm btn-danger" data-delete-node="${sf.id}">Delete</button>
         </div>` : ''}
       </div>
@@ -4597,8 +4612,8 @@ function renderWorldClockCurrentList(){
           <div class="muted" style="font-size:12px;margin-top:6px;">${c.country}</div>
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0;">
-          <button type="button" class="btn btn-sm btn-ghost" data-wc-up="${c.id}" ${i===0?'disabled':''} title="Move up">↑</button>
-          <button type="button" class="btn btn-sm btn-ghost" data-wc-down="${c.id}" ${i===cities.length-1?'disabled':''} title="Move down">↓</button>
+          <button type="button" class="btn btn-sm btn-ghost" data-wc-up="${c.id}" ${i===0?'disabled':''} data-tooltip="Move up">↑</button>
+          <button type="button" class="btn btn-sm btn-ghost" data-wc-down="${c.id}" ${i===cities.length-1?'disabled':''} data-tooltip="Move down">↓</button>
           <button type="button" class="btn btn-sm btn-danger" data-wc-remove="${c.id}">Remove</button>
         </div>
       </div>
@@ -4933,7 +4948,7 @@ function renderProjectContentItem(it, projectId, canEdit){
   const name = it.title || it.fileName || (it.type==='text' ? 'Text note' : 'Untitled');
   return `<div class="content-item" style="position:relative;">
     <span class="ci-link" data-open-project-content="${projectId}|${it.id}" style="cursor:pointer;">${icon} ${name}</span>
-    ${canEdit ? `<button class="icon-btn" data-delete-project-content="${projectId}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
+    ${canEdit ? `<button class="icon-btn" data-delete-project-content="${projectId}|${it.id}" data-tooltip="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
   </div>`;
 }
 function openProjectContentPreviewModal(projectId, itemId){
@@ -5042,7 +5057,7 @@ function renderTaskAttachmentItem(it, taskId, canEdit){
   const name = it.title || it.fileName || 'Untitled';
   return `<div class="content-item" style="position:relative;">
     <span class="ci-link" data-open-task-attachment="${taskId}|${it.id}" style="cursor:pointer;">${icon} ${name}</span>
-    ${canEdit ? `<button class="icon-btn" data-delete-task-attachment="${taskId}|${it.id}" title="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
+    ${canEdit ? `<button class="icon-btn" data-delete-task-attachment="${taskId}|${it.id}" data-tooltip="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
   </div>`;
 }
 
@@ -5178,7 +5193,7 @@ function renderProject(){
       const lu = t.lastUpdated;
       const luText = lu ? `Updated by ${lu.byName} at ${fmtDateTime(lu.at)}` : 'Not yet updated';
       const attSummary = canSeeAttBadges ? taskAttendanceSummary(t) : null;
-      const attBadge = attSummary ? `<span class="rail-att-badge" title="${entityName(t.assignedType,t.assignedId)} (${attSummary.label.replace(/"/g,'&quot;')})">${attSummary.hasWFH ? '🏠' : ''}${attSummary.hasLeave ? '🌴' : ''}</span>` : '';
+      const attBadge = attSummary ? `<span class="rail-att-badge" data-tooltip="${entityName(t.assignedType,t.assignedId)} (${attSummary.label.replace(/"/g,'&quot;')})">${attSummary.hasWFH ? '🏠' : ''}${attSummary.hasLeave ? '🌴' : ''}</span>` : '';
       return `
         ${i>0 ? '<div class="rail-connector"></div>' : ''}
         <div class="rail-node ${color}" data-task-node="${t.id}" style="cursor:pointer;">          ${attBadge}
@@ -5273,7 +5288,7 @@ function renderProject(){
         ${p.description ? `<div class="muted" style="font-size:13px;margin-top:4px;max-width:640px;">${p.description}</div>` : ''}
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           ${pill(status, status==='red' ? `Delayed ${tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
-          ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" title="${blockedDetailForProject(p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+          ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" data-tooltip="${blockedDetailForProject(p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
         </div>
       </div>
       <div class="hero-metrics">
@@ -6276,7 +6291,7 @@ function buildCalendarHtml(row, monthKey, currentTaskId){
     const cls = `cal-day ${cat||''}${weekend?' weekend':''}${clickable?' admin-toggle':''}`;
     const toggleAttr = clickable ? ` data-cal-toggle="${iso}|${attributionTask.id}|${row.user.id}"` : '';
     const titleAttr = weekend ? (cat ? 'Worked this weekend — click to unmark' : (clickable ? 'Weekly off — click to mark as worked' : 'Weekly off')) : '';
-    cells += `<div class="${cls}"${toggleAttr} title="${titleAttr}">${d}</div>`;
+    cells += `<div class="${cls}"${toggleAttr} data-tooltip="${titleAttr}">${d}</div>`;
   }
   return `<div style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap;">
       <span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${CAL_COLOR.closed};margin-right:5px;"></span>Closed</span>
@@ -6723,7 +6738,7 @@ function renderAdminSettings(){
     <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac4};">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div class="section-title" style="display:inline-block;margin-bottom:0;background:${ac4};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Workspace Copilot Details</div>
-        <label class="toggle-switch" title="${state.settings.aiCopilotEnabled ? 'Turn off for everyone' : 'Turn on for everyone with access'}">
+        <label class="toggle-switch" data-tooltip="${state.settings.aiCopilotEnabled ? 'Turn off for everyone' : 'Turn on for everyone with access'}">
           <input type="checkbox" id="aiCopilotToggle" ${state.settings.aiCopilotEnabled?'checked':''}>
           <div class="toggle-track"></div>
         </label>
@@ -7540,7 +7555,7 @@ function openManageChecklistModal(teamId){
           ${t.checklist.map(item=>`
             <div class="field-row" data-cl-item="${item.id}" style="align-items:center;">
               <input type="text" class="clItemText" value="${item.text.replace(/"/g,'&quot;')}" style="flex:1;background:var(--ink);border:1px solid var(--line);border-radius:7px;padding:8px 10px;color:var(--paper);font-size:13px;">
-              <button type="button" class="icon-btn" data-remove-cl-item="${item.id}" title="Remove">✕</button>
+              <button type="button" class="icon-btn" data-remove-cl-item="${item.id}" data-tooltip="Remove">✕</button>
             </div>`).join('') || '<div class="hint">No checklist points yet — add one below.</div>'}
         </div>
         <div class="field-row">

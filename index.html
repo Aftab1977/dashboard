@@ -1926,18 +1926,18 @@ function renderWorkstreamWidgets(m){
       })();
       return `
         <div class="drag-node" style="position:relative;flex:1;min-width:150px;background:${bg};border:1.5px solid ${widgetBorder('wg_spend')};border-radius:12px;padding:14px;padding-bottom:22px;cursor:grab;" draggable="true" data-widget-drag="wg_spend" data-widget-navigate="feat_spend">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px;">
             <div style="width:40px;height:40px;border-radius:50%;background:${DASHBOARD_WIDGET_COLORS.wg_spend}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
               ${WIDGET_ICONS.dollar(DASHBOARD_WIDGET_COLORS.wg_spend)}
             </div>
             <div style="font-size:13px;font-weight:600;color:var(--paper);">Spend Overview</div>
           </div>
           ${data ? `
-          <div style="text-align:center;margin-top:8px;">
-            <div style="font-size:33px;font-weight:700;color:var(--paper);margin-top:2px;">${fmtUSD(data.latestTotal)}</div>
+          <div style="text-align:center;margin-top:-12px;">
+            <div style="font-size:33px;font-weight:700;color:var(--paper);line-height:1.1;">${fmtUSD(data.latestTotal)}</div>
             <div class="muted" style="font-size:11px;">${data.latestLabel}</div>
             ${changeHtml}
-          </div>` : `<div class="muted" style="font-size:12px;margin-top:2px;">No expenses logged yet</div>`}
+          </div>` : `<div class="muted" style="font-size:12px;">No expenses logged yet</div>`}
           ${moduleSourceLabel('wg_spend')}
         </div>`;
     })(),

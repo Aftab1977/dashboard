@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ImproveID Workspace — Workstream Timeline Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Bitter:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Bitter:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root, [data-theme="dark"]{
@@ -2592,24 +2592,25 @@ function headingColorForNode(node){
   const idx = siblings.findIndex(s=>s.id===node.id);
   return boardroomColor(idx>=0 ? idx : 0);
 }
-function renderPageHero(eyebrowText, titleText, accentColor){
+function renderPageHero(eyebrowText, titleText, accentColor, titleFontSize, showWorkspaceBtn){
   const cu = currentUser();
   const c = accentColor || 'var(--amber)';
+  const fsStyle = titleFontSize ? `font-size:${titleFontSize}px;` : '';
   return `
-    <div style="position:relative;overflow:hidden;background:var(--hero-bg);border-radius:16px;padding:24px 32px 28px;margin-bottom:20px;">
+    <div style="position:relative;overflow:hidden;background:var(--hero-bg);border-radius:16px;padding:24px 32px 15.83px;margin-bottom:20px;">
       <div style="position:absolute;top:-60px;right:-40px;width:220px;height:220px;border-radius:50%;background:${c};opacity:.16;pointer-events:none;"></div>
       <div style="position:absolute;bottom:-70px;right:120px;width:150px;height:150px;border-radius:50%;background:${c};opacity:.1;pointer-events:none;"></div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;position:relative;">
         <div style="flex:1;min-width:0;">
           <div class="eyebrow" style="color:var(--hero-text-faint);">${eyebrowText}</div>
-          <h1 class="page-title" style="margin-bottom:14px;color:#fff;">${titleText}</h1>
+          <h1 class="page-title" style="margin-bottom:14px;color:#fff;${fsStyle}">${titleText}</h1>
           ${ui.view!=='home' ? `<button class="btn btn-sm topbar-accent-btn" data-go-back>← Go Back</button>` : ''}
+          ${showWorkspaceBtn ? `<button class="btn btn-sm" style="background:#fff;color:#1A1A1A;border:none;font-weight:800;padding:9px 20px;border-radius:20px;cursor:default;">WORKSPACE</button>` : ''}
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0;">
-          <div class="who" style="color:rgba(255,255,255,.9);"><span>${cu ? cu.name : ''}</span><div class="avatar" style="background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);">${cu ? initials(cu.name) : ''}</div></div>
-          <div class="section-title" style="white-space:nowrap;display:inline-block;background:${c};color:#fff;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px rgba(0,0,0,.25);">
-            ${fmtDate(todayISO())}
-            <div style="font-size:10.5px;font-weight:600;opacity:.85;margin-top:2px;text-align:center;">${nowTimeIST()} IST</div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0;margin-top:21px;">
+          <div class="who" style="color:rgba(255,255,255,.9);"><span style="font-family:var(--f-display);font-size:38px;font-weight:600;line-height:1.05;">${cu ? 'Hello, '+cu.name : ''}</span><div class="avatar" style="background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);">${cu ? initials(cu.name) : ''}</div></div>
+          <div class="section-title" style="white-space:nowrap;display:inline-block;background:${c};color:#fff;padding:8px 18px;border-radius:8px;font-size:18px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px rgba(0,0,0,.25);">
+            ${fmtDate(todayISO())} · ${nowTimeIST()} IST
           </div>
         </div>
       </div>
@@ -2687,8 +2688,8 @@ function renderLogin(){
   <div class="login-shell" style="display:flex;align-items:stretch;justify-content:stretch;padding:0;">
     <div style="flex:1 1 75%;position:relative;overflow:hidden;background:${panelBg};display:flex;flex-direction:column;justify-content:center;padding:60px;min-height:100vh;">
       <div style="position:relative;">
-        <div style="font-family:${headlineFont};font-weight:700;font-size:57px;line-height:1.15;color:#fff;max-width:520px;">Everything for your focus, in one place.</div>
-        <div style="font-family:${headlineFont};font-weight:600;font-size:26px;color:rgba(255,255,255,.75);margin-top:16px;">ImproveID Workspace</div>
+        <div style="font-family:${headlineFont};font-weight:700;font-size:51.3px;line-height:1.15;color:#fff;max-width:520px;">Everything for your focus, in one place.</div>
+        <button style="background:#fff;color:#1A1A1A;border:none;font-weight:800;padding:18px 40px;border-radius:40px;font-size:34px;margin-top:16px;cursor:default;">WORKSPACE</button>
       </div>
     </div>
     <div style="flex:1 1 25%;display:flex;align-items:center;justify-content:center;background:#fff;min-height:100vh;padding:20px;">
@@ -2837,7 +2838,7 @@ function renderFocusAreaHome(){
     </div>`;
   }).join('');
 
-  const heroHeader = isBoardroom ? renderPageHero('Focus Area', 'Everything for your focus, in one place.') : `
+  const heroHeader = isBoardroom ? renderPageHero('Focus Area', 'Everything for your focus, in one place.', null, null, true) : `
     <div class="eyebrow">Focus Area</div>
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:2px;">
       <h1 class="page-title" style="margin-bottom:0;">Everything for your focus, in one place.</h1>

@@ -620,10 +620,10 @@ const DASHBOARD_WIDGET_COLORS = {
   wg_reminders: '#16A085',
   wg_capacity: '#E91E8C',
   wg_worldclock: '#F5A623',
-  wg_empty5:  '#17A2C4',
+  wg_spend:  '#34495E',
   wg_empty6:  '#5C6BC0',
 };
-const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_attendance','wg_reminders','wg_capacity','wg_worldclock','wg_empty5','wg_empty6'];
+const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','wg_blocked','wg_attendance','wg_reminders','wg_capacity','wg_worldclock','wg_spend','wg_empty6'];
 // One source of truth for every widget's name, which Module it draws from, and a
 // plain-language explanation of what it shows and how — used both for the small
 // label inside each widget and the fuller listing on My Account, so the two never
@@ -657,7 +657,8 @@ const DASHBOARD_WIDGET_META = {
     description:"Shows how many Members currently have no open task (free) versus how many have at least one (occupied). HODs are excluded, since they aren't usually assigned tasks directly and would misleadingly always show as free." },
   wg_worldclock: { label:'World Clock', module:'Essentials', moduleId:'h_world_clock',
     description:"Shows the current time in up to 3 cities you choose. Click the widget to search for and pick any major city — adding a new one when you already have 3 replaces the oldest. Drag within the picker to set your priority order." },
-  wg_empty5: { label:'Reserved Slot 5', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
+  wg_spend: { label:'Spend Overview', module:'$ Spend Management', moduleId:'feat_spend',
+    description:'Shows total spend for the latest month with any logged expenses, across every company, plus the percent change versus the month before it. Admin-only, same as the module itself.' },
   wg_empty6: { label:'Reserved Slot 6', module:null, moduleId:null, description:'Not yet configured — reserved for a future widget.' },
 };
 /* ============================================================================ */
@@ -726,7 +727,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
 let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
@@ -1002,12 +1003,13 @@ function seedState(){
     {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
     {id:'h_reminders', name:'Reminders', nodeType:'heading', parentId:'feat_fai', order:1, contentItems:[], description:'', specialView:'reminders'},
     {id:'h_world_clock', name:'World Clock', nodeType:'heading', parentId:'feat_fai', order:2, contentItems:[], description:'', specialView:'worldClock'},
+    {id:'feat_spend', name:'$ Spend Management', nodeType:'feature', parentId:null, systemView:'spend', order:6.5, contentItems:[], description:''},
   ];
 
-  const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent');
+  const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent' && id!=='feat_spend');
   const userAccess = {};
   users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
-  return normalizeState({ teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {}, reminders: [], roles: [] });
+  return normalizeState({ teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {}, reminders: [], roles: [], spendCompanies: [], spendExpenses: [] });
 }
 
 function withTimeout(promise, ms){
@@ -1032,6 +1034,8 @@ function stateRichness(s){
 // saved is touched.
 function normalizeState(s){
   if(!s) return s;
+  if(!Array.isArray(s.spendCompanies)) s.spendCompanies = [];
+  if(!Array.isArray(s.spendExpenses)) s.spendExpenses = [];
   if(!Array.isArray(s.featureNodes) || s.featureNodes.length===0){
     s.featureNodes = [
       {id:'feat_summary', name:'Summary - Daily & Weekly', nodeType:'feature', parentId:null, systemView:null, order:2.5, contentItems:[], description:''},
@@ -1147,6 +1151,12 @@ function normalizeState(s){
     // get auto-granted to anyone below — access is admin-controlled from the start.
     if(!s.featureNodes.some(n=>n.id==='feat_ai_agent')){
       s.featureNodes.push({id:'feat_ai_agent', name:'Workspace CoPilot', nodeType:'feature', parentId:null, systemView:null, order:0.5, contentItems:[], description:''});
+    }
+    // One-time addition: $ Spend Management. Admin-only for now, same construction
+    // as Workspace CoPilot above — never auto-granted to non-admins below, so it
+    // simply doesn't appear in their node list until deliberately shared.
+    if(!s.featureNodes.some(n=>n.id==='feat_spend')){
+      s.featureNodes.push({id:'feat_spend', name:'$ Spend Management', nodeType:'feature', parentId:null, systemView:'spend', order:6.5, contentItems:[], description:''});
     }
     // One-time addition: Workspace Search, now a real reorderable node like every
     // other module (previously a fixed, separately-rendered element) so it can be
@@ -1789,6 +1799,7 @@ const WIDGET_ICONS = {
   bell: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`,
   gauge: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle cx="12" cy="15" r="1.2" fill="${c}" stroke="none"/></svg>`,
   clock: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>`,
+  dollar: (c)=>`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>`,
 };
 // The Workspace Dashboard's widgets — live, computed fresh on every render from
 // computeWorkstreamWidgetMetrics(), never cached. Rendered using this specific
@@ -1903,11 +1914,35 @@ function renderWorkstreamWidgets(m){
           ${rows}
         </div>`;
     })(),
+    wg_spend: (()=>{
+      const data = spendOverviewData();
+      const bg = `${DASHBOARD_WIDGET_COLORS.wg_spend}1A`;
+      const changeHtml = (()=>{
+        if(!data || data.pctChange==null) return `<div class="muted" style="font-size:11px;margin-top:4px;">No prior month to compare</div>`;
+        const up = data.pctChange >= 0;
+        const color = up ? 'var(--red)' : 'var(--green)';
+        const arrow = up ? '▲' : '▼';
+        return `<div style="font-size:12px;font-weight:700;color:${color};margin-top:4px;">${arrow} ${Math.abs(data.pctChange).toFixed(1)}% vs last month</div>`;
+      })();
+      return `
+        <div class="drag-node" style="position:relative;flex:1;min-width:150px;background:${bg};border:1.5px solid ${widgetBorder('wg_spend')};border-radius:12px;padding:14px;padding-bottom:22px;cursor:grab;" draggable="true" data-widget-drag="wg_spend" data-widget-navigate="feat_spend">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <div style="width:40px;height:40px;border-radius:50%;background:${DASHBOARD_WIDGET_COLORS.wg_spend}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              ${WIDGET_ICONS.dollar(DASHBOARD_WIDGET_COLORS.wg_spend)}
+            </div>
+            <div style="font-size:13px;font-weight:600;color:var(--paper);">Spend Overview</div>
+          </div>
+          ${data ? `
+          <div style="font-size:22px;font-weight:700;color:var(--paper);margin-top:2px;">${fmtUSD(data.latestTotal)}</div>
+          <div class="muted" style="font-size:11px;">${data.latestLabel}</div>
+          ${changeHtml}` : `<div class="muted" style="font-size:12px;margin-top:2px;">No expenses logged yet</div>`}
+        </div>`;
+    })(),
     wg_empty5: emptyWidgetCard('wg_empty5'), wg_empty6: emptyWidgetCard('wg_empty6'),
   };
   const order = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
   const enabled = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
-  const orderedHtml = order.filter(id=>enabled.has(id)).map(id=>widgetsById[id]).filter(Boolean);
+  const orderedHtml = order.filter(id=>enabled.has(id) && (id!=='wg_spend' || isAdmin())).map(id=>widgetsById[id]).filter(Boolean);
   if(!orderedHtml.length){
     return `<div class="muted" style="font-size:13px;padding:20px;text-align:center;">All widgets are turned off. Turn some back on from My Account &gt; Widgets.</div>`;
   }
@@ -2525,6 +2560,12 @@ function currentAiAgentContext(){
   if(ui.view==='portfolio') return { label: 'Viewing: Workstream overview (all workstreams)' };
   if(ui.view==='assignments') return { label: 'Viewing: Active Assignments' };
   if(ui.view==='reports') return { label: 'Viewing: Reports' };
+  if(ui.view==='spend'){
+    const company = ui.spendCompanyId ? state.spendCompanies.find(c=>c.id===ui.spendCompanyId) : null;
+    if(company && ui.spendMonthKey) return { label: 'Viewing: $ Spend Management > '+company.name+' > '+monthLabelLong(ui.spendMonthKey) };
+    if(company) return { label: 'Viewing: $ Spend Management > '+company.name };
+    return { label: 'Viewing: $ Spend Management (all companies)' };
+  }
   if(ui.view==='home') return { label: 'Viewing: Focus Area' };
   return null;
 }
@@ -2639,6 +2680,7 @@ function renderView(){
   if(ui.view==='project') return renderProject();
   if(ui.view==='assignments') return (canSeeAssignmentsPage() && canSeeNode('feat_assignments')) ? renderAssignments() : renderFocusAreaHome();
   if(ui.view==='reports') return canSeeNode('feat_reports') ? renderReports() : renderFocusAreaHome();
+  if(ui.view==='spend') return canSeeNode('feat_spend') ? renderSpendManagement() : renderFocusAreaHome();
   if(ui.view==='feature') return canSeeNode(ui.featureNodeId) ? renderFeatureNode() : renderFocusAreaHome();
   if(ui.view==='admin') return isAdmin() ? renderAdmin() : renderFocusAreaHome();
   if(ui.view==='account') return renderMyAccount();
@@ -2669,6 +2711,7 @@ function bindView(){
   if(ui.view==='project') bindProject();
   if(ui.view==='assignments') bindAssignments();
   if(ui.view==='reports') bindReports();
+  if(ui.view==='spend') bindSpendManagement();
   if(ui.view==='feature') bindFeatureNode();
   if(ui.view==='admin') bindAdmin();
   if(ui.view==='account') bindMyAccount();
@@ -6159,6 +6202,299 @@ function bindReports(){
   if(clearBtn) clearBtn.addEventListener('click', ()=>{ ui.reportFilters.reason=''; render(); });
 }
 
+/* ============================== SPEND MANAGEMENT ============================== */
+// Admin-only module (feat_spend is never auto-granted to non-admins — same
+// construction as Workspace CoPilot). Structure: Companies -> Months (auto-rolled
+// from each expense's own date, never created as a separate step) -> Expenses
+// within a month.
+
+function spendMonthKeyOf(dateISO){ return (dateISO||'').slice(0,7); }
+
+function spendMonthsForCompany(companyId){
+  const expenses = state.spendExpenses.filter(e=>e.companyId===companyId);
+  const byMonth = {};
+  expenses.forEach(e=>{
+    const mk = spendMonthKeyOf(e.date);
+    if(!mk) return;
+    if(!byMonth[mk]) byMonth[mk] = { monthKey: mk, total: 0, count: 0 };
+    byMonth[mk].total += Number(e.amount)||0;
+    byMonth[mk].count += 1;
+  });
+  return Object.values(byMonth).map(m=>({...m, label: monthLabelLong(m.monthKey)})).sort((a,b)=> b.monthKey.localeCompare(a.monthKey));
+}
+
+function spendExpensesForMonth(companyId, monthKey){
+  return state.spendExpenses.filter(e=>e.companyId===companyId && spendMonthKeyOf(e.date)===monthKey).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+}
+
+function spendCompanyTotal(companyId){
+  return state.spendExpenses.filter(e=>e.companyId===companyId).reduce((sum,e)=> sum + (Number(e.amount)||0), 0);
+}
+
+function fmtUSD(amount){
+  const n = Number(amount)||0;
+  return '$' + n.toLocaleString('en-US', {minimumFractionDigits: n % 1 === 0 ? 0 : 2, maximumFractionDigits: 2});
+}
+
+// Latest month across ALL companies combined, plus % change vs the month before
+// it — feeds the "Spend Overview" dashboard card.
+function spendOverviewData(){
+  const byMonth = {};
+  state.spendExpenses.forEach(e=>{
+    const mk = spendMonthKeyOf(e.date);
+    if(!mk) return;
+    byMonth[mk] = (byMonth[mk]||0) + (Number(e.amount)||0);
+  });
+  const monthKeys = Object.keys(byMonth).sort();
+  if(!monthKeys.length) return null;
+  const latestKey = monthKeys[monthKeys.length-1];
+  const latestTotal = byMonth[latestKey];
+  const prevKey = monthKeys.length>1 ? monthKeys[monthKeys.length-2] : null;
+  const prevTotal = prevKey ? byMonth[prevKey] : null;
+  const pctChange = (prevTotal!=null && prevTotal>0) ? ((latestTotal - prevTotal)/prevTotal*100) : null;
+  return { latestKey, latestLabel: monthLabelLong(latestKey), latestTotal, prevTotal, pctChange };
+}
+
+function renderSpendManagement(){
+  if(!isAdmin()) return renderFocusAreaHome();
+  const company = ui.spendCompanyId ? state.spendCompanies.find(c=>c.id===ui.spendCompanyId) : null;
+  if(company && ui.spendMonthKey) return renderSpendMonthDetail(company, ui.spendMonthKey);
+  if(company) return renderSpendCompanyDetail(company);
+  return renderSpendCompanyList();
+}
+
+function renderSpendCompanyList(){
+  const isBoardroom = isBoardroomTheme();
+  const companies = state.spendCompanies.slice().sort((a,b)=> a.name.localeCompare(b.name));
+  const cards = companies.map((c,i)=>{
+    const total = spendCompanyTotal(c.id);
+    const color = isBoardroom ? boardroomColor(i) : 'var(--amber)';
+    const glow = isBoardroom ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
+    return `
+    <div class="card drag-node" style="margin-bottom:14px;border-left:4px solid ${color};cursor:pointer;" data-open-spend-company="${c.id}">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="display:inline-block;background:${color};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${glow};">${c.name}</div>
+          <div class="muted" style="font-size:12px;margin-top:6px;">${fmtUSD(total)} total logged</div>
+        </div>
+        <button class="btn btn-sm btn-danger" data-delete-spend-company="${c.id}">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `
+    ${isBoardroom ? renderPageHero('$ Spend Management', 'Company spend, tracked month by month', '#34495E') : `
+    <div class="eyebrow">$ Spend Management</div>
+    <h1 class="page-title" style="margin-bottom:22px;">Company spend, tracked month by month</h1>`}
+    <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addSpendCompanyBtn">+ Add Company</button>
+    ${companies.length ? cards : `<div class="empty-state"><div class="et">No companies yet</div>Add one to start tracking spend.</div>`}
+  `;
+}
+
+function renderSpendCompanyDetail(company){
+  const isBoardroom = isBoardroomTheme();
+  const months = spendMonthsForCompany(company.id);
+  const cards = months.map((m,i)=>{
+    const color = isBoardroom ? boardroomColor(i) : 'var(--amber)';
+    const glow = isBoardroom ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
+    return `
+    <div class="card" style="margin-bottom:14px;border-left:4px solid ${color};cursor:pointer;" data-open-spend-month="${m.monthKey}">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:inline-block;background:${color};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${glow};">${m.label}</div>
+        <div style="font-size:20px;font-weight:700;color:var(--paper);">${fmtUSD(m.total)}</div>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:8px;">${m.count} expense${m.count===1?'':'s'}</div>
+    </div>`;
+  }).join('');
+  return `
+    <button class="btn btn-sm" data-spend-back-to-companies style="margin-bottom:14px;">← All companies</button>
+    ${isBoardroom ? renderPageHero('$ Spend Management', company.name, '#34495E') : `
+    <div class="eyebrow">$ Spend Management</div>
+    <h1 class="page-title" style="margin-bottom:22px;">${company.name}</h1>`}
+    <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addSpendExpenseBtn" data-company="${company.id}">+ Add Expense</button>
+    ${months.length ? cards : `<div class="empty-state"><div class="et">No expenses logged yet</div>Add one to see it show up here, grouped by month automatically.</div>`}
+  `;
+}
+
+function renderSpendMonthDetail(company, monthKey){
+  const isBoardroom = isBoardroomTheme();
+  const expenses = spendExpensesForMonth(company.id, monthKey);
+  const total = expenses.reduce((s,e)=> s+(Number(e.amount)||0), 0);
+  const rows = expenses.map(e=>`
+    <tr>
+      <td>${fmtDate(e.date)}</td>
+      <td>${e.platform||'—'}</td>
+      <td>${e.product||'—'}</td>
+      <td>${e.plan||'—'}</td>
+      <td>${e.card||'—'}</td>
+      <td style="font-weight:700;">${fmtUSD(e.amount)}</td>
+      <td style="text-align:right;white-space:nowrap;">
+        <button class="btn btn-sm" data-edit-spend-expense="${e.id}">Edit</button>
+        <button class="btn btn-sm btn-danger" data-delete-spend-expense="${e.id}">Delete</button>
+      </td>
+    </tr>`).join('');
+  return `
+    <button class="btn btn-sm" data-spend-back-to-months="${company.id}" style="margin-bottom:14px;">← ${company.name}</button>
+    ${isBoardroom ? renderPageHero('$ Spend Management', monthLabelLong(monthKey), '#34495E') : `
+    <div class="eyebrow">$ Spend Management</div>
+    <h1 class="page-title" style="margin-bottom:6px;">${monthLabelLong(monthKey)}</h1>`}
+    <div class="muted" style="font-size:13px;margin-bottom:20px;">${company.name} · ${fmtUSD(total)} total across ${expenses.length} expense${expenses.length===1?'':'s'}</div>
+    ${expenses.length ? `
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table style="width:100%;">
+        <thead><tr><th>Date</th><th>Platform</th><th>Product</th><th>Plan</th><th>Card</th><th>Amount</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>` : `<div class="empty-state"><div class="et">Nothing here</div></div>`}
+  `;
+}
+
+function bindSpendManagement(){
+  document.querySelectorAll('[data-open-spend-company]').forEach(el=>{
+    el.addEventListener('click', ()=>{ ui.spendCompanyId = el.dataset.openSpendCompany; ui.spendMonthKey = null; render(); });
+  });
+  document.querySelectorAll('[data-open-spend-month]').forEach(el=>{
+    el.addEventListener('click', ()=>{ ui.spendMonthKey = el.dataset.openSpendMonth; render(); });
+  });
+  const backToCompanies = document.querySelector('[data-spend-back-to-companies]');
+  if(backToCompanies) backToCompanies.addEventListener('click', ()=>{ ui.spendCompanyId = null; ui.spendMonthKey = null; render(); });
+  document.querySelectorAll('[data-spend-back-to-months]').forEach(el=>{
+    el.addEventListener('click', ()=>{ ui.spendMonthKey = null; render(); });
+  });
+  const addCompanyBtn = document.getElementById('addSpendCompanyBtn');
+  if(addCompanyBtn) addCompanyBtn.addEventListener('click', openAddSpendCompanyModal);
+  document.querySelectorAll('[data-delete-spend-company]').forEach(el=>{
+    el.addEventListener('click', (ev)=>{ ev.stopPropagation(); openDeleteSpendCompanyConfirm(el.dataset.deleteSpendCompany); });
+  });
+  const addExpenseBtn = document.getElementById('addSpendExpenseBtn');
+  if(addExpenseBtn) addExpenseBtn.addEventListener('click', ()=> openSpendExpenseModal(addExpenseBtn.dataset.company, null));
+  document.querySelectorAll('[data-edit-spend-expense]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const exp = state.spendExpenses.find(e=>e.id===el.dataset.editSpendExpense);
+      if(exp) openSpendExpenseModal(exp.companyId, exp.id);
+    });
+  });
+  document.querySelectorAll('[data-delete-spend-expense]').forEach(el=>{
+    el.addEventListener('click', ()=> openDeleteSpendExpenseConfirm(el.dataset.deleteSpendExpense));
+  });
+}
+
+function openAddSpendCompanyModal(){
+  if(!isAdmin()) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Add Company</h3>
+        <form id="spendCompanyForm">
+          <div class="field"><label>Name</label><input id="spendCompanyNameInput" required placeholder="e.g. Company A"></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="spendCompanySubmitBtn" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('spendCompanyForm','spendCompanySubmitBtn', ()=>{
+    const nameEl = document.getElementById('spendCompanyNameInput');
+    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    state.spendCompanies.push({ id: uid('spendco'), name: nameEl.value.trim(), createdAt: nowDateTimeIST() });
+    persist(); closeModal(); render();
+  });
+}
+
+function openDeleteSpendCompanyConfirm(companyId){
+  if(!isAdmin()) return;
+  const company = state.spendCompanies.find(c=>c.id===companyId);
+  if(!company) return;
+  const count = state.spendExpenses.filter(e=>e.companyId===companyId).length;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Delete "${company.name}"?</h3>
+        <div class="modal-sub">This can't be undone.</div>
+        <p style="font-size:13px;color:var(--paper-dim);line-height:1.6;">This will permanently delete <b style="color:var(--paper);">${company.name}</b>${count ? ` and all ${count} expense${count===1?'':'s'} logged under it` : ''}.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" class="btn btn-danger" id="confirmDeleteSpendCompanyBtn">Delete</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.getElementById('confirmDeleteSpendCompanyBtn').addEventListener('click', ()=>{
+    state.spendExpenses = state.spendExpenses.filter(e=>e.companyId!==companyId);
+    state.spendCompanies = state.spendCompanies.filter(c=>c.id!==companyId);
+    if(ui.spendCompanyId===companyId){ ui.spendCompanyId=null; ui.spendMonthKey=null; }
+    persist(); closeModal(); render();
+  });
+}
+
+function openSpendExpenseModal(companyId, expenseId){
+  if(!isAdmin()) return;
+  const editing = expenseId ? state.spendExpenses.find(e=>e.id===expenseId) : null;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>${editing ? 'Edit Expense' : 'Add Expense'}</h3>
+        <form id="spendExpenseForm">
+          <div class="field"><label>Date</label><input type="date" id="spendExpDate" required value="${editing ? editing.date : todayISO()}"></div>
+          <div class="field"><label>Platform</label><input id="spendExpPlatform" placeholder="e.g. AWS" value="${editing ? (editing.platform||'').replace(/"/g,'&quot;') : ''}"></div>
+          <div class="field"><label>Product</label><input id="spendExpProduct" placeholder="e.g. EC2" value="${editing ? (editing.product||'').replace(/"/g,'&quot;') : ''}"></div>
+          <div class="field"><label>Plan (optional)</label><input id="spendExpPlan" placeholder="e.g. Enterprise" value="${editing ? (editing.plan||'').replace(/"/g,'&quot;') : ''}"></div>
+          <div class="field"><label>Card</label><input id="spendExpCard" placeholder="e.g. Company Amex ...1234" value="${editing ? (editing.card||'').replace(/"/g,'&quot;') : ''}"></div>
+          <div class="field"><label>Amount (USD)</label><input type="number" step="0.01" min="0" id="spendExpAmount" required value="${editing ? editing.amount : ''}"></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="spendExpenseSubmitBtn" class="btn btn-primary">${editing ? 'Save' : 'Add'}</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('spendExpenseForm','spendExpenseSubmitBtn', ()=>{
+    const dateEl = document.getElementById('spendExpDate');
+    const amountEl = document.getElementById('spendExpAmount');
+    if(!dateEl.value){ dateEl.focus(); return; }
+    if(!amountEl.value || Number(amountEl.value) < 0){ amountEl.focus(); return; }
+    const data = {
+      date: dateEl.value,
+      platform: document.getElementById('spendExpPlatform').value.trim(),
+      product: document.getElementById('spendExpProduct').value.trim(),
+      plan: document.getElementById('spendExpPlan').value.trim(),
+      card: document.getElementById('spendExpCard').value.trim(),
+      amount: Number(amountEl.value),
+    };
+    if(editing){
+      Object.assign(editing, data);
+    } else {
+      state.spendExpenses.push({ id: uid('spendexp'), companyId, ...data, createdAt: nowDateTimeIST() });
+    }
+    persist(); closeModal(); render();
+  });
+}
+
+function openDeleteSpendExpenseConfirm(expenseId){
+  if(!isAdmin()) return;
+  const exp = state.spendExpenses.find(e=>e.id===expenseId);
+  if(!exp) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Delete this expense?</h3>
+        <div class="modal-sub">This can't be undone.</div>
+        <p style="font-size:13px;color:var(--paper-dim);line-height:1.6;">${exp.platform||'Expense'} · ${fmtUSD(exp.amount)} on ${fmtDate(exp.date)}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" class="btn btn-danger" id="confirmDeleteSpendExpenseBtn">Delete</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.getElementById('confirmDeleteSpendExpenseBtn').addEventListener('click', ()=>{
+    state.spendExpenses = state.spendExpenses.filter(e=>e.id!==expenseId);
+    persist(); closeModal(); render();
+  });
+}
+
 /* ============================== ACTIVE ASSIGNMENTS ============================== */
 
 // Per-member workload: what they're on right now, what's next, and a tentative
@@ -6532,7 +6868,7 @@ function renderMyAccount(){
     {id:'light', name:'ImproveID Theme', desc:'A clean, bright look.'},
     {id:'boardroom', name:'Boardroom', desc:'The look from our leadership presentation.'}
   ];
-  const widgetOrder = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
+  const widgetOrder = ((cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER).filter(id=> id!=='wg_spend' || isAdmin());
   const enabledSet = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
   const widgetCards = widgetOrder.map(id=>{
     const meta = DASHBOARD_WIDGET_META[id] || {};

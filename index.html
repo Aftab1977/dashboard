@@ -1933,9 +1933,12 @@ function renderWorkstreamWidgets(m){
             <div style="font-size:13px;font-weight:600;color:var(--paper);">Spend Overview</div>
           </div>
           ${data ? `
-          <div style="font-size:22px;font-weight:700;color:var(--paper);margin-top:2px;">${fmtUSD(data.latestTotal)}</div>
-          <div class="muted" style="font-size:11px;">${data.latestLabel}</div>
-          ${changeHtml}` : `<div class="muted" style="font-size:12px;margin-top:2px;">No expenses logged yet</div>`}
+          <div style="text-align:center;margin-top:8px;">
+            <div style="font-size:33px;font-weight:700;color:var(--paper);margin-top:2px;">${fmtUSD(data.latestTotal)}</div>
+            <div class="muted" style="font-size:11px;">${data.latestLabel}</div>
+            ${changeHtml}
+          </div>` : `<div class="muted" style="font-size:12px;margin-top:2px;">No expenses logged yet</div>`}
+          ${moduleSourceLabel('wg_spend')}
         </div>`;
     })(),
     wg_empty5: emptyWidgetCard('wg_empty5'), wg_empty6: emptyWidgetCard('wg_empty6'),
@@ -2113,6 +2116,8 @@ function currentNavSnapshot(){ return { view: ui.view, projectId: ui.projectId, 
 function snapshotsEqual(a,b){ return a && b && a.view===b.view && a.projectId===b.projectId && a.featureNodeId===b.featureNodeId; }
 
 function goBack(){
+  if(ui.view==='spend' && ui.spendMonthKey){ ui.spendMonthKey = null; render(); return; }
+  if(ui.view==='spend' && ui.spendCompanyId){ ui.spendCompanyId = null; render(); return; }
   if(ui.navHistory && ui.navHistory.length){
     const prev = ui.navHistory.pop();
     ui.view = prev.view;
@@ -6306,7 +6311,6 @@ function renderSpendCompanyDetail(company){
     </div>`;
   }).join('');
   return `
-    <button class="btn btn-sm" data-spend-back-to-companies style="margin-bottom:14px;">← All companies</button>
     ${isBoardroom ? renderPageHero('$ Spend Management', company.name, '#34495E') : `
     <div class="eyebrow">$ Spend Management</div>
     <h1 class="page-title" style="margin-bottom:22px;">${company.name}</h1>`}
@@ -6333,7 +6337,6 @@ function renderSpendMonthDetail(company, monthKey){
       </td>
     </tr>`).join('');
   return `
-    <button class="btn btn-sm" data-spend-back-to-months="${company.id}" style="margin-bottom:14px;">← ${company.name}</button>
     ${isBoardroom ? renderPageHero('$ Spend Management', monthLabelLong(monthKey), '#34495E') : `
     <div class="eyebrow">$ Spend Management</div>
     <h1 class="page-title" style="margin-bottom:6px;">${monthLabelLong(monthKey)}</h1>`}
@@ -6354,11 +6357,6 @@ function bindSpendManagement(){
   });
   document.querySelectorAll('[data-open-spend-month]').forEach(el=>{
     el.addEventListener('click', ()=>{ ui.spendMonthKey = el.dataset.openSpendMonth; render(); });
-  });
-  const backToCompanies = document.querySelector('[data-spend-back-to-companies]');
-  if(backToCompanies) backToCompanies.addEventListener('click', ()=>{ ui.spendCompanyId = null; ui.spendMonthKey = null; render(); });
-  document.querySelectorAll('[data-spend-back-to-months]').forEach(el=>{
-    el.addEventListener('click', ()=>{ ui.spendMonthKey = null; render(); });
   });
   const addCompanyBtn = document.getElementById('addSpendCompanyBtn');
   if(addCompanyBtn) addCompanyBtn.addEventListener('click', openAddSpendCompanyModal);

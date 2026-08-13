@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ImproveID Workspace — Workstream Timeline Tracker</title>
+<title>WORKSPACE — Workstream Timeline Tracker</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAEu0lEQVR4nL2Xz29TRxDHP7s2SniOVAVIAiEICQgktZsEGSUFrj0kak7kH6jaEwiJQ/tf9FfaU1VVRT21UntvFEWKgAMGq5JbRTkgWQiF5JHaoArZThTsNz283ed9jp3QtHSkkf3e9+18Z2d2d2YVnUUBGmiY5xPANPAeMAEMAT0GqwDrQAFYAhaADYMlgACQPbh2iXb+p4FvgE1j5HX0T+Bb4J0ONveUhPk9DHwK7DiGG0DdzChw3tvnuvnGvt8BPgdSLbb3Jb8A/OYYetVCuJ8GZox9LgCj+zlhgSxhCO0M/glxO0dsBEvAZCcnbH6GzYd21gclblVr67mJrsuJMh4dBn5/A+StTqwAnuFUbjg+c8IugCilRGstWmtRSsUMHhCzTsy7qVAmLK9orvD/evbumqgbfRtQSQN8DCQNoJRSiAh9fX0cP34cpRSPHj1ie3sbix05coShoSEAfN+nVCpFWHd3N+fPn0dE8H2fcrlsMWX4ksAnwIcA/cALx0NJJBICyMzMjFiZm5sTQLq7uwWQ+fn5CLt9+7YA0tXVJYDMzc1F2PT0tLg2nQj/BZzQwPtArwEUQBAEAORyOcrlMgCXL18GoNFoxJ4Bpqam0FpH2NTUFAClUolcLodr03AEwFvALMCPTm6ifGmtBZDFxUUREVleXo6w/v5+qVQqsrW1JbVaTXZ2duTMmTMRvrS0JCIiCwsLMVuO2rX2syYsLMrO3orW4Ta9d+8eAOl0mmPHjgEwPj5OKpUil8uRz+c5dOgQly5dAqC3t5d0Oh0ba2255g3fhAZOOi8jEREA7ty5A0BfXx+ZTAaAK1euICIsLy9HJFevXgVgdHSUgYGB2FhryxE72UFNs6TGxOasUCjw7NkzALLZbOSAUor79+9HObYOjI+Po5RiY2ODQqEQs9VGvI4lUkTQWvPy5Uvy+TwAFy9eRGtNNptFRFhdXWVlZQURIZPJ4HkeY2NjAOTzeSqVColEol0EItFAtSNocnf37l0ARkZGmJiY4OjRoxSLRXzf5+nTpzx+/Jiuri4mJyej/NvwK6XaGw9lSxN2MhCuzl1RgOZiOn36NNeuXQPgwYMHBEFAvV6PIjQ7O8vw8HBsTIfZ25cbAD/RZhtiznRAPM8T3/clCAJ58uSJiIjcuHEj+u7WrVsSBIGsra1JEASyvr4eHVitdYL4NvxFA4u02YbW+0QiQa1WI5fLoZTi1KlTADx8+DD6zmKDg4PR4tze3t4r/5ZvEWCAlqPY1WQyKYDcvHkzOl593xfP86Jvenp6ZHNzM8KvX78eG9ui7lE8aGf9HfCRCU0y5qopMKlUirNnzwJQrVYpFouxKZ07dw7P8wAoFotUq9VobItYjh+AD2w4RmiWyf+jHDcIu+1YQ/IF8aahY5PR5myPYR0Wnmv7a8MZNSQJwjZpZS8n/qXaXbZK2KbbegA068AFoPwGnLDkL2i257tOYZuKSccJ91JyULU2ngPvtnDtEguMEl4m3Nwd5GJix/wBZPYjb3UiBXxJPBXu1awdaYP41awOfEWz4u5LbsXNzxjhOWEvLK+jZeB7wmannc1I9ipVrdfzIWCG5vX8JOHOAagRFpYC4fX8V2DNYHtez/8GPIRF3IiuGR0AAAAASUVORK5CYII=">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Bitter:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -2670,20 +2671,20 @@ function renderPageHero(eyebrowText, titleText, accentColor, titleFontSize, show
     </div>`;
 }
 function breadcrumb(){
-  if(ui.view==='home') return 'IMPROVEID WORKSPACE / <b>FOCUS AREA</b>';
-  if(ui.view==='portfolio') return 'IMPROVEID WORKSPACE / <b>WORKSTREAM</b>';
+  if(ui.view==='home') return 'WORKSPACE / <b>FOCUS AREA</b>';
+  if(ui.view==='portfolio') return 'WORKSPACE / <b>WORKSTREAM</b>';
   if(ui.view==='project'){
     const p = state.projects.find(p=>p.id===ui.projectId);
-    return `IMPROVEID WORKSPACE / <b>${p ? p.name.toUpperCase() : 'WORKSTREAM'}</b>`;
+    return `WORKSPACE / <b>${p ? p.name.toUpperCase() : 'WORKSTREAM'}</b>`;
   }
-  if(ui.view==='assignments') return 'IMPROVEID WORKSPACE / <b>ACTIVE ASSIGNMENTS</b>';
-  if(ui.view==='reports') return 'IMPROVEID WORKSPACE / <b>REPORTS</b>';
+  if(ui.view==='assignments') return 'WORKSPACE / <b>ACTIVE ASSIGNMENTS</b>';
+  if(ui.view==='reports') return 'WORKSPACE / <b>REPORTS</b>';
   if(ui.view==='feature'){
     const path = featureNodePath(ui.featureNodeId);
-    return 'IMPROVEID WORKSPACE / ' + path.map(n=>`<b>${n.name.toUpperCase()}</b>`).join(' / ');
+    return 'WORKSPACE / ' + path.map(n=>`<b>${n.name.toUpperCase()}</b>`).join(' / ');
   }
-  if(ui.view==='admin') return 'IMPROVEID WORKSPACE / <b>ADMIN</b>';
-  return 'IMPROVEID WORKSPACE';
+  if(ui.view==='admin') return 'WORKSPACE / <b>ADMIN</b>';
+  return 'WORKSPACE';
 }
 
 function renderView(){
@@ -7052,7 +7053,7 @@ function renderMyAccount(){
   const current = (cu && cu.themePreference) || 'boardroom';
   const themes = [
     {id:'dark', name:'Dark', desc:'The original theme.'},
-    {id:'light', name:'ImproveID Theme', desc:'A clean, bright look.'},
+    {id:'light', name:'Light', desc:'A clean, bright look.'},
     {id:'boardroom', name:'Boardroom', desc:'The look from our leadership presentation.'}
   ];
   const widgetOrder = ((cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER).filter(id=> id!=='wg_spend' || isAdmin());

@@ -2830,10 +2830,22 @@ async function completeLogin(match){
     try{
       const { data: factorData, error: factorErr } = await supaClient.auth.mfa.listFactors();
       if(factorErr) console.error('[TOTP check] listFactors() returned an error:', factorErr);
-      console.log('[TOTP check] factors returned:', factorData);
+      console.log('[TOTP check] factors returned:', JSON.stringify(factorData));
       const verified = factorData && (factorData.totp||[]).find(f=>f.status==='verified');
       console.log('[TOTP check] verified factor found =', verified);
-      if(verified){
+      // Cross-check against Supabase's own documented authority on whether a
+      // step-up is actually due — comparing current vs. next assurance level,
+      // not just "does a verified factor exist" on its own.
+      let aalInfo = null;
+      try{
+        aalInfo = supaClient.auth.mfa.getAuthenticatorAssuranceLevel ? await supaClient.auth.mfa.getAuthenticatorAssuranceLevel() : null;
+        console.log('[TOTP check] getAuthenticatorAssuranceLevel() =', JSON.stringify(aalInfo));
+      }catch(aalErr){
+        console.error('[TOTP check] getAuthenticatorAssuranceLevel() threw:', aalErr);
+      }
+      const aalSaysStepUpDue = aalInfo && aalInfo.data && aalInfo.data.nextLevel === 'aal2' && aalInfo.data.currentLevel !== aalInfo.data.nextLevel;
+      console.log('[TOTP check] aal says step-up is due =', aalSaysStepUpDue);
+      if(verified && (aalSaysStepUpDue || !aalInfo)){
         ui.pendingLoginMatch = match;
         ui.loginStep = 'totp';
         ui.loginTotpFactorId = verified.id;

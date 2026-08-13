@@ -729,7 +729,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null, hasSupabaseSession:false };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
 let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
@@ -2825,22 +2825,25 @@ function renderLogin(){
 // check whether this account has a verified Authenticator factor and, if so,
 // require it before finishing sign-in.
 async function completeLogin(match){
-  if(state.settings.totpEnabled && supaClient){
+  console.log('[TOTP check] state.settings.totpEnabled =', state.settings.totpEnabled, '| supaClient present =', !!supaClient, '| session confirmed at OTP-verify time =', ui.hasSupabaseSession);
+  if(state.settings.totpEnabled && supaClient && ui.hasSupabaseSession){
     try{
-      const { data: sessionData } = await supaClient.auth.getSession();
-      if(sessionData && sessionData.session){
-        const { data: factorData } = await supaClient.auth.mfa.listFactors();
-        const verified = factorData && (factorData.totp||[]).find(f=>f.status==='verified');
-        if(verified){
-          ui.pendingLoginMatch = match;
-          ui.loginStep = 'totp';
-          ui.loginTotpFactorId = verified.id;
-          ui.loginError=''; ui.loginBusy=false;
-          render();
-          return;
-        }
+      const { data: factorData, error: factorErr } = await supaClient.auth.mfa.listFactors();
+      if(factorErr) console.error('[TOTP check] listFactors() returned an error:', factorErr);
+      console.log('[TOTP check] factors returned:', factorData);
+      const verified = factorData && (factorData.totp||[]).find(f=>f.status==='verified');
+      console.log('[TOTP check] verified factor found =', verified);
+      if(verified){
+        ui.pendingLoginMatch = match;
+        ui.loginStep = 'totp';
+        ui.loginTotpFactorId = verified.id;
+        ui.loginError=''; ui.loginBusy=false;
+        render();
+        return;
       }
-    }catch(e){ /* if the MFA check itself fails, don't block sign-in over it */ }
+    }catch(e){
+      console.error('[TOTP check] threw an unexpected error, skipping the step-up as a result:', e);
+    }
   }
   finishLogin(match);
 }
@@ -2849,7 +2852,7 @@ function finishLogin(match){
   session.userId = match.id; persistSession();
   try{ localStorage.setItem('lastLoginTheme', match.themePreference || 'boardroom'); }catch(e){}
   ui.loginError=''; ui.loginStep='email'; ui.loginEmail=''; ui.loginAccountChoices=null; ui.loginBusy=false;
-  ui.pendingLoginMatch=null; ui.loginTotpFactorId=null;
+  ui.pendingLoginMatch=null; ui.loginTotpFactorId=null; ui.hasSupabaseSession=false;
   if(loginCooldownTimer){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; }
   ui.view='home';
   try{
@@ -2967,8 +2970,10 @@ function bindLogin(){
     if(!token){ ui.loginError = 'Enter the code from your email.'; render(); return; }
     ui.loginBusy = true; ui.loginError=''; render();
     try{
-      const { error } = await supaClient.auth.verifyOtp({ email: ui.loginEmail, token, type: 'email' });
+      const { data, error } = await supaClient.auth.verifyOtp({ email: ui.loginEmail, token, type: 'email' });
       if(error) throw error;
+      ui.hasSupabaseSession = !!(data && data.session);
+      console.log('[TOTP check] verifyOtp succeeded, session present in its own response =', ui.hasSupabaseSession);
       if(!state || !Array.isArray(state.users) || state.users.length===0){ state = seedState(); persist(); }
       const matches = state.users.filter(x => (x.email||'').toLowerCase() === ui.loginEmail.toLowerCase());
       ui.loginBusy = false;

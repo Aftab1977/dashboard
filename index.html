@@ -727,7 +727,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0 };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
 let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
@@ -955,10 +955,10 @@ function seedState(){
     {id:'team_qa', name:'QA', checklist:[]},
   ];
   const users = [
-    {id:'admin', name:'Admin', username:'admin', password:'admin123', role:'admin', teamId:null},
-    {id:'u_priya', name:'Priya Nair', username:'priya', password:'priya123', role:'member', teamId:'team_design'},
-    {id:'u_arjun', name:'Arjun Rao', username:'arjun', password:'arjun123', role:'member', teamId:'team_backend'},
-    {id:'u_meera', name:'Meera Iyer', username:'meera', password:'meera123', role:'member', teamId:'team_qa'},
+    {id:'admin', name:'Admin', username:'admin', password:'admin123', email:'aftab@mahmood.co.in', role:'admin', teamId:null},
+    {id:'u_priya', name:'Priya Nair', username:'priya', password:'priya123', email:'aftab@mahmood.co.in', role:'member', teamId:'team_design'},
+    {id:'u_arjun', name:'Arjun Rao', username:'arjun', password:'arjun123', email:'aftab@mahmood.co.in', role:'member', teamId:'team_backend'},
+    {id:'u_meera', name:'Meera Iyer', username:'meera', password:'meera123', email:'aftab@mahmood.co.in', role:'member', teamId:'team_qa'},
   ];
   const p1 = 'proj_portal';
   const p2 = 'proj_vendor';
@@ -1035,6 +1035,13 @@ function stateRichness(s){
 function normalizeState(s){
   if(!s) return s;
   if(!Array.isArray(s.spendCompanies)) s.spendCompanies = [];
+  // One-time testing migration: every user without an email gets the shared
+  // testing address, so OTP login works immediately for existing deployed
+  // data too. Once real per-user emails are set via Admin > Users, this
+  // condition naturally stops matching that user.
+  if(Array.isArray(s.users)){
+    s.users.forEach(u=>{ if(!u.email) u.email = 'aftab@mahmood.co.in'; });
+  }
   if(!Array.isArray(s.spendExpenses)) s.spendExpenses = [];
   if(!Array.isArray(s.featureNodes) || s.featureNodes.length===0){
     s.featureNodes = [
@@ -2725,13 +2732,59 @@ function bindView(){
 /* ============================== LOGIN ============================== */
 
 function renderLogin(){
-  const userCount = (state && Array.isArray(state.users)) ? state.users.length : 0;
   const logoUrl = state && state.settings && state.settings.logoUrl;
   const theme = getPreLoginTheme();
   const isDarkPanel = theme !== 'light';
   const panelBg = isDarkPanel ? '#0D1316' : '#0060BF';
   const btnColor = isDarkPanel ? '#1A1A1A' : '#0060BF';
   const headlineFont = isDarkPanel ? "'Bitter',serif" : "'Barlow Condensed',sans-serif";
+  const cooldownLeft = Math.max(0, Math.ceil((ui.loginResendAt - Date.now())/1000));
+  const method = ui.loginMethod || 'password';
+
+  const methodToggle = `
+    <div style="display:flex;gap:6px;margin-top:18px;background:var(--bg);padding:4px;border-radius:10px;">
+      <button type="button" class="btn btn-sm" data-login-method="password" style="flex:1;justify-content:center;${method==='password'?`background:${btnColor};border-color:${btnColor};color:#fff;`:'background:transparent;border-color:transparent;'}">Password</button>
+      <button type="button" class="btn btn-sm" data-login-method="otp" style="flex:1;justify-content:center;${method==='otp'?`background:${btnColor};border-color:${btnColor};color:#fff;`:'background:transparent;border-color:transparent;'}">Email Code</button>
+    </div>`;
+
+  let formHtml = '';
+  const userCount = (state && Array.isArray(state.users)) ? state.users.length : 0;
+  if(method === 'password'){
+    formHtml = `
+      <form id="loginForm" style="margin-top:18px;">
+        <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required autofocus></div>
+        <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" required></div>
+        <button class="btn btn-primary" type="button" id="loginSubmitBtn" style="width:100%;justify-content:center;margin-top:16px;background:${btnColor};border-color:${btnColor};">Sign in</button>
+        <div class="login-error">${ui.loginError}</div>
+      </form>`;
+  } else if(ui.loginStep === 'choose'){
+    formHtml = `
+      <div style="margin-top:18px;">
+        <div class="hint" style="margin-bottom:12px;">Code verified — that email is linked to more than one account. Which one is you?</div>
+        ${(ui.loginAccountChoices||[]).map(u=>`<button type="button" class="btn" style="width:100%;justify-content:flex-start;margin-bottom:8px;" data-choose-account="${u.id}">${u.name.replace(/</g,'&lt;')} <span class="muted" style="margin-left:6px;">(${u.username})</span></button>`).join('')}
+        <button type="button" class="btn btn-sm" style="margin-top:6px;" id="loginBackToEmailBtn">← Use a different email</button>
+      </div>`;
+  } else if(ui.loginStep === 'code'){
+    formHtml = `
+      <form id="loginForm" style="margin-top:18px;">
+        <div class="hint" style="margin-bottom:10px;">Code sent to <b>${ui.loginEmail.replace(/</g,'&lt;')}</b></div>
+        <div class="field"><label>6-digit code</label><input id="loginOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></div>
+        <button class="btn btn-primary" type="button" id="loginVerifyBtn" style="width:100%;justify-content:center;margin-top:16px;background:${btnColor};border-color:${btnColor};" ${ui.loginBusy?'disabled':''}>${ui.loginBusy?'Verifying…':'Verify & sign in'}</button>
+        <div class="login-error">${ui.loginError}</div>
+        <div style="display:flex;justify-content:space-between;margin-top:14px;">
+          <button type="button" class="btn btn-sm" id="loginBackToEmailBtn">← Use a different email</button>
+          <button type="button" class="btn btn-sm" id="loginResendBtn" ${cooldownLeft>0?'disabled':''}>${cooldownLeft>0?`Resend in ${cooldownLeft}s`:'Resend code'}</button>
+        </div>
+      </form>`;
+  } else {
+    formHtml = `
+      <form id="loginForm" style="margin-top:18px;">
+        <div class="field"><label>Email</label><input id="loginEmail" type="email" autocomplete="email" required autofocus value="${(ui.loginEmail||'').replace(/"/g,'&quot;')}"></div>
+        <button class="btn btn-primary" type="button" id="loginSendBtn" style="width:100%;justify-content:center;margin-top:16px;background:${btnColor};border-color:${btnColor};" ${ui.loginBusy?'disabled':''}>${ui.loginBusy?'Sending…':'Send code'}</button>
+        <div class="login-error">${ui.loginError}</div>
+      </form>`;
+  }
+
   return `
   <div class="login-shell" style="display:flex;align-items:stretch;justify-content:stretch;padding:0;">
     <div style="flex:1 1 75%;position:relative;overflow:hidden;background:${panelBg};display:flex;flex-direction:column;justify-content:center;padding:60px;min-height:100vh;">
@@ -2744,16 +2797,41 @@ function renderLogin(){
       <div class="login-card" style="border:none;box-shadow:none;max-width:360px;">
         ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="login-logo">` : ''}
         <div class="mono" id="loginDateTime" style="font-size:11px;color:var(--paper-faint);margin-top:6px;text-align:center;">${fmtDate(todayISO())} · ${nowTimeIST()} IST</div>
-        <form id="loginForm" style="margin-top:22px;">
-          <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username" required></div>
-          <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" required></div>
-          <button class="btn btn-primary" type="button" id="loginSubmitBtn" style="width:100%;justify-content:center;margin-top:16px;background:${btnColor};border-color:${btnColor};">Sign in</button>
-          <div class="login-error">${ui.loginError}</div>
-        </form>
-        ${userCount === 0 ? `<div style="margin-top:16px;text-align:center;"><button class="btn btn-sm btn-danger" type="button" id="resetDataBtn">Reset &amp; reload demo data</button></div>` : ''}
+        ${(method==='password' || ui.loginStep==='email') ? methodToggle : ''}
+        ${formHtml}
+        ${(userCount === 0 && (method==='password' || ui.loginStep==='email')) ? `<div style="margin-top:16px;text-align:center;"><button class="btn btn-sm btn-danger" type="button" id="resetDataBtn">Reset &amp; reload demo data</button></div>` : ''}
       </div>
     </div>
   </div>`;
+}
+
+// Completes sign-in for an already-identified user — same steps the old
+// password flow used after a successful match, now shared by both the
+// single-match path and the account-picker path.
+function completeLogin(match){
+  session.userId = match.id; persistSession();
+  try{ localStorage.setItem('lastLoginTheme', match.themePreference || 'boardroom'); }catch(e){}
+  ui.loginError=''; ui.loginStep='email'; ui.loginEmail=''; ui.loginAccountChoices=null; ui.loginBusy=false;
+  if(loginCooldownTimer){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; }
+  ui.view='home';
+  try{
+    runSummaryEngine();
+    checkAndShowSummaryPopup();
+  }catch(summaryErr){
+    console.error('Summary engine failed (non-fatal):', summaryErr);
+  }
+  render();
+  loadAiConversationHistory(match.id); // fire-and-forget — never delays login itself
+}
+
+let loginCooldownTimer = null;
+function startLoginCooldownTicker(){
+  if(loginCooldownTimer) clearInterval(loginCooldownTimer);
+  loginCooldownTimer = setInterval(()=>{
+    if(ui.view!=='login' || ui.loginStep!=='code'){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; return; }
+    if(Date.now() >= ui.loginResendAt){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; }
+    render();
+  }, 1000);
 }
 
 function bindLogin(){
@@ -2773,33 +2851,125 @@ function bindLogin(){
       render();
     });
   }
+
+  document.querySelectorAll('[data-login-method]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      ui.loginMethod = btn.dataset.loginMethod;
+      ui.loginError = ''; ui.loginStep='email'; ui.loginAccountChoices=null; ui.loginBusy=false;
+      if(loginCooldownTimer){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; }
+      render();
+    });
+  });
+
+  // Password sign-in
   runOnClickAndEnter('loginForm', 'loginSubmitBtn', ()=>{
     try{
       const uEl = document.getElementById('loginUser');
       const pEl = document.getElementById('loginPass');
+      if(!uEl || !pEl) return;
       const u = uEl.value.trim().toLowerCase();
       const p = pEl.value.trim();
       if(!u || !p){ ui.loginError = 'Enter both a username and a password.'; render(); return; }
       if(!state || !Array.isArray(state.users) || state.users.length===0){ state = seedState(); persist(); }
       const match = state.users.find(x=> x.username.toLowerCase()===u && x.password===p);
-      if(!match){ ui.loginError = 'Username or password not recognized. Check for extra spaces or try one of the demo logins below.'; render(); return; }
-      session.userId = match.id; persistSession();
-      try{ localStorage.setItem('lastLoginTheme', match.themePreference || 'boardroom'); }catch(e){}
-      ui.loginError='';
-      ui.view='home';
-      try{
-        runSummaryEngine();
-        checkAndShowSummaryPopup();
-      }catch(summaryErr){
-        console.error('Summary engine failed (non-fatal):', summaryErr);
-      }
-      render();
-      loadAiConversationHistory(match.id); // fire-and-forget — never delays login itself
+      if(!match){ ui.loginError = 'Username or password not recognized. Check for extra spaces.'; render(); return; }
+      completeLogin(match);
     }catch(err){
       ui.loginError = 'Sign-in hit an unexpected error: ' + (err && err.message ? err.message : err);
       render();
     }
   });
+
+  // Step 1: send the code
+  runOnClickAndEnter('loginForm', 'loginSendBtn', async ()=>{
+    const emailEl = document.getElementById('loginEmail');
+    if(!emailEl) return;
+    const email = emailEl.value.trim().toLowerCase();
+    if(!email){ ui.loginError = 'Enter your email.'; render(); return; }
+    if(!supaClient){ ui.loginError = 'Sign-in requires a live connection, which is not available right now.'; render(); return; }
+    ui.loginBusy = true; ui.loginError=''; render();
+    try{
+      const { error } = await supaClient.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+      if(error) throw error;
+      ui.loginStep = 'code';
+      ui.loginEmail = email;
+      ui.loginResendAt = Date.now() + 60000;
+      ui.loginBusy = false;
+      render();
+      startLoginCooldownTicker();
+    }catch(err){
+      ui.loginBusy = false;
+      ui.loginError = 'Could not send a code: ' + (err && err.message ? err.message : err);
+      render();
+    }
+  });
+
+  // Step 2: verify the code
+  runOnClickAndEnter('loginForm', 'loginVerifyBtn', async ()=>{
+    const otpEl = document.getElementById('loginOtp');
+    if(!otpEl) return;
+    const token = otpEl.value.trim();
+    if(!token){ ui.loginError = 'Enter the code from your email.'; render(); return; }
+    ui.loginBusy = true; ui.loginError=''; render();
+    try{
+      const { error } = await supaClient.auth.verifyOtp({ email: ui.loginEmail, token, type: 'email' });
+      if(error) throw error;
+      if(!state || !Array.isArray(state.users) || state.users.length===0){ state = seedState(); persist(); }
+      const matches = state.users.filter(x => (x.email||'').toLowerCase() === ui.loginEmail.toLowerCase());
+      ui.loginBusy = false;
+      if(matches.length === 0){
+        ui.loginError = "This email isn't linked to any user in this workspace. Contact your admin.";
+        render();
+      } else if(matches.length === 1){
+        completeLogin(matches[0]);
+      } else {
+        ui.loginStep = 'choose';
+        ui.loginAccountChoices = matches;
+        render();
+      }
+    }catch(err){
+      ui.loginBusy = false;
+      ui.loginError = 'That code was not accepted: ' + (err && err.message ? err.message : err);
+      render();
+    }
+  });
+
+  // Resend
+  const resendBtn = document.getElementById('loginResendBtn');
+  if(resendBtn) resendBtn.addEventListener('click', async ()=>{
+    if(Date.now() < ui.loginResendAt) return;
+    ui.loginBusy = true; ui.loginError=''; render();
+    try{
+      const { error } = await supaClient.auth.signInWithOtp({ email: ui.loginEmail, options: { shouldCreateUser: true } });
+      if(error) throw error;
+      ui.loginResendAt = Date.now() + 60000;
+      ui.loginBusy = false;
+      render();
+      startLoginCooldownTicker();
+    }catch(err){
+      ui.loginBusy = false;
+      ui.loginError = 'Could not resend: ' + (err && err.message ? err.message : err);
+      render();
+    }
+  });
+
+  // Back to email entry, from either the code step or the account-choice step
+  const backBtn = document.getElementById('loginBackToEmailBtn');
+  if(backBtn) backBtn.addEventListener('click', ()=>{
+    ui.loginStep = 'email'; ui.loginError=''; ui.loginAccountChoices=null; ui.loginBusy=false;
+    if(loginCooldownTimer){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; }
+    render();
+  });
+
+  // Account picker, when one email maps to more than one user
+  document.querySelectorAll('[data-choose-account]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const match = state.users.find(x=>x.id===btn.dataset.chooseAccount);
+      if(match) completeLogin(match);
+    });
+  });
+
+  if(ui.loginStep==='code') startLoginCooldownTicker();
 }
 
 /* ============================== PORTFOLIO ============================== */
@@ -7545,6 +7715,7 @@ function openAddUserModal(){
         <div class="modal-sub">Generates a login the person can use right away.</div>
         <form id="userForm">
           <div class="field"><label>Full name</label><input id="uName" required></div>
+          <div class="field"><label>Email (for sign-in)</label><input id="uEmail" type="email" required placeholder="e.g. priya@company.com"><div class="hint">This is how they'll sign in — a code gets sent here instead of using a password.</div></div>
           <div class="field"><label>Employee ID (optional)</label><input id="uEmployeeId" placeholder="e.g. EMP-1042"></div>
           <div class="field"><label>Job title (optional)</label><input id="uJobTitle" placeholder="e.g. Software Developer"></div>
           <div class="field"><label>Responsibilities (optional)</label>
@@ -7594,11 +7765,12 @@ function openAddUserModal(){
   runOnClickAndEnter('userForm', 'userSubmitBtn', ()=>{
     const nameEl = document.getElementById('uName');
     const userEl = document.getElementById('uUsername');
-    if(!nameEl.value.trim() || !userEl.value.trim()){ (nameEl.value.trim()?userEl:nameEl).focus(); return; }
+    const emailEl = document.getElementById('uEmail');
+    if(!nameEl.value.trim() || !userEl.value.trim() || !emailEl.value.trim()){ (nameEl.value.trim()? (userEl.value.trim()?emailEl:userEl) :nameEl).focus(); return; }
     const isViewer = roleSel.value==='viewer';
     const responsibilitiesRaw = document.getElementById('uResponsibilities').value.trim();
     const responsibilities = responsibilitiesRaw ? responsibilitiesRaw.split(';').map(s=>s.trim()).filter(Boolean) : [];
-    const u = { id: uid('u'), name: nameEl.value.trim(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: roleSel.value, teamId: isViewer ? null : (document.getElementById('uTeam').value || null), jobTitle: document.getElementById('uJobTitle').value.trim(), responsibilities };
+    const u = { id: uid('u'), name: nameEl.value.trim(), email: document.getElementById('uEmail').value.trim().toLowerCase(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: roleSel.value, teamId: isViewer ? null : (document.getElementById('uTeam').value || null), jobTitle: document.getElementById('uJobTitle').value.trim(), responsibilities };
     if(isViewer){
       u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
       u.viewerCanSeeAssignments = document.getElementById('uCanSeeAssignments').checked;
@@ -7824,6 +7996,7 @@ function openEditUserModal(userId){
         <h3>Edit ${u.name}</h3>
         <form id="editUserForm">
           <div class="field"><label>Full name</label><input id="euName" value="${u.name.replace(/"/g,'&quot;')}" required></div>
+          <div class="field"><label>Email (for sign-in)</label><input id="euEmail" type="email" value="${(u.email||'').replace(/"/g,'&quot;')}" required placeholder="e.g. priya@company.com"><div class="hint">This is how they sign in — a code gets sent here instead of using a password.</div></div>
           <div class="field"><label>Employee ID (optional)</label><input id="euEmployeeId" value="${(u.employeeId||'').replace(/"/g,'&quot;')}" placeholder="e.g. EMP-1042"></div>
           <div class="field"><label>WhatsApp number (optional)</label><input id="euPhone" value="${(u.phone||'').replace(/"/g,'&quot;')}" placeholder="e.g. +1 555 123 4567"></div>
           <div class="field"><label>Job title (optional)</label><input id="euJobTitle" value="${(u.jobTitle||'').replace(/"/g,'&quot;')}" placeholder="e.g. Software Developer"></div>
@@ -7841,9 +8014,11 @@ function openEditUserModal(userId){
   bindModalClose();
   runOnClickAndEnter('editUserForm', 'editUserSubmitBtn', ()=>{
     const nameEl = document.getElementById('euName');
-    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    const emailEl = document.getElementById('euEmail');
+    if(!nameEl.value.trim() || !emailEl.value.trim()){ (nameEl.value.trim()?emailEl:nameEl).focus(); return; }
     const raw = document.getElementById('euResponsibilities').value.trim();
     u.name = nameEl.value.trim();
+    u.email = emailEl.value.trim().toLowerCase();
     u.employeeId = document.getElementById('euEmployeeId').value.trim();
     u.phone = document.getElementById('euPhone').value.trim();
     u.jobTitle = document.getElementById('euJobTitle').value.trim();

@@ -2768,7 +2768,7 @@ function renderLogin(){
     formHtml = `
       <form id="loginForm" style="margin-top:18px;">
         <div class="hint" style="margin-bottom:10px;">Code sent to <b>${ui.loginEmail.replace(/</g,'&lt;')}</b></div>
-        <div class="field"><label>6-digit code</label><input id="loginOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></div>
+        <div class="field"><label>Code from your email</label><input id="loginOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" required autofocus></div>
         <button class="btn btn-primary" type="button" id="loginVerifyBtn" style="width:100%;justify-content:center;margin-top:16px;background:${btnColor};border-color:${btnColor};" ${ui.loginBusy?'disabled':''}>${ui.loginBusy?'Verifying…':'Verify & sign in'}</button>
         <div class="login-error">${ui.loginError}</div>
         <div style="display:flex;justify-content:space-between;margin-top:14px;">
@@ -2829,8 +2829,17 @@ function startLoginCooldownTicker(){
   if(loginCooldownTimer) clearInterval(loginCooldownTimer);
   loginCooldownTimer = setInterval(()=>{
     if(ui.view!=='login' || ui.loginStep!=='code'){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; return; }
-    if(Date.now() >= ui.loginResendAt){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; }
-    render();
+    const btn = document.getElementById('loginResendBtn');
+    const left = Math.max(0, Math.ceil((ui.loginResendAt - Date.now())/1000));
+    if(left <= 0){
+      clearInterval(loginCooldownTimer); loginCooldownTimer=null;
+      if(btn){ btn.disabled = false; btn.textContent = 'Resend code'; }
+      return;
+    }
+    // Update the button directly — never call render() here, since a full
+    // re-render would wipe out whatever the person has already typed into
+    // the code field mid-countdown.
+    if(btn){ btn.disabled = true; btn.textContent = `Resend in ${left}s`; }
   }, 1000);
 }
 
@@ -2908,7 +2917,7 @@ function bindLogin(){
   runOnClickAndEnter('loginForm', 'loginVerifyBtn', async ()=>{
     const otpEl = document.getElementById('loginOtp');
     if(!otpEl) return;
-    const token = otpEl.value.trim();
+    const token = otpEl.value.replace(/\D/g, ''); // codes are pasted as often as typed — strip anything but digits, not just whitespace
     if(!token){ ui.loginError = 'Enter the code from your email.'; render(); return; }
     ui.loginBusy = true; ui.loginError=''; render();
     try{

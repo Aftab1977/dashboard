@@ -2896,6 +2896,14 @@ function bindLogin(){
     const email = emailEl.value.trim().toLowerCase();
     if(!email){ ui.loginError = 'Enter your email.'; render(); return; }
     if(!supaClient){ ui.loginError = 'Sign-in requires a live connection, which is not available right now.'; render(); return; }
+    if(!state || !Array.isArray(state.users) || state.users.length===0){ state = seedState(); persist(); }
+    // Check this email actually belongs to a user in this workspace BEFORE
+    // ever contacting Supabase — this is the real gate. A matching admin-
+    // added user can still sign in on their very first attempt (Supabase
+    // creates their auth account transparently at that point), but a
+    // random/unrecognized email never gets as far as sending a real request.
+    const knownUser = state.users.some(x => (x.email||'').toLowerCase() === email);
+    if(!knownUser){ ui.loginError = "This email isn't linked to any account in this workspace. Contact your admin."; render(); return; }
     ui.loginBusy = true; ui.loginError=''; render();
     try{
       const { error } = await supaClient.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
@@ -2947,6 +2955,8 @@ function bindLogin(){
   const resendBtn = document.getElementById('loginResendBtn');
   if(resendBtn) resendBtn.addEventListener('click', async ()=>{
     if(Date.now() < ui.loginResendAt) return;
+    const stillKnown = state && Array.isArray(state.users) && state.users.some(x => (x.email||'').toLowerCase() === ui.loginEmail.toLowerCase());
+    if(!stillKnown){ ui.loginError = "This email isn't linked to any account in this workspace anymore."; render(); return; }
     ui.loginBusy = true; ui.loginError=''; render();
     try{
       const { error } = await supaClient.auth.signInWithOtp({ email: ui.loginEmail, options: { shouldCreateUser: true } });

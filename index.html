@@ -7172,13 +7172,6 @@ function renderMyAccount(){
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:14px;">${widgetCards}</div>
     </div>
-    <div class="card" style="margin-top:16px;" id="totpAccountCard">
-      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Authenticator App</div>
-      <div class="muted" style="font-size:12px;margin-bottom:14px;">
-        An extra security step at sign-in, using an app like Microsoft Authenticator or Google Authenticator on your phone. This is personal to you — setting it up here doesn't affect anyone else, and it only actually applies at sign-in once an admin turns the feature on for the workspace.
-      </div>
-      <div id="totpStatusArea"><div class="muted" style="font-size:12px;">Checking your current setup…</div></div>
-    </div>
   `;
 }
 
@@ -7208,7 +7201,6 @@ function bindMyAccount(){
     });
   });
   bindDashboardWidgetDrag();
-  renderTotpStatus();
 }
 
 // ---- Authenticator App (TOTP) enrollment, in My Account ----
@@ -7255,6 +7247,17 @@ async function beginTotpEnrollment(){
   if(!area || !supaClient) return;
   area.innerHTML = `<div class="muted" style="font-size:12px;">Generating your QR code…</div>`;
   try{
+    // If a previous attempt was abandoned without clicking Cancel (e.g. the
+    // person just navigated away), an unverified factor is left behind in
+    // Supabase and blocks any new enroll() call with a "friendly name
+    // already exists" error. Clear out any leftover unverified factor first,
+    // every time, so starting fresh always works regardless of what
+    // happened last time.
+    const { data: existing } = await supaClient.auth.mfa.listFactors();
+    const stale = existing && (existing.totp||[]).filter(f => f.status !== 'verified');
+    if(stale && stale.length){
+      for(const f of stale){ try{ await supaClient.auth.mfa.unenroll({ factorId: f.id }); }catch(e){} }
+    }
     const { data, error } = await supaClient.auth.mfa.enroll({ factorType: 'totp' });
     if(error) throw error;
     area.innerHTML = `
@@ -7444,8 +7447,15 @@ function renderAdminSettings(){
         </label>
       </div>
       <div class="muted" style="font-size:12px;">
-        This is an admin-only master switch, applying to everyone at once — not something set person by person. When on, anyone who has personally set up an Authenticator app (in their own My Account page) will be asked for their code as an extra step after signing in. People who haven't set one up yet are unaffected either way. Turning this off skips the extra step for absolutely everyone, even those who have set one up.
+        This is an admin-only master switch, applying to everyone at once — not something set person by person. When on, anyone who has personally set up an Authenticator app will be asked for their code as an extra step after signing in. People who haven't set one up yet are unaffected either way. Turning this off skips the extra step for absolutely everyone, even those who have set one up.
       </div>
+    </div>
+    <div class="card" style="margin-bottom:16px;" id="totpAccountCard">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Set Up Your Own Authenticator</div>
+      <div class="muted" style="font-size:12px;margin-bottom:14px;">
+        This registers a device for your own account (${admin ? admin.name : 'you'}) — it doesn't set anything up on anyone else's behalf. Each person registers their own separately.
+      </div>
+      <div id="totpStatusArea"><div class="muted" style="font-size:12px;">Checking your current setup…</div></div>
     </div>
     <div class="card" style="border-left:4px solid var(--red);border-color:var(--red);">
       <div class="section-title" style="display:inline-block;margin-bottom:6px;background:var(--red);color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--red-glow);">Danger zone</div>
@@ -7610,6 +7620,7 @@ function renderAdminProjects(){
 }
 
 function bindAdmin(){
+  if(ui.adminTab==='settings') renderTotpStatus();
   document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click', ()=>{
     ui.adminTab=b.dataset.tab;
     render();

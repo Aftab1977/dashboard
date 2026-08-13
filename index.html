@@ -729,7 +729,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0 };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
 let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
@@ -1011,7 +1011,7 @@ function seedState(){
   const allNodeIds = featureNodes.map(n=>n.id).filter(id=>id!=='feat_ai_agent' && id!=='feat_spend');
   const userAccess = {};
   users.forEach(u=>{ if(u.role!=='admin') userAccess[u.id] = allNodeIds.slice(); });
-  return normalizeState({ teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {}, reminders: [], roles: [], spendCompanies: [], spendExpenses: [] });
+  return normalizeState({ teams, users, projects, tasks, featureNodes, attendance: {}, appraisal: {}, settings: { maxUploadMB: 250, aiCopilotEnabled: true, totpEnabled: false, dashboardWidgetOrder: DEFAULT_DASHBOARD_WIDGET_ORDER.slice() }, userAccess, _userAccessGrandfathered: true, _summaryModuleGranted: true, dailySnapshots: {}, dailySummaries: {}, weeklySummaries: {}, summaryShownLog: {}, reminders: [], roles: [], spendCompanies: [], spendExpenses: [] });
 }
 
 function withTimeout(promise, ms){
@@ -1312,6 +1312,7 @@ function normalizeState(s){
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
   if(typeof s.settings.aiCopilotEnabled !== 'boolean') s.settings.aiCopilotEnabled = true;
+  if(typeof s.settings.totpEnabled !== 'boolean') s.settings.totpEnabled = false;
   if(!Array.isArray(s.settings.dashboardWidgetOrder)) s.settings.dashboardWidgetOrder = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
   else {
     // Keep this in sync if the widget set itself ever changes — add any new
@@ -2766,6 +2767,14 @@ function renderLogin(){
         ${(ui.loginAccountChoices||[]).map(u=>`<button type="button" class="btn" style="width:100%;justify-content:flex-start;margin-bottom:8px;" data-choose-account="${u.id}">${u.name.replace(/</g,'&lt;')} <span class="muted" style="margin-left:6px;">(${u.username})</span></button>`).join('')}
         <button type="button" class="btn btn-sm" style="margin-top:6px;" id="loginBackToEmailBtn">← Use a different email</button>
       </div>`;
+  } else if(ui.loginStep === 'totp'){
+    formHtml = `
+      <form id="loginForm" style="margin-top:18px;">
+        <div class="hint" style="margin-bottom:10px;">One more step — this account has an Authenticator app set up. Enter the current code from it.</div>
+        <div class="field"><label>Authenticator code</label><input id="loginTotpInput" type="text" inputmode="numeric" maxlength="10" required autofocus></div>
+        <button class="btn btn-primary" type="button" id="loginTotpVerifyBtn" style="width:100%;justify-content:center;margin-top:16px;background:${btnColor};border-color:${btnColor};" ${ui.loginBusy?'disabled':''}>${ui.loginBusy?'Verifying…':'Verify & sign in'}</button>
+        <div class="login-error">${ui.loginError}</div>
+      </form>`;
   } else if(ui.loginStep === 'code'){
     formHtml = `
       <form id="loginForm" style="margin-top:18px;">
@@ -2810,10 +2819,37 @@ function renderLogin(){
 // Completes sign-in for an already-identified user — same steps the old
 // password flow used after a successful match, now shared by both the
 // single-match path and the account-picker path.
-function completeLogin(match){
+// If MFA is turned on system-wide AND this login has a real Supabase session
+// (only true for the Email Code path — Password sign-in never touches Supabase
+// Auth at all, so there's nothing for an Authenticator check to attach to),
+// check whether this account has a verified Authenticator factor and, if so,
+// require it before finishing sign-in.
+async function completeLogin(match){
+  if(state.settings.totpEnabled && supaClient){
+    try{
+      const { data: sessionData } = await supaClient.auth.getSession();
+      if(sessionData && sessionData.session){
+        const { data: factorData } = await supaClient.auth.mfa.listFactors();
+        const verified = factorData && (factorData.totp||[]).find(f=>f.status==='verified');
+        if(verified){
+          ui.pendingLoginMatch = match;
+          ui.loginStep = 'totp';
+          ui.loginTotpFactorId = verified.id;
+          ui.loginError=''; ui.loginBusy=false;
+          render();
+          return;
+        }
+      }
+    }catch(e){ /* if the MFA check itself fails, don't block sign-in over it */ }
+  }
+  finishLogin(match);
+}
+
+function finishLogin(match){
   session.userId = match.id; persistSession();
   try{ localStorage.setItem('lastLoginTheme', match.themePreference || 'boardroom'); }catch(e){}
   ui.loginError=''; ui.loginStep='email'; ui.loginEmail=''; ui.loginAccountChoices=null; ui.loginBusy=false;
+  ui.pendingLoginMatch=null; ui.loginTotpFactorId=null;
   if(loginCooldownTimer){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; }
   ui.view='home';
   try{
@@ -2946,6 +2982,28 @@ function bindLogin(){
         ui.loginAccountChoices = matches;
         render();
       }
+    }catch(err){
+      ui.loginBusy = false;
+      ui.loginError = 'That code was not accepted: ' + (err && err.message ? err.message : err);
+      render();
+    }
+  });
+
+  // TOTP step-up: the extra Authenticator check, only reached when the admin
+  // toggle is on and this account has a verified factor (see completeLogin).
+  runOnClickAndEnter('loginForm', 'loginTotpVerifyBtn', async ()=>{
+    const codeEl = document.getElementById('loginTotpInput');
+    if(!codeEl) return;
+    const code = codeEl.value.replace(/\D/g, '');
+    if(!code){ ui.loginError = 'Enter the code from your Authenticator app.'; render(); return; }
+    ui.loginBusy = true; ui.loginError=''; render();
+    try{
+      const { data: challenge, error: challengeErr } = await supaClient.auth.mfa.challenge({ factorId: ui.loginTotpFactorId });
+      if(challengeErr) throw challengeErr;
+      const { error: verifyErr } = await supaClient.auth.mfa.verify({ factorId: ui.loginTotpFactorId, challengeId: challenge.id, code });
+      if(verifyErr) throw verifyErr;
+      ui.loginBusy = false;
+      finishLogin(ui.pendingLoginMatch);
     }catch(err){
       ui.loginBusy = false;
       ui.loginError = 'That code was not accepted: ' + (err && err.message ? err.message : err);
@@ -7114,6 +7172,13 @@ function renderMyAccount(){
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:14px;">${widgetCards}</div>
     </div>
+    <div class="card" style="margin-top:16px;" id="totpAccountCard">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Authenticator App</div>
+      <div class="muted" style="font-size:12px;margin-bottom:14px;">
+        An extra security step at sign-in, using an app like Microsoft Authenticator or Google Authenticator on your phone. This is personal to you — setting it up here doesn't affect anyone else, and it only actually applies at sign-in once an admin turns the feature on for the workspace.
+      </div>
+      <div id="totpStatusArea"><div class="muted" style="font-size:12px;">Checking your current setup…</div></div>
+    </div>
   `;
 }
 
@@ -7143,6 +7208,95 @@ function bindMyAccount(){
     });
   });
   bindDashboardWidgetDrag();
+  renderTotpStatus();
+}
+
+// ---- Authenticator App (TOTP) enrollment, in My Account ----
+async function renderTotpStatus(){
+  const area = document.getElementById('totpStatusArea');
+  if(!area) return;
+  if(!supaClient){
+    area.innerHTML = `<div class="muted" style="font-size:12px;">Setting this up requires a live connection, which is not available right now.</div>`;
+    return;
+  }
+  try{
+    const { data, error } = await supaClient.auth.mfa.listFactors();
+    if(error) throw error;
+    const verified = (data.totp || []).find(f => f.status === 'verified');
+    if(verified){
+      area.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="color:var(--green);font-weight:600;font-size:13px;">✓ Set up and active</div>
+          <button class="btn btn-sm btn-danger" id="totpRemoveBtn" data-factor-id="${verified.id}">Remove</button>
+        </div>`;
+      const removeBtn = document.getElementById('totpRemoveBtn');
+      if(removeBtn) removeBtn.addEventListener('click', async ()=>{
+        removeBtn.disabled = true; removeBtn.textContent = 'Removing…';
+        try{
+          const { error: unenrollErr } = await supaClient.auth.mfa.unenroll({ factorId: removeBtn.dataset.factorId });
+          if(unenrollErr) throw unenrollErr;
+          renderTotpStatus();
+        }catch(err){
+          area.innerHTML = `<div style="color:var(--red);font-size:12px;">Could not remove: ${err && err.message ? err.message : err}</div>`;
+        }
+      });
+    } else {
+      area.innerHTML = `<button class="btn btn-sm" id="totpSetupBtn">Set Up Authenticator</button>`;
+      const setupBtn = document.getElementById('totpSetupBtn');
+      if(setupBtn) setupBtn.addEventListener('click', beginTotpEnrollment);
+    }
+  }catch(err){
+    area.innerHTML = `<div style="color:var(--red);font-size:12px;">Could not check your Authenticator status: ${err && err.message ? err.message : err}</div>`;
+  }
+}
+
+async function beginTotpEnrollment(){
+  const area = document.getElementById('totpStatusArea');
+  if(!area || !supaClient) return;
+  area.innerHTML = `<div class="muted" style="font-size:12px;">Generating your QR code…</div>`;
+  try{
+    const { data, error } = await supaClient.auth.mfa.enroll({ factorType: 'totp' });
+    if(error) throw error;
+    area.innerHTML = `
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">
+        <div>
+          <img src="${data.totp.qr_code}" alt="Scan with your Authenticator app" style="width:160px;height:160px;border:1px solid var(--line);border-radius:8px;">
+          <div class="muted" style="font-size:10.5px;margin-top:6px;max-width:160px;">Can't scan? Enter this code manually: <span style="font-family:var(--f-mono);word-break:break-all;">${data.totp.secret}</span></div>
+        </div>
+        <div style="flex:1;min-width:200px;">
+          <div class="field"><label>Code from your app</label><input id="totpVerifyInput" type="text" inputmode="numeric" maxlength="10" autofocus></div>
+          <button class="btn btn-sm btn-primary" id="totpVerifyBtn" data-factor-id="${data.id}" style="margin-top:8px;">Confirm</button>
+          <button class="btn btn-sm" id="totpCancelBtn" style="margin-top:8px;">Cancel</button>
+          <div id="totpVerifyError" style="color:var(--red);font-size:12px;margin-top:8px;"></div>
+        </div>
+      </div>`;
+    const verifyBtn = document.getElementById('totpVerifyBtn');
+    const cancelBtn = document.getElementById('totpCancelBtn');
+    if(cancelBtn) cancelBtn.addEventListener('click', async ()=>{
+      // Clean up the unconfirmed factor so it doesn't linger unverified
+      try{ await supaClient.auth.mfa.unenroll({ factorId: data.id }); }catch(e){}
+      renderTotpStatus();
+    });
+    if(verifyBtn) runOnClickAndEnter(null, 'totpVerifyBtn', async ()=>{
+      const codeEl = document.getElementById('totpVerifyInput');
+      const errEl = document.getElementById('totpVerifyError');
+      const code = codeEl.value.replace(/\D/g, '');
+      if(!code){ errEl.textContent = 'Enter the code from your app.'; return; }
+      verifyBtn.disabled = true; verifyBtn.textContent = 'Confirming…'; errEl.textContent = '';
+      try{
+        const { data: challenge, error: challengeErr } = await supaClient.auth.mfa.challenge({ factorId: data.id });
+        if(challengeErr) throw challengeErr;
+        const { error: verifyErr } = await supaClient.auth.mfa.verify({ factorId: data.id, challengeId: challenge.id, code });
+        if(verifyErr) throw verifyErr;
+        renderTotpStatus();
+      }catch(err){
+        verifyBtn.disabled = false; verifyBtn.textContent = 'Confirm';
+        errEl.textContent = 'That code was not accepted: ' + (err && err.message ? err.message : err);
+      }
+    });
+  }catch(err){
+    area.innerHTML = `<div style="color:var(--red);font-size:12px;">Could not start setup: ${err && err.message ? err.message : err}</div>`;
+  }
 }
 
 function renderAdmin(){
@@ -7279,6 +7433,18 @@ function renderAdminSettings(){
         ${aiProviderInfo
           ? `Currently using <b>${aiProviderInfo.provider}</b>, model <b>${aiProviderInfo.model}</b>. This is read directly from the backend, so it will always reflect whichever provider or model is actually in use — including if that changes in the future.`
           : `Checking which AI service is currently in use…`}
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac4};">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="section-title" style="display:inline-block;margin-bottom:0;background:${ac4};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Authenticator App (Extra Security)</div>
+        <label class="toggle-switch" data-tooltip="${state.settings.totpEnabled ? 'Turn off for everyone' : 'Turn on for everyone'}">
+          <input type="checkbox" id="totpEnabledToggle" ${state.settings.totpEnabled?'checked':''}>
+          <div class="toggle-track"></div>
+        </label>
+      </div>
+      <div class="muted" style="font-size:12px;">
+        This is an admin-only master switch, applying to everyone at once — not something set person by person. When on, anyone who has personally set up an Authenticator app (in their own My Account page) will be asked for their code as an extra step after signing in. People who haven't set one up yet are unaffected either way. Turning this off skips the extra step for absolutely everyone, even those who have set one up.
       </div>
     </div>
     <div class="card" style="border-left:4px solid var(--red);border-color:var(--red);">
@@ -7502,6 +7668,11 @@ function bindAdmin(){
   if(aiCopilotToggle) aiCopilotToggle.addEventListener('change', ()=>{
     state.settings.aiCopilotEnabled = aiCopilotToggle.checked;
     persist(); render(); renderAiAgentWidget();
+  });
+  const totpEnabledToggle = document.getElementById('totpEnabledToggle');
+  if(totpEnabledToggle) totpEnabledToggle.addEventListener('change', ()=>{
+    state.settings.totpEnabled = totpEnabledToggle.checked;
+    persist(); render();
   });
 
   const logoUploadBtn = document.getElementById('logoUploadBtn');

@@ -1037,6 +1037,10 @@ function stateRichness(s){
 function normalizeState(s){
   if(!s) return s;
   if(!Array.isArray(s.spendCompanies)) s.spendCompanies = [];
+  // One-time migration: workstreams created before priority existed default to Medium.
+  if(Array.isArray(s.projects)){
+    s.projects.forEach(p=>{ if(!p.priority) p.priority = 'medium'; });
+  }
   // One-time testing migration: every user without an email gets the shared
   // testing address, so OTP login works immediately for existing deployed
   // data too. Once real per-user emails are set via Admin > Users, this
@@ -1562,10 +1566,17 @@ function accessibleProjectIds(){
   }
   const ids = new Set();
   state.tasks.forEach(t=>{
-    if((t.assignedType==='user' && t.assignedId===u.id) || (t.assignedType==='team' && t.assignedId===u.teamId)){
-      ids.add(t.projectId);
+    if(t.assignedType==='user'){
+      if(t.assignedId===u.id) ids.add(t.projectId);
+      else if(u.teamId){
+        const assignedUser = state.users.find(x=>x.id===t.assignedId);
+        if(assignedUser && assignedUser.teamId===u.teamId) ids.add(t.projectId);
+      }
     }
+    if(t.assignedType==='team' && t.assignedId===u.teamId) ids.add(t.projectId);
     if(t.blockedByUserId===u.id) ids.add(t.projectId);
+    if(t.pendingReviewerId===u.id) ids.add(t.projectId);
+    if(t.reviewApprovedById===u.id) ids.add(t.projectId);
   });
   state.projects.forEach(p=>{
     if(Array.isArray(p.taggedUserIds) && p.taggedUserIds.includes(u.id)) ids.add(p.id);
@@ -2102,6 +2113,19 @@ function pill(status, label, tooltip){
   const pulse = status==='red' ? ' pulse' : '';
   const titleAttr = tooltip ? ` data-tooltip="${tooltip.replace(/"/g,'&quot;')}"` : '';
   return `<span class="pill ${cls}"${titleAttr}><span class="dot${pulse}"></span>${label}</span>`;
+}
+
+// Shared priority metadata — one place controlling label, color, and sort
+// order for workstream priority everywhere it's used (list, detail page).
+const PRIORITY_META = {
+  high:   { label: 'High',   color: 'var(--red)',   order: 0 },
+  medium: { label: 'Medium', color: 'var(--amber)', order: 1 },
+  low:    { label: 'Low',    color: 'var(--textFaint, #8A93A0)', order: 2 },
+};
+function priorityMeta(p){ return PRIORITY_META[(p && p.priority) || 'medium']; }
+function priorityBadge(p){
+  const m = priorityMeta(p);
+  return `<span class="pill" style="background:${m.color};color:#fff;border-color:${m.color};"><span class="dot"></span>${m.label} Priority</span>`;
 }
 
 function svgIcon(name){
@@ -3152,6 +3176,15 @@ function renderFocusAreaHome(){
     </div>`;
   }).join('');
 
+  const myReviewRequests = cu ? state.tasks.filter(t=>t.pendingReviewerId===cu.id) : [];
+  const reviewNoticesHtml = myReviewRequests.map(t=>{
+    const fromUser = entityName('user', t.reviewRequestedById);
+    return `
+    <div class="card" data-open-review-task="${t.id}" style="margin-bottom:14px;cursor:pointer;border-color:var(--amber);">
+      <div style="font-size:14px;color:var(--amber);font-weight:600;">${fromUser} has assigned a task "${t.title||'Untitled task'}" for your review</div>
+    </div>`;
+  }).join('');
+
   const heroHeader = isBoardroom ? renderPageHero('Focus Area', 'Everything for your focus, in one place.', null, null, true) : `
     <div class="eyebrow">Focus Area</div>
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:2px;">
@@ -3165,6 +3198,8 @@ function renderFocusAreaHome(){
     ${workstreamWidgetsCard}
 
     ${blockNoticesHtml}
+
+    ${reviewNoticesHtml}
 
     <div style="display:flex;flex-wrap:wrap;gap:14px;">
       ${featureBoxes}
@@ -3316,6 +3351,16 @@ function bindFocusAreaHome(){
       openTaskDetailsModal(taskId);
     });
   });
+  document.querySelectorAll('[data-open-review-task]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const taskId = el.dataset.openReviewTask;
+      const t = state.tasks.find(x=>x.id===taskId);
+      if(!t) return;
+      ui.projectId = t.projectId; ui.view = 'project';
+      render();
+      openTaskDetailsModal(taskId);
+    });
+  });
   const wsInput = document.getElementById('workspaceSearchInput');
   if(wsInput){
     wsInput.addEventListener('input', ()=>{
@@ -3374,7 +3419,7 @@ function renderPortfolio(){
     if(filter==='closed') return s.isClosedProject;
     if(filter==='future') return s.isFutureProject;
     return !s.isClosedProject && !s.isFutureProject; // 'open' — default
-  });
+  }).sort((a,b)=> priorityMeta(a.p).order - priorityMeta(b.p).order);
 
   const onTrack = filtered.filter(s=>!s.tl.isRed).length;
   const delayed = filtered.filter(s=>s.tl.isRed).length;
@@ -3390,7 +3435,7 @@ function renderPortfolio(){
     <div class="proj-card status-${status}" data-open-project="${s.p.id}">
       <div class="pname" style="margin:2px 0 4px;">${s.p.name}</div>
       <div class="eyebrow" style="margin-bottom:10px;">${s.tasks.length} task${s.tasks.length===1?'':'s'}</div>
-      <div style="margin-bottom:10px;">${pill(s.isClosedProject?'green':'amber', s.isClosedProject?'Closed':(s.isFutureProject?'Future':'Open'))}</div>
+      <div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;">${pill(s.isClosedProject?'green':'amber', s.isClosedProject?'Closed':(s.isFutureProject?'Future':'Open'))}${priorityBadge(s.p)}</div>
       <div class="proj-meta" style="margin-top:0;">
         <span>STARTED <b style="color:var(--paper);">${fmtDate(s.p.startDate)}</b></span>
         <span>DEADLINE <b style="color:var(--paper);">${fmtDate(deadline)}</b></span>
@@ -5601,9 +5646,16 @@ function renderProject(){
         <div class="eyebrow">Workstream</div>
         <h1 class="page-title" data-open-workstream-info="${p.id}" style="cursor:pointer;">${p.name}</h1>
         ${p.description ? `<div class="muted" style="font-size:13px;margin-top:4px;max-width:640px;">${p.description}</div>` : ''}
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           ${pill(status, status==='red' ? `Delayed ${tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
           ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" data-tooltip="${blockedDetailForProject(p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
+          ${isAdmin()
+            ? `<select id="projPrioritySelect" data-tooltip="Change priority" style="background:${priorityMeta(p).color};color:#fff;border:none;border-radius:20px;padding:5px 12px;font-size:12.5px;font-weight:700;cursor:pointer;">
+                <option value="high" ${p.priority==='high'?'selected':''}>High Priority</option>
+                <option value="medium" ${(!p.priority||p.priority==='medium')?'selected':''}>Medium Priority</option>
+                <option value="low" ${p.priority==='low'?'selected':''}>Low Priority</option>
+              </select>`
+            : priorityBadge(p)}
         </div>
       </div>
       <div class="hero-metrics">
@@ -5669,6 +5721,11 @@ function renderProject(){
 function bindProject(){
   const switcher = document.getElementById('workstreamSwitcher');
   if(switcher) switcher.addEventListener('change', ()=>{ ui.projectId = switcher.value; render(); });
+  const prioritySelect = document.getElementById('projPrioritySelect');
+  if(prioritySelect) prioritySelect.addEventListener('change', ()=>{
+    const p = state.projects.find(x=>x.id===ui.projectId);
+    if(p){ p.priority = prioritySelect.value; persist(); render(); }
+  });
   const wsInfo = document.querySelector('[data-open-workstream-info]');
   if(wsInfo) wsInfo.addEventListener('click', ()=> openWorkstreamInfoModal(wsInfo.dataset.openWorkstreamInfo));
   document.querySelectorAll('[data-edit-task]').forEach(el=>{
@@ -5896,6 +5953,11 @@ function openTaskDetailsModal(taskId){
 
         ${t.checklistRecord ? `<div class="field"><label>Checklist confirmed</label><div class="hint">Completed by ${t.checklistRecord.completedByName} on ${fmtDate(t.checklistRecord.completedAt)}${t.checklistRecord.items.map(i=>`<br>✓ ${i.text}`).join('')}</div></div>` : ''}
 
+        ${t.reviewApprovedById ? `<div class="field"><label>Review</label><div class="hint" style="color:var(--green);">✓ Reviewed &amp; approved by ${entityName('user', t.reviewApprovedById)} on ${fmtDate(t.reviewApprovedAt)}</div></div>`
+          : t.pendingReviewerId ? `
+            <div class="field"><label>Review</label><div class="hint">Pending review by ${entityName('user', t.pendingReviewerId)}, requested by ${entityName('user', t.reviewRequestedById)} on ${fmtDate(t.reviewRequestedAt)}. This task can't close until then.</div></div>
+            ${currentUser() && currentUser().id===t.pendingReviewerId ? `<button type="button" class="btn btn-primary" id="approveReviewBtnReadonly" data-approve-task="${t.id}" style="margin:4px 0 10px;">Approve this task</button>` : ''}
+          ` : ''}
         <div class="field"><label>Last updated</label><div class="hint">${t.lastUpdated ? `${t.lastUpdated.byName} at ${fmtDateTime(t.lastUpdated.at)}` : 'Not yet updated'}</div></div>
 
         ${(t.attachments && t.attachments.length) ? `<div class="field"><label>Attachments</label>${t.attachments.map(it=>renderTaskAttachmentItem(it,t.id,false)).join('')}</div>` : ''}
@@ -5936,6 +5998,17 @@ function openTaskDetailsModal(taskId){
       openTaskAttachmentPreviewModal(tid, attId);
     });
   });
+  const approveBtn = document.getElementById('approveReviewBtnReadonly');
+  if(approveBtn) approveBtn.addEventListener('click', ()=>{
+    const task = state.tasks.find(x=>x.id===approveBtn.dataset.approveTask);
+    const cu = currentUser();
+    if(task && cu && task.pendingReviewerId===cu.id){
+      task.reviewApprovedById = cu.id;
+      task.reviewApprovedAt = todayISO();
+      task.pendingReviewerId = null;
+      persist(); closeModal(); render();
+    }
+  });
 }
 
 function openTaskModal(taskId){
@@ -5969,6 +6042,11 @@ function openTaskModal(taskId){
           </div>
           ${t.weekendWork ? `<div style="margin:6px 0;">${pill('amber','Includes weekend work')}</div>` : ''}
           ${t.checklistRecord ? `<div class="field"><label>Checklist confirmed</label><div class="hint">Completed by ${t.checklistRecord.completedByName} on ${fmtDate(t.checklistRecord.completedAt)}${t.checklistRecord.items.map(i=>`<br>✓ ${i.text}`).join('')}</div></div>` : ''}
+          ${t.reviewApprovedById ? `<div class="field"><label>Review</label><div class="hint" style="color:var(--green);">✓ Reviewed &amp; approved by ${entityName('user', t.reviewApprovedById)} on ${fmtDate(t.reviewApprovedAt)}</div></div>`
+            : t.pendingReviewerId ? `
+              <div class="field"><label>Review</label><div class="hint">Pending review by ${entityName('user', t.pendingReviewerId)}, requested by ${entityName('user', t.reviewRequestedById)} on ${fmtDate(t.reviewRequestedAt)}. This task can't close until then.</div></div>
+              ${currentUser() && currentUser().id===t.pendingReviewerId ? `<button type="button" class="btn btn-primary" id="approveReviewBtn" style="margin:4px 0 10px;">Approve this task</button>` : ''}
+            ` : ''}
           ${admin && !t.deadlineDisabled ? `<div class="hint">To correct these dates, use "Amend timeline" below — it's kept separate from Save so closing or editing a task never silently changes the permanent record.</div>` : ''}
           `}
           <div class="field"><label>Reason — why this much time?</label><textarea id="tfReason" placeholder="Explain the estimate...">${t.reason||''}</textarea></div>
@@ -6089,16 +6167,60 @@ function openTaskModal(taskId){
     const pendingStatus = document.getElementById('tfStatus').value;
     const isClosingNow = t.status!=='closed' && pendingStatus==='closed';
     if(isClosingNow){
+      // Already reviewed and approved on a prior attempt — this closure can proceed,
+      // still going through the checklist gate first if this workstream requires it.
+      if(t.reviewApprovedById){
+        const proj = state.projects.find(p=>p.id===t.projectId);
+        const teamId = t.assignedType==='team' ? t.assignedId : (state.users.find(u=>u.id===t.assignedId)||{}).teamId;
+        const team = teamId ? state.teams.find(tm=>tm.id===teamId) : null;
+        const items = (team && Array.isArray(team.checklist)) ? team.checklist : [];
+        if(t.checklistRequired && items.length){
+          openChecklistGateModal(t, team, items, (record)=>{ t.checklistRecord = record; overlapThenCommit(); });
+          return;
+        }
+        overlapThenCommit();
+        return;
+      }
+      // A review was requested but the reviewer hasn't approved it yet — closing is
+      // blocked entirely until they do, no matter how many times this is attempted.
+      if(t.pendingReviewerId){
+        document.getElementById('tfStatus').value = t.status;
+        openReviewPendingNotice(t);
+        return;
+      }
+      // Neither yet — checklist (if required) and then the mandatory reviewer
+      // assignment, which is what actually gates this closure the first time through.
       const proj = state.projects.find(p=>p.id===t.projectId);
       const teamId = t.assignedType==='team' ? t.assignedId : (state.users.find(u=>u.id===t.assignedId)||{}).teamId;
       const team = teamId ? state.teams.find(tm=>tm.id===teamId) : null;
       const items = (team && Array.isArray(team.checklist)) ? team.checklist : [];
+      const goToReviewerAssignment = ()=>{
+        openAssignReviewerModal(t, (reviewerId)=>{
+          t.pendingReviewerId = reviewerId;
+          t.reviewRequestedById = currentUser().id;
+          t.reviewRequestedAt = todayISO();
+          document.getElementById('tfStatus') && (document.getElementById('tfStatus').value = t.status);
+          persist(); closeModal(); render();
+        });
+      };
       if(t.checklistRequired && items.length){
-        openChecklistGateModal(t, team, items, (record)=>{ t.checklistRecord = record; overlapThenCommit(); });
+        openChecklistGateModal(t, team, items, (record)=>{ t.checklistRecord = record; goToReviewerAssignment(); });
         return;
       }
+      goToReviewerAssignment();
+      return;
     }
     overlapThenCommit();
+  });
+  const approveBtnEdit = document.getElementById('approveReviewBtn');
+  if(approveBtnEdit) approveBtnEdit.addEventListener('click', ()=>{
+    const cu = currentUser();
+    if(cu && t.pendingReviewerId===cu.id){
+      t.reviewApprovedById = cu.id;
+      t.reviewApprovedAt = todayISO();
+      t.pendingReviewerId = null;
+      persist(); closeModal(); render();
+    }
   });
   const amendBtn = document.getElementById('amendTimelineBtn');
   if(amendBtn) amendBtn.addEventListener('click', ()=> openAmendTimelineModal(t.id));
@@ -6333,6 +6455,60 @@ function openChecklistGateModal(t, team, items, onComplete){
     div.remove();
     onComplete(record);
   });
+}
+
+// Mandatory step after the checklist (if any) and before a task can actually
+// close — the person closing it must name someone else in the company to
+// review and approve the work first. Self-review isn't offered as an option.
+function openAssignReviewerModal(t, onAssign){
+  const cu = currentUser();
+  const candidates = state.users.filter(u => u.id !== (cu?cu.id:null));
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Assign a reviewer</h3>
+        <div class="modal-sub">Before "${(t.title||'this task').replace(/</g,'&lt;')}" can close, someone else needs to review and approve it.</div>
+        <div class="field" style="margin-top:14px;">
+          <label>Reviewer</label>
+          <select id="reviewerSelect" required>
+            <option value="">Choose someone…</option>
+            ${candidates.map(u=>`<option value="${u.id}">${entityName('user', u.id)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="reviewerCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="reviewerConfirm">Submit for review</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  div.querySelector('#reviewerCancel').addEventListener('click', ()=> div.remove());
+  div.querySelector('#reviewerConfirm').addEventListener('click', ()=>{
+    const sel = div.querySelector('#reviewerSelect');
+    if(!sel.value){ sel.focus(); return; }
+    div.remove();
+    onAssign(sel.value);
+  });
+}
+
+// A simple, read-only explanation shown whenever someone tries to close a
+// task that's already awaiting a reviewer's approval — closing stays blocked
+// no matter how many times this is attempted, until the reviewer approves.
+function openReviewPendingNotice(t){
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" style="z-index:60;">
+      <div class="modal">
+        <h3>Waiting on review</h3>
+        <div class="modal-sub">"${(t.title||'this task').replace(/</g,'&lt;')}" is still waiting on ${entityName('user', t.pendingReviewerId)} to approve it — this task can't close until then.</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-primary" id="reviewPendingOk">OK</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+  div.querySelector('#reviewPendingOk').addEventListener('click', ()=> div.remove());
 }
 
 /* ============================== REPORTS ============================== */
@@ -8412,7 +8588,7 @@ function openAddProjectModal(){
       }
     }
     const taggedUserIds = getMultiSelectValues('pTag');
-    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, contentItems: contentItem ? [contentItem] : [] };
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, contentItems: contentItem ? [contentItem] : [], priority: 'medium' };
     state.projects.push(p); persist(); closeModal();
     ui.projectId = p.id; ui.view='project'; render();
   });

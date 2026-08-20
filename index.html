@@ -1320,6 +1320,16 @@ function normalizeState(s){
   if(typeof s.settings.totpEnabled !== 'boolean') s.settings.totpEnabled = false;
   if(typeof s.settings.attendanceLateCutoff !== 'string') s.settings.attendanceLateCutoff = '10:00';
   if(typeof s.attendanceLate !== 'object' || s.attendanceLate===null || Array.isArray(s.attendanceLate)) s.attendanceLate = {};
+  // One-time migration: attendance status codes were shortened
+  // (WFH->W, NS->N, CO->C, REVIEW->R) — rename any already-stored records
+  // so existing data keeps displaying correctly under the new codes.
+  if(s.attendance && typeof s.attendance === 'object'){
+    const codeRenames = { WFH:'W', NS:'N', CO:'C', REVIEW:'R' };
+    Object.keys(s.attendance).forEach(key=>{
+      const renamed = codeRenames[s.attendance[key]];
+      if(renamed) s.attendance[key] = renamed;
+    });
+  }
   if(!Array.isArray(s.settings.dashboardWidgetOrder)) s.settings.dashboardWidgetOrder = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
   else {
     // Keep this in sync if the widget set itself ever changes — add any new
@@ -1679,7 +1689,7 @@ function computeTodaysAttendanceWidget(){
   // Anyone still flagged "needs review" is genuinely unknown right now —
   // excluded entirely rather than counted as present or absent, the same
   // way a weekend excludes everyone from this calculation.
-  const employees = allEmployees.filter(u=>getAttendance(u.id, todayIso)!=='REVIEW');
+  const employees = allEmployees.filter(u=>getAttendance(u.id, todayIso)!=='R');
   if(!employees.length) return { isWeeklyOff: false, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
   const onLeave = [], onHoliday = [];
   employees.forEach(u=>{
@@ -1861,7 +1871,7 @@ function renderWorkstreamWidgets(m){
     }),
     wg_attendance: (()=>{
       const att = computeTodaysAttendanceWidget();
-      const displayValue = att.isWeeklyOff ? 'WO' : (att.pct===null ? '—' : `${att.pct}%`);
+      const displayValue = att.isWeeklyOff ? 'O' : (att.pct===null ? '—' : `${att.pct}%`);
       const subLine = att.isWeeklyOff
         ? `<div style="font-size:11.5px;color:var(--paper-dim);font-weight:500;">Weekly off — not tracked today</div>`
         : att.pct===null
@@ -3559,7 +3569,7 @@ function deleteNodeCascade(nodeId){
 
 /* ============================== ATTENDANCE SHEET (special Heading view) ============================== */
 
-const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color:'#B8791A'}, WFH:{label:'Work from home',color:'#3D74A8'}, NS:{label:'No show',color:'#B8362D'}, H:{label:'Holiday',color:'#7A4F96'}, CO:{label:'Comp off',color:'#347F77'}, REVIEW:{label:'Needs review',color:'#CC5500'} };
+const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color:'#B8791A'}, W:{label:'Work from home',color:'#3D74A8'}, N:{label:'No show',color:'#B8362D'}, H:{label:'Holiday',color:'#7A4F96'}, C:{label:'Comp off',color:'#347F77'}, R:{label:'Needs review',color:'#CC5500'} };
 
 function attendanceKey(userId, date){ return userId+'|'+date; }
 function getAttendance(userId, date){ return state.attendance[attendanceKey(userId,date)] || null; }
@@ -3598,7 +3608,7 @@ function taskAttendanceSummary(t){
   let cur = t.startDate;
   while(cur <= rangeEnd){
     const status = getAttendance(t.assignedId, cur);
-    if(status==='L' || status==='WFH') days.push({date:cur, status});
+    if(status==='L' || status==='W') days.push({date:cur, status});
     cur = addDays(cur, 1);
   }
   if(!days.length) return null;
@@ -3616,7 +3626,7 @@ function taskAttendanceSummary(t){
     const statusName = g.status==='L' ? 'Leave' : 'WFH';
     return g.start===g.end ? `${statusName} ${fmtDateOrdinal(g.start)}` : `${statusName} ${fmtDateOrdinal(g.start)} till ${fmtDateOrdinal(g.end)}`;
   }).join(', ');
-  return { groups, label, hasLeave: groups.some(g=>g.status==='L'), hasWFH: groups.some(g=>g.status==='WFH') };
+  return { groups, label, hasLeave: groups.some(g=>g.status==='L'), hasWFH: groups.some(g=>g.status==='W') };
 }
 function setAttendanceValue(userId, date, status){
   const key = attendanceKey(userId,date);
@@ -3664,7 +3674,7 @@ function renderAttendanceSheet(node){
       const isLate = !!(state.attendanceLate && state.attendanceLate[attendanceKey(u.id, dateISO)]);
       let label, style='';
       if(weekend){
-        label = (rec && ATT_STATUS[rec]) ? rec : 'WO';
+        label = (rec && ATT_STATUS[rec]) ? rec : 'O';
         if(rec && ATT_STATUS[rec]) style = `background:${ATT_STATUS[rec].color};color:#fff;border-color:${ATT_STATUS[rec].color};font-weight:700;`;
       } else {
         label = rec || '';
@@ -3680,7 +3690,7 @@ function renderAttendanceSheet(node){
 
   const legend = Object.entries(ATT_STATUS).map(([code,v])=>
     `<span style="font-size:11px;color:var(--paper-dim);margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${v.color};margin-right:5px;"></span>${code} = ${v.label}</span>`
-  ).join('') + `<span style="font-size:11px;color:var(--paper-dim);margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--panel-raised);border:1px dashed var(--paper-faint);margin-right:5px;"></span>WO = Weekly off${admin?' — click to mark Present, click again to revert':''}</span>` + `<span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#E9A400;border:1px solid var(--paper-dim);margin-right:5px;"></span>dot = Logged in after the cutoff time</span>`;
+  ).join('') + `<span style="font-size:11px;color:var(--paper-dim);margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--panel-raised);border:1px dashed var(--paper-faint);margin-right:5px;"></span>O = Weekly off${admin?' — click to mark Present, click again to revert':''}</span>` + `<span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#E9A400;border:1px solid var(--paper-dim);margin-right:5px;"></span>dot = Logged in after the cutoff time</span>`;
 
   return `
     ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Heading', node.name, headingColorForNode(node)) : `
@@ -3791,7 +3801,7 @@ function processAttendanceImport(workbook){
     if(matchedUserIds.has(u.id)) return;
     const key = attendanceKey(u.id, dateISO);
     if(!state.attendance[key]){
-      state.attendance[key] = 'REVIEW';
+      state.attendance[key] = 'R';
       flaggedForReview++;
     }
   });
@@ -3841,7 +3851,7 @@ function bindAttendanceSheet(){
     el.addEventListener('click', ()=>{
       const [userId,date] = el.dataset.attWeekday.split('|');
       const cur = getAttendance(userId,date);
-      const cycle = ['','P','L','WFH','NS','H'];
+      const cycle = ['','P','L','W','N','H'];
       const next = cycle[(cycle.indexOf(cur||'')+1) % cycle.length];
       setAttendanceValue(userId,date, next || null);
       persist(); render();
@@ -7387,7 +7397,7 @@ function bindAssignments(){
         openRevertWeekendConfirm(iso, ()=>{
           const i2 = t.workedWeekendDates.indexOf(iso);
           if(i2>=0) t.workedWeekendDates.splice(i2,1);
-          if(userId && getAttendance(userId, iso)==='CO') setAttendanceValue(userId, iso, null);
+          if(userId && getAttendance(userId, iso)==='C') setAttendanceValue(userId, iso, null);
           persist(); render();
         });
       } else {
@@ -7395,7 +7405,7 @@ function bindAssignments(){
         // Comp Off (CO) day in Attendance for the same person and date
         openMarkWeekendWorkedConfirm(iso, ()=>{
           t.workedWeekendDates.push(iso);
-          if(userId) setAttendanceValue(userId, iso, 'CO');
+          if(userId) setAttendanceValue(userId, iso, 'C');
           persist(); render();
         });
       }

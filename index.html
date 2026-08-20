@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Bitter:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
   :root, [data-theme="dark"]{
     --ink:#0D1316;
@@ -1317,6 +1318,8 @@ function normalizeState(s){
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
   if(typeof s.settings.aiCopilotEnabled !== 'boolean') s.settings.aiCopilotEnabled = true;
   if(typeof s.settings.totpEnabled !== 'boolean') s.settings.totpEnabled = false;
+  if(typeof s.settings.attendanceLateCutoff !== 'string') s.settings.attendanceLateCutoff = '10:00';
+  if(typeof s.attendanceLate !== 'object' || s.attendanceLate===null || Array.isArray(s.attendanceLate)) s.attendanceLate = {};
   if(!Array.isArray(s.settings.dashboardWidgetOrder)) s.settings.dashboardWidgetOrder = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
   else {
     // Keep this in sync if the widget set itself ever changes — add any new
@@ -1671,7 +1674,12 @@ function computeWorkstreamWidgetMetrics(){
 function computeTodaysAttendanceWidget(){
   const todayIso = todayISO();
   if(isWeekendISO(todayIso)) return { isWeeklyOff: true, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
-  const employees = state.users.filter(u=>u.role!=='viewer');
+  const allEmployees = state.users.filter(u=>u.role!=='viewer');
+  if(!allEmployees.length) return { isWeeklyOff: false, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
+  // Anyone still flagged "needs review" is genuinely unknown right now —
+  // excluded entirely rather than counted as present or absent, the same
+  // way a weekend excludes everyone from this calculation.
+  const employees = allEmployees.filter(u=>getAttendance(u.id, todayIso)!=='REVIEW');
   if(!employees.length) return { isWeeklyOff: false, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
   const onLeave = [], onHoliday = [];
   employees.forEach(u=>{
@@ -3551,7 +3559,7 @@ function deleteNodeCascade(nodeId){
 
 /* ============================== ATTENDANCE SHEET (special Heading view) ============================== */
 
-const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color:'#B8791A'}, WFH:{label:'Work from home',color:'#3D74A8'}, NS:{label:'No show',color:'#B8362D'}, H:{label:'Holiday',color:'#7A4F96'}, CO:{label:'Comp off',color:'#347F77'} };
+const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color:'#B8791A'}, WFH:{label:'Work from home',color:'#3D74A8'}, NS:{label:'No show',color:'#B8362D'}, H:{label:'Holiday',color:'#7A4F96'}, CO:{label:'Comp off',color:'#347F77'}, REVIEW:{label:'Needs review',color:'#CC5500'} };
 
 function attendanceKey(userId, date){ return userId+'|'+date; }
 function getAttendance(userId, date){ return state.attendance[attendanceKey(userId,date)] || null; }
@@ -3653,6 +3661,7 @@ function renderAttendanceSheet(node){
       const dateISO = `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
       const weekend = isWeekendISO(dateISO);
       const rec = getAttendance(u.id, dateISO);
+      const isLate = !!(state.attendanceLate && state.attendanceLate[attendanceKey(u.id, dateISO)]);
       let label, style='';
       if(weekend){
         label = (rec && ATT_STATUS[rec]) ? rec : 'WO';
@@ -3661,16 +3670,17 @@ function renderAttendanceSheet(node){
         label = rec || '';
         if(rec && ATT_STATUS[rec]) style = `background:${ATT_STATUS[rec].color};color:#fff;border-color:${ATT_STATUS[rec].color};font-weight:700;`;
       }
+      const lateDot = isLate ? `<span data-tooltip="Logged in after ${state.settings.attendanceLateCutoff||'the cutoff'}" style="position:absolute;top:1px;right:1px;width:6px;height:6px;border-radius:50%;background:#E9A400;border:1px solid #fff;"></span>` : '';
       const clickAttr = admin ? (weekend ? ` data-att-weekend="${u.id}|${dateISO}"` : ` data-att-weekday="${u.id}|${dateISO}"`) : '';
       const cls = `att-cell${weekend?' att-weekend':''}${admin?' att-clickable':''}`;
-      return `<td class="${cls}" style="${style}"${clickAttr}>${label}</td>`;
+      return `<td class="${cls}" style="${style}position:relative;"${clickAttr}>${label}${lateDot}</td>`;
     }).join('');
     return `<tr><td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
   }).join('');
 
   const legend = Object.entries(ATT_STATUS).map(([code,v])=>
     `<span style="font-size:11px;color:var(--paper-dim);margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${v.color};margin-right:5px;"></span>${code} = ${v.label}</span>`
-  ).join('') + `<span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--panel-raised);border:1px dashed var(--paper-faint);margin-right:5px;"></span>WO = Weekly off${admin?' — click to mark Present, click again to revert':''}</span>`;
+  ).join('') + `<span style="font-size:11px;color:var(--paper-dim);margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--panel-raised);border:1px dashed var(--paper-faint);margin-right:5px;"></span>WO = Weekly off${admin?' — click to mark Present, click again to revert':''}</span>` + `<span style="font-size:11px;color:var(--paper-dim);"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#E9A400;border:1px solid var(--paper-dim);margin-right:5px;"></span>dot = Logged in after the cutoff time</span>`;
 
   return `
     ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Heading', node.name, headingColorForNode(node)) : `
@@ -3679,11 +3689,17 @@ function renderAttendanceSheet(node){
     <div class="muted" style="font-size:15px;font-family:var(--f-display);margin-bottom:16px;">${monthLabelLong(monthKey)}</div>`}
     ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<div class="muted" style="font-size:14px;font-family:var(--f-display);margin-bottom:16px;">${monthLabelLong(monthKey)}</div>` : ''}
 
-    <div class="filters" style="margin-bottom:14px;">
+    <div class="filters" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
       <select id="attMonthSelect">
         ${months.map(mk=>`<option value="${mk}" ${mk===monthKey?'selected':''}>${monthLabelLong(mk)}</option>`).join('')}
       </select>
+      ${admin ? `<button type="button" class="btn btn-sm" id="attImportBtn">Import Attendance</button>
+      <input type="file" id="attImportFile" accept=".xls,.xlsx" style="display:none;">
+      <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--paper-dim);">
+        Late cutoff: <input type="time" id="attLateCutoffInput" value="${state.settings.attendanceLateCutoff||'10:00'}" style="width:110px;">
+      </span>` : ''}
     </div>
+    <div id="attImportStatus"></div>
 
     <div style="margin-bottom:14px;">${legend}</div>
 
@@ -3697,9 +3713,129 @@ function renderAttendanceSheet(node){
   `;
 }
 
+// Parses the "DD-Mon-YYYY" date format used in the biometric report's
+// "Attendance Date" header line (e.g. "19-Aug-2026") into our own ISO
+// format (2026-08-19).
+function parseBiometricDate(raw){
+  const months = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  const m = String(raw).trim().match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  if(!m) return null;
+  const mm = months[m[2].toLowerCase()];
+  if(!mm) return null;
+  return `${m[3]}-${mm}-${String(m[1]).padStart(2,'0')}`;
+}
+
+// Reads the uploaded biometric report, matches each row's Employee Code
+// against every user's own Employee ID (any prefix format, exact match),
+// and applies the three rules agreed on: mark present (flagging late
+// arrivals separately, never changing the status itself), leave existing
+// manual entries alone, and flag anyone genuinely unaccounted for.
+function processAttendanceImport(workbook){
+  const sheetName = workbook.SheetNames[0];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false, defval: '' });
+
+  let dateISO = null;
+  let headerRowIdx = -1;
+  let col = { code: -1, intime: -1 };
+
+  rows.forEach((row, idx)=>{
+    if(dateISO===null){
+      const dateCellIdx = row.findIndex(c => String(c).trim().toLowerCase() === 'attendance date');
+      if(dateCellIdx !== -1){
+        const valueCell = row.slice(dateCellIdx+1).find(c => String(c).trim() !== '');
+        if(valueCell) dateISO = parseBiometricDate(valueCell);
+      }
+    }
+    if(headerRowIdx===-1){
+      const codeIdx = row.findIndex(c => String(c).trim().toLowerCase() === 'e. code');
+      if(codeIdx !== -1){
+        headerRowIdx = idx;
+        col.code = codeIdx;
+        col.intime = row.findIndex(c => String(c).trim().toLowerCase() === 'intime');
+      }
+    }
+  });
+
+  if(!dateISO) return { error: 'Could not find an "Attendance Date" line in this file.' };
+  if(headerRowIdx===-1 || col.code===-1 || col.intime===-1) return { error: 'Could not find the E. Code / InTime columns in this file — the report format may have changed.' };
+
+  const cutoff = state.settings.attendanceLateCutoff || '10:00';
+  const dataRows = rows.slice(headerRowIdx+1).filter(r => String(r[col.code]||'').trim() !== '');
+
+  let markedPresent = 0, flaggedLate = 0, unmatchedCodes = [];
+  const matchedUserIds = new Set();
+
+  dataRows.forEach(row=>{
+    const code = String(row[col.code]).trim();
+    const inTime = String(row[col.intime]||'').trim();
+    const user = state.users.find(u => u.employeeId && u.employeeId.trim() === code);
+    if(!user){ unmatchedCodes.push(code); return; }
+    matchedUserIds.add(user.id);
+    const key = attendanceKey(user.id, dateISO);
+    // Never overwrite an existing manual entry, of any kind — the import
+    // only ever fills in what wasn't already decided by a person.
+    if(!state.attendance[key]){
+      state.attendance[key] = 'P';
+      markedPresent++;
+      if(inTime && cutoff && inTime > cutoff){
+        state.attendanceLate[key] = true;
+        flaggedLate++;
+      }
+    }
+  });
+
+  // Anyone not in the file and not already marked anything gets flagged
+  // for a human to resolve — never auto-marked absent.
+  let flaggedForReview = 0;
+  state.users.filter(u=>u.role!=='viewer').forEach(u=>{
+    if(matchedUserIds.has(u.id)) return;
+    const key = attendanceKey(u.id, dateISO);
+    if(!state.attendance[key]){
+      state.attendance[key] = 'REVIEW';
+      flaggedForReview++;
+    }
+  });
+
+  persist();
+  return { dateISO, markedPresent, flaggedLate, flaggedForReview, unmatchedCodes };
+}
+
 function bindAttendanceSheet(){
   const sel = document.getElementById('attMonthSelect');
   if(sel) sel.addEventListener('change', ()=>{ ui.attendanceMonth = sel.value; render(); });
+
+  const importBtn = document.getElementById('attImportBtn');
+  const importFile = document.getElementById('attImportFile');
+  if(importBtn && importFile) importBtn.addEventListener('click', ()=> importFile.click());
+  if(importFile) importFile.addEventListener('change', async ()=>{
+    const file = importFile.files[0];
+    if(!file) return;
+    const statusEl = document.getElementById('attImportStatus');
+    if(statusEl) statusEl.innerHTML = `<div class="hint" style="margin-bottom:10px;">Reading ${file.name.replace(/</g,'&lt;')}…</div>`;
+    try{
+      if(typeof XLSX === 'undefined') throw new Error('The spreadsheet reader failed to load — check your connection and try again.');
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { type: 'array', cellDates: false });
+      const result = processAttendanceImport(workbook);
+      if(result.error){
+        if(statusEl) statusEl.innerHTML = `<div class="hint" style="color:var(--red);margin-bottom:10px;">${result.error}</div>`;
+      } else {
+        const unmatchedNote = result.unmatchedCodes.length ? ` ${result.unmatchedCodes.length} code${result.unmatchedCodes.length===1?'':'s'} in the file didn't match anyone here: ${result.unmatchedCodes.join(', ')}.` : '';
+        if(statusEl) statusEl.innerHTML = `<div class="hint" style="color:var(--green);margin-bottom:10px;">Imported ${fmtDate(result.dateISO)} — ${result.markedPresent} marked present (${result.flaggedLate} late), ${result.flaggedForReview} flagged for review.${unmatchedNote}</div>`;
+        ui.attendanceMonth = result.dateISO.slice(0,7);
+        render();
+      }
+    }catch(err){
+      if(statusEl) statusEl.innerHTML = `<div class="hint" style="color:var(--red);margin-bottom:10px;">Could not read this file: ${err && err.message ? err.message : err}</div>`;
+    }
+    importFile.value = '';
+  });
+
+  const cutoffInput = document.getElementById('attLateCutoffInput');
+  if(cutoffInput) cutoffInput.addEventListener('change', ()=>{
+    state.settings.attendanceLateCutoff = cutoffInput.value || '10:00';
+    persist();
+  });
 
   document.querySelectorAll('[data-att-weekday]').forEach(el=>{
     el.addEventListener('click', ()=>{

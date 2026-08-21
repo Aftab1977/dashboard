@@ -3569,7 +3569,7 @@ function deleteNodeCascade(nodeId){
 
 /* ============================== ATTENDANCE SHEET (special Heading view) ============================== */
 
-const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color:'#B8791A'}, W:{label:'Work from home',color:'#3D74A8'}, N:{label:'No show',color:'#B8362D'}, H:{label:'Holiday',color:'#7A4F96'}, C:{label:'Comp off',color:'#347F77'}, R:{label:'Needs review',color:'#CC5500'} };
+const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color:'#B8791A'}, '½':{label:'Half day',color:'#8A6DAB'}, W:{label:'Work from home',color:'#3D74A8'}, N:{label:'No show',color:'#B8362D'}, H:{label:'Holiday',color:'#7A4F96'}, C:{label:'Comp off',color:'#347F77'}, R:{label:'Needs review',color:'#CC5500'} };
 
 function attendanceKey(userId, date){ return userId+'|'+date; }
 function getAttendance(userId, date){ return state.attendance[attendanceKey(userId,date)] || null; }
@@ -3851,7 +3851,7 @@ function bindAttendanceSheet(){
     el.addEventListener('click', ()=>{
       const [userId,date] = el.dataset.attWeekday.split('|');
       const cur = getAttendance(userId,date);
-      const cycle = ['','P','L','W','N','H'];
+      const cycle = ['','P','L','½','W','N','H'];
       const next = cycle[(cycle.indexOf(cur||'')+1) % cycle.length];
       setAttendanceValue(userId,date, next || null);
       persist(); render();

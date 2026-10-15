@@ -10,66 +10,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
-  :root, [data-theme="dark"]{
-    --ink:#0D1316;
-    --panel:#141B1F;
-    --panel-raised:#1B2328;
-    --panel-hi:#212A2F;
-    --line:#2A353B;
-    --line-soft:#1E2830;
-    --paper:#EDE8DC;
-    --paper-dim:#8F988F;
-    --paper-faint:#5B6560;
-    --green:#33A85C;
-    --green-soft:#132A1C;
-    --green-glow:rgba(51,168,92,.38);
-    --red:#DD5147;
-    --red-soft:#331A17;
-    --red-glow:rgba(221,81,71,.4);
-    --amber:#E0AC3F;
-    --amber-soft:#2E2410;
-    --amber-border:rgba(224,172,63,.4);
-    --amber-glow:rgba(224,172,63,.35);
-    --blocker:#CC5500;
-    --blocker-soft:#2E1B0A;
-    --blocker-border:rgba(204,85,0,.4);
-    --blocker-glow:rgba(204,85,0,.35);
-    --card-shadow:none;
-    --f-display:'Barlow Condensed',sans-serif;
-    --f-body:'Space Grotesk',sans-serif;
-    --f-mono:'JetBrains Mono',monospace;
-  }
-  [data-theme="light"]{
-    --ink:#E9EBF2;
-    --panel:#FFFFFF;
-    --panel-raised:#F7F8FC;
-    --panel-hi:#EEF0F7;
-    --line:#E3E5EE;
-    --line-soft:#ECEDF4;
-    --paper:#1D2029;
-    --paper-dim:#6B7280;
-    --paper-faint:#9CA3AF;
-    /* Green & red stay identical to Dark — these are status colors (green = done/
-       closed, red = pending/delayed), not decorative, so they don't change per theme. */
-    --green:#33A85C;
-    --green-soft:#E6F6EC;
-    --green-glow:rgba(51,168,92,.22);
-    --red:#DD5147;
-    --red-soft:#FCEAE8;
-    --red-glow:rgba(221,81,71,.22);
-    --amber:#0060BF;
-    --amber-soft:#E8F1F9;
-    --amber-border:rgba(0,96,191,.35);
-    --amber-glow:rgba(0,96,191,.3);
-    /* Blockers get their own dedicated dark-orange, identical across themes — like
-       green/red, this is a status color carrying real meaning, not decoration. */
-    --blocker:#CC5500;
-    --blocker-soft:#FBEDE3;
-    --blocker-border:rgba(204,85,0,.35);
-    --blocker-glow:rgba(204,85,0,.3);
-    --card-shadow:0 1px 3px rgba(30,35,60,.06);
-  }
-  [data-theme="boardroom"]{
+  :root, [data-theme="boardroom"]{
     --ink:#E9EBF2;
     --panel:#FFFFFF;
     --panel-raised:#F7F8FC;
@@ -85,10 +26,6 @@
     --red:#DD5147;
     --red-soft:#FCEAE8;
     --red-glow:rgba(221,81,71,.22);
-    --amber:#1A1A1A;
-    --amber-soft:#EDEDED;
-    --amber-border:rgba(26,26,26,.35);
-    --amber-glow:rgba(0,0,0,.28);
     --blocker:#CC5500;
     --blocker-soft:#FBEDE3;
     --blocker-border:rgba(204,85,0,.35);
@@ -100,10 +37,29 @@
        dark, glowing "title slide" treatment used for the dashboard hero band. */
     --f-display:'Bitter',serif;
     --f-body:'Inter',sans-serif;
-    --hero-bg:#0D1316;
-    --hero-bg-soft:#141B1F;
+    --f-mono:'JetBrains Mono',monospace;
     --hero-text-dim:#AEB8C4;
     --hero-text-faint:#6B7684;
+  }
+  /* Personal accent color — chosen per person in My Account, applies on top
+     of the single Boardroom look. Each variant only overrides the
+     color-carrying variables; every structural/layout variable above is
+     shared across all four. */
+  [data-accent="black"]{
+    --amber:#1A1A1A; --amber-soft:#EDEDED; --amber-border:rgba(26,26,26,.35); --amber-glow:rgba(0,0,0,.28);
+    --hero-bg:#0D1316; --hero-bg-soft:#141B1F;
+  }
+  [data-accent="blue"]{
+    --amber:#0060BF; --amber-soft:#E8F1F9; --amber-border:rgba(0,96,191,.35); --amber-glow:rgba(0,96,191,.3);
+    --hero-bg:#0D1826; --hero-bg-soft:#132234;
+  }
+  [data-accent="maroon"]{
+    --amber:#7A1F2B; --amber-soft:#F5E6E8; --amber-border:rgba(122,31,43,.35); --amber-glow:rgba(122,31,43,.3);
+    --hero-bg:#1A0D10; --hero-bg-soft:#241014;
+  }
+  [data-accent="brown"]{
+    --amber:#4A3728; --amber-soft:#EFE9E3; --amber-border:rgba(74,55,40,.35); --amber-glow:rgba(74,55,40,.3);
+    --hero-bg:#150F0A; --hero-bg-soft:#1D140D;
   }
   *{box-sizing:border-box;}
   html{scrollbar-gutter:stable;}
@@ -287,6 +243,49 @@
   .proj-card.status-green::before{background:var(--green);box-shadow:0 0 14px var(--green-glow);}
   .proj-card.status-red::before{background:var(--red);box-shadow:0 0 14px var(--red-glow);}
   .proj-card .pname{font-family:var(--f-display);font-size:24px;margin:2px 0 12px;}
+  /* ---------- workstream rows (horizontal listing) ---------- */
+  .ws-list{display:flex;flex-direction:column;gap:12px;}
+  .ws-row{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 20px 14px 24px;
+    cursor:pointer;transition:all .15s ease;position:relative;overflow:hidden;box-shadow:var(--card-shadow);
+    display:flex;align-items:center;gap:20px;
+  }
+  .ws-row:hover{border-color:var(--paper-faint);transform:translateY(-1px);}
+  .ws-row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;}
+  .ws-row.status-green::before{background:var(--green);box-shadow:0 0 14px var(--green-glow);}
+  .ws-row.status-red::before{background:var(--red);box-shadow:0 0 14px var(--red-glow);}
+  .ws-row .ws-name{flex:0 0 240px;min-width:0;}
+  .ws-row .ws-name .pname{font-family:var(--f-display);font-size:18px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ws-row .ws-name .eyebrow{margin-top:3px;}
+  .ws-row .ws-tags{flex:0 0 140px;display:flex;gap:6px;flex-wrap:wrap;}
+  .ws-row .ws-dates{flex:0 0 185px;font-family:var(--f-mono);font-size:12px;color:var(--paper-dim);line-height:1.6;}
+  .ws-row .ws-dates b{color:var(--paper);}
+  .ws-row .ws-tl{flex:1 1 0;min-width:0;display:flex;gap:6px;flex-wrap:wrap;}
+  .ws-row .ws-prog{flex:0 0 150px;}
+  .ws-row .ws-prog .pl{font-family:var(--f-mono);font-size:11px;color:var(--paper-dim);text-align:right;}
+  .ws-row .ws-prog .pl b{color:var(--paper);}
+  .ws-row .ws-prog .bar-track{margin-top:5px;}
+  @media (max-width:1100px){
+    .ws-row{flex-wrap:wrap;gap:10px 16px;}
+    .ws-row .ws-name{flex:1 1 100%;}
+    .ws-row .ws-tags,.ws-row .ws-dates{flex:0 0 auto;}
+    .ws-row .ws-tl{flex:1 1 200px;}
+    .ws-row .ws-prog{flex:1 1 100%;}
+  }
+  .ws-filters select,.ws-filters input{width:210px;box-sizing:border-box;background:var(--panel-raised);border:1px solid var(--line);color:var(--paper);border-radius:7px;padding:8px 10px;font-size:12px;font-family:var(--f-body);}
+  .ws-filters select:disabled{opacity:.5;cursor:not-allowed;}
+  @media (max-width:760px){.ws-filters select,.ws-filters input{width:100%;}}
+  .ws-row .ws-path{font-size:11px;color:var(--paper-dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ws-row .ws-path b{color:var(--paper);font-weight:600;}
+  .ws-group{background:var(--panel-raised);border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  .ws-group-head{display:flex;align-items:center;gap:16px;padding:14px 20px;cursor:pointer;}
+  .ws-group-head:hover{background:var(--panel-hi);}
+  .ws-group-head .chev{font-size:12px;color:var(--paper-dim);width:12px;transition:transform .15s ease;}
+  .ws-group.open .ws-group-head .chev{transform:rotate(90deg);}
+  .ws-group-head .gname{font-family:var(--f-display);font-size:18px;flex:1 1 0;min-width:0;}
+  .ws-group-head .gmeta{font-family:var(--f-mono);font-size:12px;color:var(--paper-dim);}
+  .ws-group-head .gprog{flex:0 0 150px;}
+  .ws-group-body{display:flex;flex-direction:column;gap:12px;padding:4px 16px 16px;}
   .proj-meta{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:12px;color:var(--paper-dim);margin-top:14px;}
   .bar-track{height:6px;background:var(--line-soft);border-radius:99px;overflow:hidden;margin-top:12px;}
   .bar-fill{height:100%;background:var(--green);border-radius:99px;}
@@ -420,6 +419,9 @@
   .login-card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:34px 30px;}
   .login-logo{max-width:264px;max-height:86px;width:auto;height:auto;object-fit:contain;margin:0 auto 18px;display:block;}
   .login-title{font-family:var(--f-display);font-size:30px;margin-bottom:2px;text-align:center;}
+  .form-error{color:var(--red);font-size:12px;font-weight:600;margin-top:6px;line-height:1.4;}
+  .form-error::before{content:"\26A0\FE0E  ";}
+  .input-invalid{border-color:var(--red) !important;box-shadow:0 0 0 2px var(--red-glow);}
   .login-error{color:var(--red);font-size:12px;margin-top:8px;font-family:var(--f-mono);min-height:14px;}
 
   /* ---------- admin tabs ---------- */
@@ -574,6 +576,7 @@
   .att-weekend-col{background:var(--amber-glow) !important;}
   .att-name{position:sticky;left:0;z-index:1;background:var(--amber) !important;color:#fff !important;text-align:center;font-weight:700;white-space:nowrap;border-radius:8px;}
   .att-cell{width:26px;height:28px;text-align:center;}
+  .att-table td.att-bal{min-width:34px;padding:9px 8px;font-size:12px;}
   .att-cell.att-weekend{background:rgba(0,96,191,.07) !important;}
   .att-cell.att-clickable{cursor:pointer;}
   .att-cell.att-clickable:hover{outline:1.5px solid var(--amber);outline-offset:-1.5px;}
@@ -730,17 +733,42 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null, hasSupabaseSession:false };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', portfolioTitle:'', portfolioGroup:'', portfolioSearch:'', openGroups:{}, reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null, hasSupabaseSession:false };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
 let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
 let aiProviderInfo = null; // {provider, model} once fetched from the backend — null until then
 let copilotAnalyticsData = null; // {logs, provider, model} once fetched — null until then
 
+// Shows a red message right under a field explaining why we can't continue, marks the
+// field, and moves focus to it. Clears itself as soon as the person edits that field.
+function formError(el, msg){
+  const scope = (el && el.closest && (el.closest('.modal') || el.closest('form'))) || document;
+  scope.querySelectorAll('.form-error').forEach(e=>e.remove());
+  scope.querySelectorAll('.input-invalid').forEach(e=>e.classList.remove('input-invalid'));
+  const box = document.createElement('div');
+  box.className = 'form-error'; box.setAttribute('role','alert'); box.textContent = msg;
+  if(el){
+    (el.closest('.field') || el.parentNode).appendChild(box);
+    el.classList.add('input-invalid');
+    const clear = ()=>{ box.remove(); el.classList.remove('input-invalid'); };
+    el.addEventListener('input', clear, {once:true});
+    el.addEventListener('change', clear, {once:true});
+    try{ el.focus(); box.scrollIntoView({block:'nearest', behavior:'smooth'}); }catch(e){}
+  } else {
+    const actions = scope.querySelector && scope.querySelector('.modal-actions');
+    if(actions) actions.parentNode.insertBefore(box, actions);
+  }
+}
+
 function runOnClickAndEnter(formId, btnId, handler){
   const form = document.getElementById(formId);
   const btn = document.getElementById(btnId);
-  const run = ()=>{ try{ handler(); }catch(err){ console.error(err); } };
+  const run = ()=>{
+    if(form) form.querySelectorAll('.form-error').forEach(e=>e.remove());
+    if(form) form.querySelectorAll('.input-invalid').forEach(e=>e.classList.remove('input-invalid'));
+    try{ handler(); }catch(err){ console.error(err); }
+  };
   if(btn) btn.addEventListener('click', run);
   if(form){
     form.addEventListener('keydown', (e)=>{
@@ -819,9 +847,12 @@ function isWeekendISO(iso){ const dow = new Date(iso+'T00:00:00').getDay(); retu
 // IST to stay consistent with the rest of the app's date handling.
 function reminderDueDateObj(dateISO, time){
   const [h,m] = (time||'00:00').split(':').map(Number);
-  const d = new Date(dateISO+'T00:00:00');
-  d.setHours(h, m, 0, 0);
-  return d;
+  // Built to match nowIST()'s own convention exactly: both represent IST
+  // wall-clock time as a UTC-based epoch, so the two are always safely
+  // comparable no matter what timezone the browser itself is set to.
+  // (Using setHours()/setMinutes() here instead would silently drift by
+  // the browser's own UTC offset — which is exactly the bug this fixes.)
+  return new Date(dateISO+'T'+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':00Z');
 }
 function nowIST(){
   const IST_OFFSET_MS = (5*60+30)*60*1000;
@@ -1000,7 +1031,7 @@ function seedState(){
     {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
     {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
     {id:'feat_fai', name:'Essentials', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
-    {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
+    {id:'feat_hr', name:'Human Resources', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
     {id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:1, contentItems:[], description:'', specialView:'attendance'},
     {id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:2, contentItems:[], description:'', specialView:'appraisal'},
     {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
@@ -1060,7 +1091,7 @@ function normalizeState(s){
       {id:'feat_reports', name:'Reports', nodeType:'feature', parentId:null, systemView:'reports', order:3, contentItems:[], description:''},
       {id:'feat_kr', name:'Repository', nodeType:'feature', parentId:null, systemView:null, order:4, contentItems:[], description:''},
       {id:'feat_fai', name:'Essentials', nodeType:'feature', parentId:null, systemView:null, order:5, contentItems:[], description:''},
-      {id:'feat_hr', name:'HR', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
+      {id:'feat_hr', name:'Human Resources', nodeType:'feature', parentId:null, systemView:null, order:6, contentItems:[], description:''},
       {id:'h_attendance_v3', name:'Attendance', nodeType:'heading', parentId:'feat_hr', order:1, contentItems:[], description:'', specialView:'attendance'},
       {id:'h_appraisal', name:'Appraisal', nodeType:'heading', parentId:'feat_hr', order:2, contentItems:[], description:'', specialView:'appraisal'},
       {id:'h_policies', name:'Policies', nodeType:'heading', parentId:'feat_hr', order:3, contentItems:[], description:'', specialView:null},
@@ -1320,14 +1351,31 @@ function normalizeState(s){
   if(typeof s.settings.totpEnabled !== 'boolean') s.settings.totpEnabled = false;
   if(typeof s.settings.attendanceLateCutoff !== 'string') s.settings.attendanceLateCutoff = '10:00';
   if(typeof s.attendanceLate !== 'object' || s.attendanceLate===null || Array.isArray(s.attendanceLate)) s.attendanceLate = {};
+  // Dark and Light themes were removed — Boardroom is now the only look.
+  // Anyone previously on a different theme (or with no accent set yet)
+  // moves to Boardroom with the Black accent, its original default color.
+  if(Array.isArray(s.users)){
+    s.users.forEach(u=>{
+      u.themePreference = 'boardroom';
+      if(!['black','blue','maroon','brown'].includes(u.accentColor)) u.accentColor = 'black';
+    });
+  }
+  // The HR module was renamed "Human Resources" — update existing saved data
+  // too, but only if it still has the old default name (never overwrite a custom one).
+  if(Array.isArray(s.featureNodes)){
+    s.featureNodes.forEach(n=>{ if(n.id==='feat_hr' && n.name==='HR') n.name = 'Human Resources'; });
+  }
   // One-time migration: attendance status codes were shortened
   // (WFH->W, NS->N, CO->C, REVIEW->R) — rename any already-stored records
   // so existing data keeps displaying correctly under the new codes.
   if(s.attendance && typeof s.attendance === 'object'){
-    const codeRenames = { WFH:'W', NS:'N', CO:'C', REVIEW:'R' };
+    const codeRenames = { WFH:'W', NS:'N', CO:'C' };
     Object.keys(s.attendance).forEach(key=>{
       const renamed = codeRenames[s.attendance[key]];
       if(renamed) s.attendance[key] = renamed;
+      // "Needs review" (R / REVIEW) no longer exists as a status — those days
+      // go back to blank so an admin can mark them properly.
+      if(s.attendance[key]==='R' || s.attendance[key]==='REVIEW') delete s.attendance[key];
     });
   }
   if(!Array.isArray(s.settings.dashboardWidgetOrder)) s.settings.dashboardWidgetOrder = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
@@ -1686,15 +1734,11 @@ function computeTodaysAttendanceWidget(){
   if(isWeekendISO(todayIso)) return { isWeeklyOff: true, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
   const allEmployees = state.users.filter(u=>u.role!=='viewer');
   if(!allEmployees.length) return { isWeeklyOff: false, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
-  // Anyone still flagged "needs review" is genuinely unknown right now —
-  // excluded entirely rather than counted as present or absent, the same
-  // way a weekend excludes everyone from this calculation.
-  const employees = allEmployees.filter(u=>getAttendance(u.id, todayIso)!=='R');
-  if(!employees.length) return { isWeeklyOff: false, pct: null, totalEmployees: 0, presentCount: 0, onLeave: [], onHoliday: [] };
+  const employees = allEmployees;
   const onLeave = [], onHoliday = [];
   employees.forEach(u=>{
     const rec = getAttendance(u.id, todayIso);
-    if(rec==='L') onLeave.push(u.name);
+    if(rec==='L' || rec==='SL') onLeave.push(u.name);
     else if(rec==='H') onHoliday.push(u.name);
   });
   const presentCount = employees.length - onLeave.length - onHoliday.length;
@@ -2703,7 +2747,7 @@ function renderPageHero(eyebrowText, titleText, accentColor, titleFontSize, show
           <div class="eyebrow" style="color:var(--hero-text-faint);">${eyebrowText}</div>
           <h1 class="page-title" style="margin-bottom:14px;color:#fff;${fsStyle}">${titleText}</h1>
           ${ui.view!=='home' ? `<button class="btn btn-sm topbar-accent-btn" data-go-back>← Go Back</button>` : ''}
-          ${showWorkspaceBtn ? `<button class="btn btn-sm" style="background:#fff;color:#1A1A1A;border:none;font-weight:800;padding:9px 20px;border-radius:20px;cursor:default;">WORKSPACE</button>` : ''}
+          ${showWorkspaceBtn ? `<button class="btn btn-sm" style="background:#fff;color:${c==='var(--amber)'?'var(--amber)':c};border:none;font-weight:800;padding:9px 20px;border-radius:20px;cursor:default;">WORKSPACE</button>` : ''}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0;margin-top:21px;">
           <div class="who" style="color:rgba(255,255,255,.9);"><span style="font-family:var(--f-display);font-size:38px;font-weight:600;line-height:1.05;">${cu ? 'Hello, '+cu.name : ''}</span><div class="avatar" style="background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);">${cu ? initials(cu.name) : ''}</div></div>
@@ -2778,11 +2822,12 @@ function bindView(){
 
 function renderLogin(){
   const logoUrl = state && state.settings && state.settings.logoUrl;
-  const theme = getPreLoginTheme();
-  const isDarkPanel = theme !== 'light';
-  const panelBg = isDarkPanel ? '#0D1316' : '#0060BF';
-  const btnColor = isDarkPanel ? '#1A1A1A' : '#0060BF';
-  const headlineFont = isDarkPanel ? "'Bitter',serif" : "'Barlow Condensed',sans-serif";
+  const accent = getPreLoginAccent();
+  const ACCENT_COLORS = { black:'#1A1A1A', blue:'#0060BF', maroon:'#7A1F2B', brown:'#4A3728' };
+  const ACCENT_PANEL_BG = { black:'#0D1316', blue:'#0D1826', maroon:'#1A0D10', brown:'#150F0A' };
+  const panelBg = ACCENT_PANEL_BG[accent] || ACCENT_PANEL_BG.black;
+  const btnColor = ACCENT_COLORS[accent] || ACCENT_COLORS.black;
+  const headlineFont = "'Bitter',serif";
   const cooldownLeft = Math.max(0, Math.ceil((ui.loginResendAt - Date.now())/1000));
   const method = ui.loginMethod || 'password';
 
@@ -2843,7 +2888,7 @@ function renderLogin(){
     <div style="flex:1 1 75%;position:relative;overflow:hidden;background:${panelBg};display:flex;flex-direction:column;justify-content:center;padding:60px;min-height:100vh;">
       <div style="position:relative;">
         <div style="font-family:${headlineFont};font-weight:700;font-size:51.3px;line-height:1.15;color:#fff;max-width:520px;">Everything for your focus, in one place.</div>
-        <button style="background:#fff;color:#1A1A1A;border:none;font-weight:800;padding:18px 40px;border-radius:40px;font-size:34px;margin-top:16px;cursor:default;">WORKSPACE</button>
+        <button style="background:#fff;color:${btnColor};border:none;font-weight:800;padding:18px 40px;border-radius:40px;font-size:34px;margin-top:16px;cursor:default;">WORKSPACE</button>
       </div>
     </div>
     <div style="flex:1 1 25%;display:flex;align-items:center;justify-content:center;background:#fff;min-height:100vh;padding:20px;">
@@ -2904,7 +2949,7 @@ async function completeLogin(match){
 
 function finishLogin(match){
   session.userId = match.id; persistSession();
-  try{ localStorage.setItem('lastLoginTheme', match.themePreference || 'boardroom'); }catch(e){}
+  try{ localStorage.setItem('lastLoginAccent', match.accentColor || 'black'); }catch(e){}
   ui.loginError=''; ui.loginStep='email'; ui.loginEmail=''; ui.loginAccountChoices=null; ui.loginBusy=false;
   ui.pendingLoginMatch=null; ui.loginTotpFactorId=null; ui.hasSupabaseSession=false;
   if(loginCooldownTimer){ clearInterval(loginCooldownTimer); loginCooldownTimer=null; }
@@ -3418,6 +3463,43 @@ function bindFocusAreaHome(){
   }
 }
 
+/* ---------- Title > Group > Workstream ---------- */
+function escAttr(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function wsTitles(){ return [...new Set(state.projects.map(p=>(p.title||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b)); }
+function wsGroupsOf(title){ return [...new Set(state.projects.filter(p=>(p.title||'').trim()===title).map(p=>(p.group||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b)); }
+function canonTitle(raw){ const v=(raw||'').trim(); if(!v) return ''; return wsTitles().find(t=>t.toLowerCase()===v.toLowerCase()) || v; }
+function canonGroup(title, raw){ const v=(raw||'').trim(); if(!title||!v) return ''; return wsGroupsOf(title).find(g=>g.toLowerCase()===v.toLowerCase()) || v; }
+function titleGroupFieldsHTML(pf, p){
+  const t=(p&&p.title)||'', g=(p&&p.group)||'';
+  return `
+    <div class="field"><label>Title (optional)</label>
+      <input id="${pf}Title" list="${pf}TitleList" value="${escAttr(t)}" placeholder="e.g. Annual Compliance 2026" autocomplete="off">
+      <datalist id="${pf}TitleList">${wsTitles().map(x=>`<option value="${escAttr(x)}"></option>`).join('')}</datalist>
+      <div class="hint">The top level. Pick an existing title or type a new one; leave blank for a stand-alone workstream.</div>
+    </div>
+    <div class="field"><label>Group (optional)</label>
+      <input id="${pf}Group" list="${pf}GroupList" value="${escAttr(g)}" placeholder="e.g. Licences" autocomplete="off" ${t?'':'disabled'}>
+      <datalist id="${pf}GroupList">${(t?wsGroupsOf(t):[]).map(x=>`<option value="${escAttr(x)}"></option>`).join('')}</datalist>
+      <div class="hint">Sits under the title, so it needs a title first.</div>
+    </div>`;
+}
+function bindTitleGroupFields(pf){
+  const tEl=document.getElementById(pf+'Title'), gEl=document.getElementById(pf+'Group'), dl=document.getElementById(pf+'GroupList');
+  if(!tEl||!gEl) return;
+  const sync=()=>{
+    const t=canonTitle(tEl.value);
+    gEl.disabled=!t;
+    if(!t) gEl.value='';
+    dl.innerHTML=(t?wsGroupsOf(t):[]).map(x=>`<option value="${escAttr(x)}"></option>`).join('');
+  };
+  tEl.addEventListener('input',sync);
+}
+function readTitleGroupFields(pf){
+  const title=canonTitle(document.getElementById(pf+'Title').value);
+  const group=canonGroup(title, document.getElementById(pf+'Group').value);
+  return {title,group};
+}
+
 function renderPortfolio(){
   const allProjects = visibleProjects();
   const today0 = todayISO();
@@ -3432,43 +3514,82 @@ function renderPortfolio(){
   });
 
   const filter = ui.portfolioFilter || 'open';
-  const filtered = summaries.filter(s=>{
+  const statusFiltered = summaries.filter(s=>{
     if(filter==='all') return true;
     if(filter==='closed') return s.isClosedProject;
     if(filter==='future') return s.isFutureProject;
     return !s.isClosedProject && !s.isFutureProject; // 'open' — default
   }).sort((a,b)=> priorityMeta(a.p).order - priorityMeta(b.p).order);
 
+  // Title / Group / search filters
+  const titleOpts = [...new Set(summaries.map(s=>(s.p.title||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const selTitle = titleOpts.includes(ui.portfolioTitle) ? ui.portfolioTitle : '';
+  const groupOpts = selTitle ? [...new Set(summaries.filter(s=>(s.p.title||'').trim()===selTitle).map(s=>(s.p.group||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b)) : [];
+  const selGroup = groupOpts.includes(ui.portfolioGroup) ? ui.portfolioGroup : '';
+  const q = (ui.portfolioSearch||'').trim().toLowerCase();
+  const filtered = statusFiltered.filter(s=>{
+    if(selTitle && (s.p.title||'').trim()!==selTitle) return false;
+    if(selGroup && (s.p.group||'').trim()!==selGroup) return false;
+    if(q && !((s.p.name||'')+' '+(s.p.title||'')+' '+(s.p.group||'')).toLowerCase().includes(q)) return false;
+    return true;
+  });
+
   const onTrack = filtered.filter(s=>!s.tl.isRed).length;
   const delayed = filtered.filter(s=>s.tl.isRed).length;
   const tasksTracked = filtered.reduce((sum,s)=>sum+s.tasks.length, 0);
 
-  const cards = filtered.map(s=>{
+  const rowHtml = s=>{
     const status = s.tl.isRed ? 'red':'green';
     const deadline = s.tl.originalDeadline || addDays(s.p.startDate, s.tl.originalTotal);
     const blockingTeams = blockedTeamsForProject(s.p.id);
     const delayNames = status==='red' ? delayResponsibleNames(s.p.id) : [];
     const lastClosedDate = s.isClosedProject ? s.tasks.reduce((max,t)=> (t.closedDate && (!max || t.closedDate > max)) ? t.closedDate : max, null) : null;
     return `
-    <div class="proj-card status-${status}" data-open-project="${s.p.id}">
-      <div class="pname" style="margin:2px 0 4px;">${s.p.name}</div>
-      <div class="eyebrow" style="margin-bottom:10px;">${s.tasks.length} task${s.tasks.length===1?'':'s'}</div>
-      <div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;">${pill(s.isClosedProject?'green':'amber', s.isClosedProject?'Closed':(s.isFutureProject?'Future':'Open'))}${priorityBadge(s.p)}</div>
-      <div class="proj-meta" style="margin-top:0;">
-        <span>STARTED <b style="color:var(--paper);">${fmtDate(s.p.startDate)}</b></span>
-        <span>DEADLINE <b style="color:var(--paper);">${fmtDate(deadline)}</b></span>
+    <div class="ws-row status-${status}" data-open-project="${s.p.id}">
+      <div class="ws-name">
+        <div class="pname" title="${String(s.p.name).replace(/"/g,'&quot;')}">${s.p.name}</div>
+        <div class="eyebrow">${s.tasks.length} task${s.tasks.length===1?'':'s'}</div>
+        ${(s.p.title||'').trim() ? `<div class="ws-path" title="${escAttr((s.p.title||'')+((s.p.group||'').trim()?' › '+s.p.group:''))}"><b>${escAttr(s.p.title)}</b>${(s.p.group||'').trim()?' › '+escAttr(s.p.group):''}</div>` : ''}
       </div>
-      ${lastClosedDate ? `<div class="proj-meta" style="margin-top:4px;"><span>CLOSED <b style="color:var(--paper);">${fmtDate(lastClosedDate)}</b></span></div>` : ''}
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
+      <div class="ws-tags">${pill(s.isClosedProject?'green':'amber', s.isClosedProject?'Closed':(s.isFutureProject?'Future':'Open'))}${priorityBadge(s.p)}</div>
+      <div class="ws-dates">
+        <div>STARTED <b>${fmtDate(s.p.startDate)}</b></div>
+        <div>${lastClosedDate ? 'CLOSED <b>'+fmtDate(lastClosedDate)+'</b>' : 'DEADLINE <b>'+fmtDate(deadline)+'</b>'}</div>
+      </div>
+      <div class="ws-tl">
         ${pill(status, status==='red' ? `Delayed ${s.tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
         ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" data-tooltip="${blockedDetailForProject(s.p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
       </div>
-      <div class="proj-meta" style="margin-top:14px;">
-        <span>${s.pct}% PROGRESS</span>
+      <div class="ws-prog">
+        <div class="pl"><b>${s.pct}%</b> PROGRESS</div>
+        <div class="bar-track"><div class="bar-fill ${status==='red'?'red':''}" style="width:${s.pct}%"></div></div>
       </div>
-      <div class="bar-track"><div class="bar-fill ${status==='red'?'red':''}" style="width:${s.pct}%"></div></div>
     </div>`;
-  }).join('');
+  };
+
+  let cards = '';
+  if(selTitle && !selGroup){
+    const ungrouped = filtered.filter(s=>!(s.p.group||'').trim());
+    const groupNames = [...new Set(filtered.map(s=>(s.p.group||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    cards = groupNames.map(g=>{
+      const items = filtered.filter(s=>(s.p.group||'').trim()===g);
+      const key = selTitle+'\u0001'+g;
+      const open = !!ui.openGroups[key];
+      const gDelayed = items.filter(s=>s.tl.isRed).length;
+      const avg = Math.round(items.reduce((n,s)=>n+s.pct,0)/items.length);
+      return `<div class="ws-group ${open?'open':''}">
+        <div class="ws-group-head" data-toggle-group="${escAttr(key)}" role="button" aria-expanded="${open}">
+          <span class="chev">&#9656;</span>
+          <span class="gname">${escAttr(g)}</span>
+          <span class="gmeta">${items.length} workstream${items.length===1?'':'s'}${gDelayed?` · <span style="color:var(--red);">${gDelayed} delayed</span>`:''}</span>
+          <div class="gprog"><div class="ws-prog" style="flex:none;"><div class="pl"><b>${avg}%</b> PROGRESS</div><div class="bar-track"><div class="bar-fill ${gDelayed?'red':''}" style="width:${avg}%"></div></div></div></div>
+        </div>
+        ${open?`<div class="ws-group-body">${items.map(rowHtml).join('')}</div>`:''}
+      </div>`;
+    }).join('') + ungrouped.map(rowHtml).join('');
+  } else {
+    cards = filtered.map(rowHtml).join('');
+  }
 
   return `
     ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Workstream', 'All workstreams, one board') : `
@@ -3482,16 +3603,25 @@ function renderPortfolio(){
       <div class="stat-chip"><div class="n">${tasksTracked}</div><div class="l">Tasks tracked</div></div>
     </div>
 
-    <div class="filters">
+    <div class="filters ws-filters">
       <select id="portfolioFilter">
         <option value="open" ${filter==='open'?'selected':''}>Open workstreams</option>
         <option value="closed" ${filter==='closed'?'selected':''}>Closed workstreams</option>
         <option value="future" ${filter==='future'?'selected':''}>Future workstreams</option>
         <option value="all" ${filter==='all'?'selected':''}>All workstreams</option>
       </select>
+      <select id="portfolioTitle" aria-label="Filter by title">
+        <option value="">All titles</option>
+        ${titleOpts.map(t=>`<option value="${escAttr(t)}" ${t===selTitle?'selected':''}>${escAttr(t)}</option>`).join('')}
+      </select>
+      <select id="portfolioGroup" aria-label="Filter by group" ${selTitle?'':'disabled'} title="${selTitle?'':'Select a title first'}">
+        <option value="">${selTitle?'All groups':'All groups (pick a title)'}</option>
+        ${groupOpts.map(g=>`<option value="${escAttr(g)}" ${g===selGroup?'selected':''}>${escAttr(g)}</option>`).join('')}
+      </select>
+      <input id="portfolioSearch" type="search" placeholder="Search workstreams…" value="${escAttr(ui.portfolioSearch||'')}" aria-label="Search workstreams" autocomplete="off">
     </div>
 
-    <div class="grid g3">
+    <div class="ws-list">
       ${cards || `<div class="empty-state"><div class="et">No workstreams to show</div>${allProjects.length ? 'Try a different filter.' : 'Create one from Admin.'}</div>`}
     </div>
     ${isAdmin() ? `<div style="margin-top:22px;"><button class="btn btn-primary" data-nav="admin">+ New workstream</button></div>` : ''}
@@ -3508,6 +3638,23 @@ function bindPortfolio(){
   document.querySelectorAll('[data-nav="admin"]').forEach(b=>b.addEventListener('click', ()=>{ ui.view='admin'; render(); }));
   const filterSel = document.getElementById('portfolioFilter');
   if(filterSel) filterSel.addEventListener('change', ()=>{ ui.portfolioFilter = filterSel.value; render(); });
+  const titleSel = document.getElementById('portfolioTitle');
+  if(titleSel) titleSel.addEventListener('change', ()=>{ ui.portfolioTitle = titleSel.value; ui.portfolioGroup = ''; render(); });
+  const groupSel = document.getElementById('portfolioGroup');
+  if(groupSel) groupSel.addEventListener('change', ()=>{ ui.portfolioGroup = groupSel.value; render(); });
+  const searchEl = document.getElementById('portfolioSearch');
+  if(searchEl) searchEl.addEventListener('input', ()=>{
+    ui.portfolioSearch = searchEl.value;
+    const pos = searchEl.selectionStart;
+    render();
+    const again = document.getElementById('portfolioSearch');
+    if(again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(e){} }
+  });
+  document.querySelectorAll('[data-toggle-group]').forEach(h=>h.addEventListener('click', ()=>{
+    const k = h.dataset.toggleGroup;
+    ui.openGroups[k] = !ui.openGroups[k];
+    render();
+  }));
 }
 
 /* ============================== FEATURE TREE (Knowledge system) ============================== */
@@ -3569,7 +3716,59 @@ function deleteNodeCascade(nodeId){
 
 /* ============================== ATTENDANCE SHEET (special Heading view) ============================== */
 
-const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color:'#B8791A'}, '½':{label:'Half day',color:'#8A6DAB'}, W:{label:'Work from home',color:'#3D74A8'}, N:{label:'No show',color:'#B8362D'}, H:{label:'Holiday',color:'#7A4F96'}, C:{label:'Comp off',color:'#347F77'}, R:{label:'Needs review',color:'#CC5500'} };
+const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color:'#B8791A'}, W:{label:'Work from home',color:'#3D74A8'}, SL:{label:'Sick Leave',color:'#C0467A'}, '½':{label:'Half day',color:'#8A6DAB'}, N:{label:'No show',color:'#B8362D'}, H:{label:'Holiday',color:'#7A4F96'}, C:{label:'Comp off',color:'#4A5568'} };
+
+/* ---------- Leave balances (EL / SL / Comp off) ----------
+   Each employee has an opening balance recorded "as of" a date. The balance
+   shown is that opening figure adjusted by attendance from that date up to
+   today: L = -1 EL, half day = -0.5 EL, SL = -1 SL, C on a weekday = -1 CO
+   (comp off taken), C on a weekly off = +1 CO (comp off earned by working). */
+// Monthly accrual: for 2026 the year's EL/SL were credited up front, so nothing
+// accrues automatically. From Jan 2027 each 1st-of-month adds 1 EL and 0.5 SL.
+// EL and Comp off carry forward into the next year; unused SL does not — it
+// resets to zero on 1 Jan each year (from 2027), before that month's credit.
+const LEAVE_ACCRUAL = { startMonth:'2027-01', el:1, sl:0.5 };
+function leaveBalanceFor(u){
+  const lb = u && u.leaveBalances;
+  if(!lb) return null;
+  let el = Number(lb.el)||0, sl = Number(lb.sl)||0, co = Number(lb.co)||0;
+  const asOf = lb.asOf || '0000-00-00', today = todayISO(), prefix = u.id+'|';
+  // Build every dated event from asOf to today, then apply them in date order so
+  // the yearly SL reset lands between the right days.
+  const ev = []; // [date, order, type, amount]
+  Object.keys(state.attendance||{}).forEach(k=>{
+    if(!k.startsWith(prefix)) return;
+    const date = k.slice(prefix.length);
+    if(date <= asOf || date > today) return;
+    const v = state.attendance[k];
+    if(v==='L') ev.push([date,1,'el',-1]);
+    else if(v==='½') ev.push([date,1,'el',-0.5]);
+    else if(v==='SL') ev.push([date,1,'sl',-1]);
+    else if(v==='C') ev.push([date,1,'co', isWeekendISO(date)?1:-1]);
+  });
+  // Credits/resets land on the 1st of the month if that 1st is after the date the
+  // balance was recorded (a balance entered on/after the 1st already includes it).
+  // Likewise attendance counts only for days after asOf: the figures entered are
+  // the balance once everything up to and including asOf has been accounted for.
+  let [ay, am] = LEAVE_ACCRUAL.startMonth.split('-').map(Number);
+  while(true){
+    const first = `${ay}-${String(am).padStart(2,'0')}-01`;
+    if(first > today) break;
+    if(first > asOf){
+      if(am===1) ev.push([first,0,'slreset',0]);
+      ev.push([first,0,'el',LEAVE_ACCRUAL.el]);
+      ev.push([first,0,'sl',LEAVE_ACCRUAL.sl]);
+    }
+    am++; if(am>12){ am=1; ay++; }
+  }
+  // Same day: reset first, then credits, then attendance (stable by order flag).
+  ev.sort((x,y)=> x[0]<y[0]?-1 : x[0]>y[0]?1 : x[1]-y[1]);
+  ev.forEach(([d,o,type,amt])=>{
+    if(type==='el') el+=amt; else if(type==='sl') sl+=amt; else if(type==='co') co+=amt; else if(type==='slreset') sl=0;
+  });
+  return { el, sl, co, asOf: lb.asOf };
+}
+function fmtBal(n){ return (Math.round(n*2)/2).toString().replace(/\.0$/,''); }
 
 function attendanceKey(userId, date){ return userId+'|'+date; }
 function getAttendance(userId, date){ return state.attendance[attendanceKey(userId,date)] || null; }
@@ -3685,7 +3884,15 @@ function renderAttendanceSheet(node){
       const cls = `att-cell${weekend?' att-weekend':''}${admin?' att-clickable':''}`;
       return `<td class="${cls}" style="${style}position:relative;"${clickAttr}>${label}${lateDot}</td>`;
     }).join('');
-    return `<tr><td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${cells}</tr>`;
+    const bal = leaveBalanceFor(u);
+    const balCell = (key, label)=>{
+      const clickable = admin ? ` data-att-balance="${u.id}" style="cursor:pointer;"` : '';
+      const tip = bal ? `data-tooltip="${label} balance as of today (set as of ${bal.asOf?fmtDate(bal.asOf):'earlier'})${admin?' — click to update':''}"` : (admin?'data-tooltip="Not set yet — click to enter the current balance"':'');
+      if(!bal) return `<td class="att-bal"${clickable} ${tip}><span class="muted">—</span></td>`;
+      const v = bal[key];
+      return `<td class="att-bal"${clickable} ${tip}><b style="${v<0?'color:var(--red);':''}">${fmtBal(v)}</b></td>`;
+    };
+    return `<tr><td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${balCell('el','Earned Leave')}${balCell('sl','Sick Leave')}${balCell('co','Comp off')}${cells}</tr>`;
   }).join('');
 
   const legend = Object.entries(ATT_STATUS).map(([code,v])=>
@@ -3711,12 +3918,13 @@ function renderAttendanceSheet(node){
     </div>
     <div id="attImportStatus"></div>
 
-    <div style="margin-bottom:14px;">${legend}</div>
+    <div style="margin-bottom:6px;">${legend}</div>
+    <div class="hint" style="margin-bottom:14px;">EL / SL / CO = balances available today. L uses 1 EL (½ uses 0.5 EL), SL uses 1 SL, C on a working day uses 1 CO, and C on a weekly off adds 1 CO. From Jan 2027, 1 EL and 0.5 SL are added on the 1st of each month; EL and CO carry forward, SL resets each 1 Jan.${admin?' Click a balance to update it.':''}</div>
 
     <div class="att-wrap">
       <table class="att-table">
-        <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${dayHeaders}</tr></thead>
-        <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+2}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
+        <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th><th data-tooltip="Earned Leave balance">EL</th><th data-tooltip="Sick Leave balance">SL</th><th data-tooltip="Comp off balance">CO</th>${dayHeaders}</tr></thead>
+        <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+5}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
     ${!admin ? '<div class="footnote">Only admins can enter attendance.</div>' : ''}
@@ -3794,16 +4002,12 @@ function processAttendanceImport(workbook){
     }
   });
 
-  // Anyone not in the file and not already marked anything gets flagged
-  // for a human to resolve — never auto-marked absent.
+  // Anyone not in the file and not already marked anything is simply left
+  // blank for a person to fill in — never auto-marked absent.
   let flaggedForReview = 0;
   state.users.filter(u=>u.role!=='viewer').forEach(u=>{
     if(matchedUserIds.has(u.id)) return;
-    const key = attendanceKey(u.id, dateISO);
-    if(!state.attendance[key]){
-      state.attendance[key] = 'R';
-      flaggedForReview++;
-    }
+    if(!state.attendance[attendanceKey(u.id, dateISO)]) flaggedForReview++;
   });
 
   persist();
@@ -3831,7 +4035,7 @@ function bindAttendanceSheet(){
         if(statusEl) statusEl.innerHTML = `<div class="hint" style="color:var(--red);margin-bottom:10px;">${result.error}</div>`;
       } else {
         const unmatchedNote = result.unmatchedCodes.length ? ` ${result.unmatchedCodes.length} code${result.unmatchedCodes.length===1?'':'s'} in the file didn't match anyone here: ${result.unmatchedCodes.join(', ')}.` : '';
-        if(statusEl) statusEl.innerHTML = `<div class="hint" style="color:var(--green);margin-bottom:10px;">Imported ${fmtDate(result.dateISO)} — ${result.markedPresent} marked present (${result.flaggedLate} late), ${result.flaggedForReview} flagged for review.${unmatchedNote}</div>`;
+        if(statusEl) statusEl.innerHTML = `<div class="hint" style="color:var(--green);margin-bottom:10px;">Imported ${fmtDate(result.dateISO)} — ${result.markedPresent} marked present (${result.flaggedLate} late), ${result.flaggedForReview} not in the file and left blank for you to mark.${unmatchedNote}</div>`;
         ui.attendanceMonth = result.dateISO.slice(0,7);
         render();
       }
@@ -3851,11 +4055,15 @@ function bindAttendanceSheet(){
     el.addEventListener('click', ()=>{
       const [userId,date] = el.dataset.attWeekday.split('|');
       const cur = getAttendance(userId,date);
-      const cycle = ['','P','L','½','W','N','H'];
+      const cycle = ['','P','L','W','SL','½','N','H','C'];
       const next = cycle[(cycle.indexOf(cur||'')+1) % cycle.length];
       setAttendanceValue(userId,date, next || null);
       persist(); render();
     });
+  });
+
+  document.querySelectorAll('[data-att-balance]').forEach(el=>{
+    el.addEventListener('click', ()=> openLeaveBalanceModal(el.dataset.attBalance));
   });
 
   document.querySelectorAll('[data-att-weekend]').forEach(el=>{
@@ -3869,6 +4077,48 @@ function bindAttendanceSheet(){
         persist(); render();
       }
     });
+  });
+}
+
+// Admin sets/updates an employee's current EL / SL / Comp off balance. Whatever is
+// entered is treated as the true balance at the start of the chosen date; attendance
+// from that date onward then adjusts it automatically (see leaveBalanceFor).
+function openLeaveBalanceModal(userId){
+  if(!isAdmin()) return;
+  const u = state.users.find(x=>x.id===userId);
+  if(!u) return;
+  const cur = leaveBalanceFor(u);
+  const val = k => cur ? fmtBal(cur[k]) : '';
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Amend leave balances — ${escAttr(u.name)}</h3>
+        <div class="modal-sub">Change any figure to the correct balance as it stands now. Attendance marked after the date below (Leave, ½, SL, Comp off) adjusts it automatically.</div>
+        <form id="lbForm">
+          <div class="field"><label>Earned Leave (EL) balance</label><input id="lbEl" type="number" step="0.5" value="${val('el')}" required></div>
+          <div class="field"><label>Sick Leave (SL) balance</label><input id="lbSl" type="number" step="0.5" value="${val('sl')}" required></div>
+          <div class="field"><label>Comp off (CO) balance</label><input id="lbCo" type="number" step="0.5" value="${val('co')}" required></div>
+          <div class="field"><label>These figures are correct as of</label><input id="lbAsOf" type="date" value="${todayISO()}" required>
+            <div class="hint">Everything up to and including this date is already reflected in the figures; only attendance after it is deducted.</div></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="lbSaveBtn" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('lbForm', 'lbSaveBtn', ()=>{
+    const ids = ['lbEl','lbSl','lbCo','lbAsOf'];
+    const lbMsg = {lbEl:'Enter the Earned Leave balance (use 0 if none).', lbSl:'Enter the Sick Leave balance (use 0 if none).', lbCo:'Enter the Comp off balance (use 0 if none).', lbAsOf:'Pick the date these balances are correct as of.'};
+    for(const id of ids){ const el = document.getElementById(id); if(el.value===''){ formError(el, lbMsg[id]); return; } }
+    u.leaveBalances = {
+      el: parseFloat(document.getElementById('lbEl').value)||0,
+      sl: parseFloat(document.getElementById('lbSl').value)||0,
+      co: parseFloat(document.getElementById('lbCo').value)||0,
+      asOf: document.getElementById('lbAsOf').value
+    };
+    persist(); closeModal(); render();
   });
 }
 
@@ -4763,7 +5013,7 @@ function openEditNodeModal(nodeId){
   bindModalClose();
   runOnClickAndEnter('editNodeForm','editNodeSubmitBtn', ()=>{
     const nameEl = document.getElementById('editNodeName');
-    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    if(!nameEl.value.trim()){ formError(nameEl, 'Enter a name to continue.'); return; }
     f.name = nameEl.value.trim();
     f.description = document.getElementById('editNodeDesc').value.trim();
     if(f.nodeType==='heading' && f.name.toLowerCase()==='attendance' && !f.specialView) f.specialView = 'attendance';
@@ -4811,7 +5061,7 @@ function openNameNodeModal(parentId, nodeType){
   bindModalClose();
   runOnClickAndEnter('nodeNameForm','nodeNameSubmitBtn', ()=>{
     const nameEl = document.getElementById('nodeNameInput');
-    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    if(!nameEl.value.trim()){ formError(nameEl, 'Enter a name to continue.'); return; }
     const trimmedName = nameEl.value.trim();
     const node = { id: uid('node'), name: trimmedName, nodeType, parentId, order: nextOrderFor(parentId), contentItems: [], description: document.getElementById('nodeDescInput').value.trim(),
       specialView: (nodeType==='heading' && trimmedName.toLowerCase()==='attendance') ? 'attendance' : null };
@@ -5930,7 +6180,8 @@ function openBlockerModal(taskId){
   runOnClickAndEnter('blockerForm', 'bkSubmitBtn', ()=>{
     const userId = document.getElementById('bkUser').value;
     const reason = document.getElementById('bkReason').value.trim();
-    if(!userId || !reason) return;
+    if(!userId){ formError(document.getElementById('bkUser'), 'Choose who is blocking this task.'); return; }
+    if(!reason){ formError(document.getElementById('bkReason'), 'Explain what is blocking this task.'); return; }
     const blockingUser = state.users.find(u=>u.id===userId);
     t.blockedByUserId = userId;
     t.blockedByTeamId = blockingUser ? blockingUser.teamId : null;
@@ -5981,7 +6232,7 @@ function openBlankTaskModal(projectId){
   bindModalClose();
   runOnClickAndEnter('blankTaskForm', 'btSubmitBtn', ()=>{
     const titleEl = document.getElementById('btTitle');
-    if(!titleEl.value.trim()){ titleEl.focus(); return; }
+    if(!titleEl.value.trim()){ formError(titleEl, 'Enter a task title to continue.'); return; }
     const [type,id] = admin ? document.getElementById('btAssignee').value.split(':') : ['user', cu.id];
     const proj = state.projects.find(p=>p.id===projectId);
     const t = {
@@ -6267,13 +6518,14 @@ function openTaskModal(taskId){
   }
   runOnClickAndEnter('taskForm', 'tfSubmitBtn', ()=>{
     const titleEl = document.getElementById('tfTitle');
-    if(!titleEl.value.trim()){ titleEl.focus(); return; }
+    if(!titleEl.value.trim()){ formError(titleEl, 'Enter a task title to continue.'); return; }
     const noDeadline = admin && document.getElementById('tfDeadlineDisabled') && document.getElementById('tfDeadlineDisabled').checked;
     let sVal, eVal;
     if(firstTimeSave){
       sVal = document.getElementById('tfStart').value;
       eVal = noDeadline ? sVal : document.getElementById('tfEnd').value;
-      if(!sVal || (!noDeadline && !eVal)){ return; }
+      if(!sVal){ formError(document.getElementById('tfStart'), 'Pick a start date to save this task.'); return; }
+      if(!noDeadline && !eVal){ formError(document.getElementById('tfEnd'), 'Pick an end date to save this task.'); return; }
     }
     const commit = ()=>{
       t.title = titleEl.value.trim();
@@ -6414,7 +6666,10 @@ function openAmendTimelineModal(taskId){
     const origEnd = document.getElementById('amOrigEnd').value;
     const extEnd = t.extended ? document.getElementById('amExtEnd').value : null;
     const closedDateVal = t.status==='closed' ? document.getElementById('amClosedDate').value : null;
-    if(!start || !origEnd || (t.extended && !extEnd) || (t.status==='closed' && !closedDateVal)) return;
+    if(!start){ formError(document.getElementById('amStart'), 'Pick a start date to save.'); return; }
+    if(!origEnd){ formError(document.getElementById('amOrigEnd'), 'Pick the original end date to save.'); return; }
+    if(t.extended && !extEnd){ formError(document.getElementById('amExtEnd'), 'Pick the extended end date to save.'); return; }
+    if(t.status==='closed' && !closedDateVal){ formError(document.getElementById('amClosedDate'), 'Pick the date this task was closed.'); return; }
     t.startDate = start;
     t.originalEndDate = origEnd;
     t.weekendWork = document.getElementById('amWeekendWork').checked;
@@ -6579,6 +6834,7 @@ function openChecklistGateModal(t, team, items, onComplete){
           <input type="checkbox" id="clGateSingleCheck" style="margin-top:2px;">
           <span>I confirm this task was completed keeping the above in mind.</span>
         </label>
+        <div class="form-error" id="clGateReason">Tick the confirmation above to enable closing this task.</div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="clGateCancel">Cancel</button>
           <button type="button" class="btn btn-primary" id="clGateConfirm" disabled>Confirm &amp; close task</button>
@@ -6588,7 +6844,7 @@ function openChecklistGateModal(t, team, items, onComplete){
   document.body.appendChild(div);
   const singleCheck = div.querySelector('#clGateSingleCheck');
   const confirmBtn = div.querySelector('#clGateConfirm');
-  singleCheck.addEventListener('change', ()=>{ confirmBtn.disabled = !singleCheck.checked; });
+  singleCheck.addEventListener('change', ()=>{ confirmBtn.disabled = !singleCheck.checked; const r = div.querySelector('#clGateReason'); if(r) r.style.display = singleCheck.checked ? 'none' : ''; });
   div.querySelector('#clGateCancel').addEventListener('click', ()=> div.remove());
   confirmBtn.addEventListener('click', ()=>{
     if(confirmBtn.disabled) return;
@@ -6632,7 +6888,7 @@ function openAssignReviewerModal(t, onAssign){
   div.querySelector('#reviewerCancel').addEventListener('click', ()=> div.remove());
   div.querySelector('#reviewerConfirm').addEventListener('click', ()=>{
     const sel = div.querySelector('#reviewerSelect');
-    if(!sel.value){ sel.focus(); return; }
+    if(!sel.value){ formError(sel, 'Choose who should review this task before continuing.'); return; }
     div.remove();
     onAssign(sel.value);
   });
@@ -6875,7 +7131,7 @@ function renderSpendCompanyList(){
     </div>`;
   }).join('');
   return `
-    ${isBoardroom ? renderPageHero('$ Spend Management', 'Company spend, tracked month by month', '#34495E') : `
+    ${isBoardroom ? renderPageHero('$ Spend Management', 'Company spend, tracked month by month') : `
     <div class="eyebrow">$ Spend Management</div>
     <h1 class="page-title" style="margin-bottom:22px;">Company spend, tracked month by month</h1>`}
     <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addSpendCompanyBtn">+ Add Company</button>
@@ -6899,7 +7155,7 @@ function renderSpendCompanyDetail(company){
     </div>`;
   }).join('');
   return `
-    ${isBoardroom ? renderPageHero('$ Spend Management', company.name, '#34495E') : `
+    ${isBoardroom ? renderPageHero('$ Spend Management', company.name) : `
     <div class="eyebrow">$ Spend Management</div>
     <h1 class="page-title" style="margin-bottom:22px;">${company.name}</h1>`}
     <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" id="addSpendExpenseBtn" data-company="${company.id}">+ Add Expense</button>
@@ -6925,7 +7181,7 @@ function renderSpendMonthDetail(company, monthKey){
       </td>
     </tr>`).join('');
   return `
-    ${isBoardroom ? renderPageHero('$ Spend Management', monthLabelLong(monthKey), '#34495E') : `
+    ${isBoardroom ? renderPageHero('$ Spend Management', monthLabelLong(monthKey)) : `
     <div class="eyebrow">$ Spend Management</div>
     <h1 class="page-title" style="margin-bottom:6px;">${monthLabelLong(monthKey)}</h1>`}
     <div class="muted" style="font-size:13px;margin-bottom:20px;">${company.name} · ${fmtUSD(total)} total across ${expenses.length} expense${expenses.length===1?'':'s'}</div>
@@ -6982,7 +7238,7 @@ function openAddSpendCompanyModal(){
   bindModalClose();
   runOnClickAndEnter('spendCompanyForm','spendCompanySubmitBtn', ()=>{
     const nameEl = document.getElementById('spendCompanyNameInput');
-    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    if(!nameEl.value.trim()){ formError(nameEl, 'Enter a name to continue.'); return; }
     state.spendCompanies.push({ id: uid('spendco'), name: nameEl.value.trim(), createdAt: nowDateTimeIST() });
     persist(); closeModal(); render();
   });
@@ -7039,8 +7295,8 @@ function openSpendExpenseModal(companyId, expenseId){
   runOnClickAndEnter('spendExpenseForm','spendExpenseSubmitBtn', ()=>{
     const dateEl = document.getElementById('spendExpDate');
     const amountEl = document.getElementById('spendExpAmount');
-    if(!dateEl.value){ dateEl.focus(); return; }
-    if(!amountEl.value || Number(amountEl.value) < 0){ amountEl.focus(); return; }
+    if(!dateEl.value){ formError(dateEl, 'Pick the date of this expense.'); return; }
+    if(!amountEl.value || Number(amountEl.value) < 0){ formError(amountEl, !amountEl.value ? 'Enter the expense amount.' : 'The amount can\'t be negative.'); return; }
     const data = {
       date: dateEl.value,
       platform: document.getElementById('spendExpPlatform').value.trim(),
@@ -7434,25 +7690,27 @@ function bindAssignments(){
 // signed in, there's no user preference to check yet, so this falls back to
 // whichever theme this browser last saw (see getPreLoginTheme), or Boardroom
 // on a genuinely first-ever visit.
-function getPreLoginTheme(){
+function getPreLoginAccent(){
   try{
-    const stored = localStorage.getItem('lastLoginTheme');
-    if(stored === 'boardroom' || stored === 'light' || stored === 'dark') return stored;
+    const stored = localStorage.getItem('lastLoginAccent');
+    if(['black','blue','maroon','brown'].includes(stored)) return stored;
   }catch(e){}
-  return 'boardroom';
+  return 'black';
 }
 function applyTheme(){
   const cu = currentUser();
-  document.documentElement.setAttribute('data-theme', cu ? (cu.themePreference || 'boardroom') : getPreLoginTheme());
+  document.documentElement.setAttribute('data-theme', 'boardroom');
+  document.documentElement.setAttribute('data-accent', cu ? (cu.accentColor || 'black') : getPreLoginAccent());
 }
 
 function renderMyAccount(){
   const cu = currentUser();
-  const current = (cu && cu.themePreference) || 'boardroom';
-  const themes = [
-    {id:'dark', name:'Dark', desc:'The original theme.'},
-    {id:'light', name:'Light', desc:'A clean, bright look.'},
-    {id:'boardroom', name:'Boardroom', desc:'The look from our leadership presentation.'}
+  const currentAccent = (cu && cu.accentColor) || 'black';
+  const ACCENT_OPTIONS = [
+    {id:'black', name:'Black', desc:'The original Boardroom look.', swatch:'#1A1A1A'},
+    {id:'blue', name:'Blue', desc:'A crisp, professional blue.', swatch:'#0060BF'},
+    {id:'maroon', name:'Maroon', desc:'A deep, formal maroon.', swatch:'#7A1F2B'},
+    {id:'brown', name:'Dark Brown', desc:'A warm, understated brown.', swatch:'#4A3728'}
   ];
   const widgetOrder = ((cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER).filter(id=> id!=='wg_spend' || isAdmin());
   const enabledSet = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
@@ -7477,25 +7735,25 @@ function renderMyAccount(){
     </div>`;
   }).join('');
   return `
-    ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('My Account', cu ? cu.name : '') : `
-    <div class="eyebrow">My Account</div>
-    <h1 class="page-title" style="margin-bottom:20px;">${cu ? cu.name : ''}</h1>`}
+    ${renderPageHero('My Account', cu ? cu.name : '')}
     <div class="card" style="margin-bottom:16px;">
-      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Theme</div>
-      <div class="muted" style="font-size:12px;margin-bottom:14px;">Choose how the workspace looks for you — this is personal and only changes what you see.</div>
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Color</div>
+      <div class="muted" style="font-size:12px;margin-bottom:14px;">Choose your accent color — this is personal and only changes what you see.</div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;">
-        ${themes.map(t=>{
-          const tColor = t.id==='dark' ? '#3D4451' : 'var(--amber)';
-          const isSelected = current===t.id;
+        ${ACCENT_OPTIONS.map(a=>{
+          const isSelected = currentAccent===a.id;
           return `
-          <label style="flex:0 0 275px;width:275px;min-height:112px;display:flex;flex-direction:column;background:var(--panel);border:1px solid ${isSelected?tColor:'rgba(30,35,60,.16)'};border-radius:12px;box-shadow:var(--card-shadow);overflow:hidden;cursor:pointer;text-transform:none;letter-spacing:normal;">
-            <div style="height:4px;background:${tColor};flex-shrink:0;"></div>
+          <label style="flex:0 0 275px;width:275px;min-height:112px;display:flex;flex-direction:column;background:var(--panel);border:1px solid ${isSelected?a.swatch:'rgba(30,35,60,.16)'};border-radius:12px;box-shadow:var(--card-shadow);overflow:hidden;cursor:pointer;text-transform:none;letter-spacing:normal;">
+            <div style="height:4px;background:${a.swatch};flex-shrink:0;"></div>
             <div style="padding:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex:1;">
-              <div>
-                <div style="font-size:14.5px;font-weight:700;color:var(--paper);margin-bottom:6px;">${t.name}</div>
-                <div class="muted" style="font-size:12px;line-height:1.55;">${t.desc}</div>
+              <div style="display:flex;gap:10px;align-items:flex-start;">
+                <span style="width:20px;height:20px;border-radius:50%;background:${a.swatch};flex-shrink:0;margin-top:2px;border:1px solid rgba(0,0,0,.15);"></span>
+                <div>
+                  <div style="font-size:14.5px;font-weight:700;color:var(--paper);margin-bottom:6px;">${a.name}</div>
+                  <div class="muted" style="font-size:12px;line-height:1.55;">${a.desc}</div>
+                </div>
               </div>
-              <input type="radio" name="themeChoice" value="${t.id}" ${isSelected?'checked':''} style="flex-shrink:0;margin-top:2px;width:16px;height:16px;accent-color:${tColor};">
+              <input type="radio" name="accentChoice" value="${a.id}" ${isSelected?'checked':''} style="flex-shrink:0;margin-top:2px;width:16px;height:16px;accent-color:${a.swatch};">
             </div>
           </label>`;
         }).join('')}
@@ -7515,12 +7773,12 @@ function renderMyAccount(){
 }
 
 function bindMyAccount(){
-  document.querySelectorAll('input[name="themeChoice"]').forEach(input=>{
+  document.querySelectorAll('input[name="accentChoice"]').forEach(input=>{
     input.addEventListener('change', ()=>{
       const cu = currentUser();
       if(!cu || !input.checked) return;
-      cu.themePreference = input.value;
-      try{ localStorage.setItem('lastLoginTheme', input.value); }catch(e){}
+      cu.accentColor = input.value;
+      try{ localStorage.setItem('lastLoginAccent', input.value); }catch(e){}
       persist();
       render();
     });
@@ -8166,6 +8424,7 @@ function openEditProjectModal(projectId){
         <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);margin-bottom:6px;">Edit workstream</div>
         <form id="editProjForm">
           <div class="field"><label>Workstream name</label><input id="epName" value="${p.name.replace(/"/g,'&quot;')}" required></div>
+          ${titleGroupFieldsHTML('ep', p)}
           <div class="field"><label>Description</label><textarea id="epDescription" placeholder="Why this workstream exists, what it's for...">${(p.description||'').replace(/</g,'&lt;')}</textarea></div>
           <div class="field"><label>Tag users</label>
             <div class="hint" style="margin-bottom:6px;">Tagged users can see this workstream right away and create their own tasks in it.</div>
@@ -8186,6 +8445,7 @@ function openEditProjectModal(projectId){
       </div>
     </div>`;
   bindModalClose();
+  bindTitleGroupFields('ep');
   bindMultiSelect('epTag');
   document.getElementById('epAddContentBtn').addEventListener('click', ()=> openAddProjectContentModal(p.id));
   document.querySelectorAll('[data-open-project-content]').forEach(el=>{
@@ -8209,10 +8469,13 @@ function openEditProjectModal(projectId){
   });
   runOnClickAndEnter('editProjForm', 'epSubmitBtn', ()=>{
     const nameEl = document.getElementById('epName');
-    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    if(!nameEl.value.trim()){ formError(nameEl, 'Enter a workstream name to continue.'); return; }
     p.name = nameEl.value.trim();
     p.description = document.getElementById('epDescription').value.trim();
     p.taggedUserIds = getMultiSelectValues('epTag');
+    const tg = readTitleGroupFields('ep');
+    if(tg.title) p.title = tg.title; else delete p.title;
+    if(tg.group) p.group = tg.group; else delete p.group;
     persist(); closeModal(); render();
   });
 }
@@ -8259,6 +8522,14 @@ function openAddUserModal(){
           <div class="field"><label>Full name</label><input id="uName" required></div>
           <div class="field"><label>Email (for sign-in)</label><input id="uEmail" type="email" required placeholder="e.g. priya@company.com"><div class="hint">This is how they'll sign in — a code gets sent here instead of using a password.</div></div>
           <div class="field"><label>Employee ID (optional)</label><input id="uEmployeeId" placeholder="e.g. EMP-1042"></div>
+          <div class="field"><label>Current leave balances (optional)</label>
+            <div style="display:flex;gap:8px;">
+              <input id="uBalEl" type="number" step="0.5" placeholder="EL" aria-label="Earned Leave balance">
+              <input id="uBalSl" type="number" step="0.5" placeholder="SL" aria-label="Sick Leave balance">
+              <input id="uBalCo" type="number" step="0.5" placeholder="Comp off" aria-label="Comp off balance">
+            </div>
+            <div class="hint">Earned Leave, Sick Leave and Comp off days available today. Attendance adjusts them from here. You can also set them later from the HR attendance sheet.</div>
+          </div>
           <div class="field"><label>Job title (optional)</label><input id="uJobTitle" placeholder="e.g. Software Developer"></div>
           <div class="field"><label>Responsibilities (optional)</label>
             <input id="uResponsibilities" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
@@ -8308,11 +8579,17 @@ function openAddUserModal(){
     const nameEl = document.getElementById('uName');
     const userEl = document.getElementById('uUsername');
     const emailEl = document.getElementById('uEmail');
-    if(!nameEl.value.trim() || !userEl.value.trim() || !emailEl.value.trim()){ (nameEl.value.trim()? (userEl.value.trim()?emailEl:userEl) :nameEl).focus(); return; }
+    if(!nameEl.value.trim()){ formError(nameEl, 'Enter the person\'s full name to continue.'); return; }
+    if(!emailEl.value.trim()){ formError(emailEl, 'Enter their email address — they use it to sign in.'); return; }
+    if(!userEl.value.trim()){ formError(userEl, 'Choose a username to continue.'); return; }
     const isViewer = roleSel.value==='viewer';
     const responsibilitiesRaw = document.getElementById('uResponsibilities').value.trim();
     const responsibilities = responsibilitiesRaw ? responsibilitiesRaw.split(';').map(s=>s.trim()).filter(Boolean) : [];
     const u = { id: uid('u'), name: nameEl.value.trim(), email: document.getElementById('uEmail').value.trim().toLowerCase(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: roleSel.value, teamId: isViewer ? null : (document.getElementById('uTeam').value || null), jobTitle: document.getElementById('uJobTitle').value.trim(), responsibilities };
+    const balVals = ['uBalEl','uBalSl','uBalCo'].map(id=>document.getElementById(id).value);
+    if(!isViewer && balVals.some(v=>v!=='')){
+      u.leaveBalances = { el: parseFloat(balVals[0])||0, sl: parseFloat(balVals[1])||0, co: parseFloat(balVals[2])||0, asOf: todayISO() };
+    }
     if(isViewer){
       u.viewerProjectIds = accessMode.value==='all' ? 'all' : Array.from(document.querySelectorAll('.uAccessCheck:checked')).map(c=>c.value);
       u.viewerCanSeeAssignments = document.getElementById('uCanSeeAssignments').checked;
@@ -8521,8 +8798,8 @@ function openChangePasswordModal(userId){
     const p1 = document.getElementById('pwNew').value;
     const p2 = document.getElementById('pwConfirm').value;
     const errEl = document.getElementById('pwForm');
-    if(!p1 || p1.length<4){ document.getElementById('pwNew').focus(); return; }
-    if(p1!==p2){ document.getElementById('pwConfirm').focus(); return; }
+    if(!p1 || p1.length<4){ formError(document.getElementById('pwNew'), 'The new password must be at least 4 characters.'); return; }
+    if(p1!==p2){ formError(document.getElementById('pwConfirm'), 'The two passwords don\'t match.'); return; }
     u.password = p1;
     persist(); closeModal(); render();
   });
@@ -8557,7 +8834,8 @@ function openEditUserModal(userId){
   runOnClickAndEnter('editUserForm', 'editUserSubmitBtn', ()=>{
     const nameEl = document.getElementById('euName');
     const emailEl = document.getElementById('euEmail');
-    if(!nameEl.value.trim() || !emailEl.value.trim()){ (nameEl.value.trim()?emailEl:nameEl).focus(); return; }
+    if(!nameEl.value.trim()){ formError(nameEl, 'Enter the person\'s full name to continue.'); return; }
+    if(!emailEl.value.trim()){ formError(emailEl, 'Enter their email address — they use it to sign in.'); return; }
     const raw = document.getElementById('euResponsibilities').value.trim();
     u.name = nameEl.value.trim();
     u.email = emailEl.value.trim().toLowerCase();
@@ -8587,7 +8865,7 @@ function openAddTeamModal(){
   bindModalClose();
   runOnClickAndEnter('teamForm', 'teamSubmitBtn', ()=>{
     const nameEl = document.getElementById('tName');
-    if(!nameEl.value.trim()){ nameEl.focus(); return; }
+    if(!nameEl.value.trim()){ formError(nameEl, 'Enter a name to continue.'); return; }
     state.teams.push({ id: uid('team'), name: nameEl.value.trim(), checklist:[] });
     persist(); closeModal(); render();
   });
@@ -8634,7 +8912,7 @@ function openManageChecklistModal(teamId){
   });
   document.getElementById('clAddBtn').addEventListener('click', ()=>{
     const val = document.getElementById('clNewItem').value.trim();
-    if(!val) return;
+    if(!val){ formError(document.getElementById('clNewItem'), 'Type a checklist point first, then click Add.'); return; }
     t.checklist.push({ id: uid('cl'), text: val });
     rerender();
   });
@@ -8657,6 +8935,7 @@ function openAddProjectModal(){
         <h3>Create workstream</h3>
         <form id="projForm">
           <div class="field"><label>Workstream name</label><input id="pName" required></div>
+          ${titleGroupFieldsHTML('p', null)}
           <div class="field"><label>Start date</label><input type="date" id="pStart" value="${todayISO()}" required></div>
           <div class="field"><label>Description (optional)</label><textarea id="pDescription" placeholder="Why this workstream exists, what it's for..."></textarea></div>
           <div class="field"><label>Tag users</label>
@@ -8687,6 +8966,7 @@ function openAddProjectModal(){
       </div>
     </div>`;
   bindModalClose();
+  bindTitleGroupFields('p');
   bindMultiSelect('pTag');
   const ACCEPT = { image:'image/*', document:'.pdf,.doc,.docx,.xls,.xlsx', video:'video/*' };
   const pContentType = document.getElementById('pContentType');
@@ -8707,7 +8987,8 @@ function openAddProjectModal(){
   runOnClickAndEnter('projForm', 'projSubmitBtn', async ()=>{
     const nameEl = document.getElementById('pName');
     const startEl = document.getElementById('pStart');
-    if(!nameEl.value.trim() || !startEl.value){ (nameEl.value.trim()?startEl:nameEl).focus(); return; }
+    if(!nameEl.value.trim()){ formError(nameEl, 'Enter a workstream name to continue.'); return; }
+    if(!startEl.value){ formError(startEl, 'Pick a start date to create this workstream.'); return; }
     const errEl = document.getElementById('pContentError');
     errEl.textContent = '';
     const contentType = pContentType.value;
@@ -8734,7 +9015,7 @@ function openAddProjectModal(){
       }
     }
     const taggedUserIds = getMultiSelectValues('pTag');
-    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, contentItems: contentItem ? [contentItem] : [], priority: 'medium' };
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, contentItems: contentItem ? [contentItem] : [], priority: 'medium', ...(()=>{ const tg=readTitleGroupFields('p'); const o={}; if(tg.title) o.title=tg.title; if(tg.group) o.group=tg.group; return o; })() };
     state.projects.push(p); persist(); closeModal();
     ui.projectId = p.id; ui.view='project'; render();
   });

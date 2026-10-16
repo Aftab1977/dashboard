@@ -3967,8 +3967,12 @@ function monthLabelLong(monthKey){
 }
 
 function renderAttendanceSheet(node){
-  const months = last3Months();
-  const monthKey = (ui.attendanceMonth && months.includes(ui.attendanceMonth)) ? ui.attendanceMonth : months[0];
+  // The rolling 3-month window, plus any older month that actually has attendance
+  // (e.g. imported history), newest first.
+  const monthSet = new Set(last3Months());
+  Object.keys(state.attendance||{}).forEach(k=>{ const d = k.split('|')[1]; if(d && /^\d{4}-\d{2}-\d{2}$/.test(d)) monthSet.add(d.slice(0,7)); });
+  const months = [...monthSet].sort().reverse();
+  const monthKey = (ui.attendanceMonth && months.includes(ui.attendanceMonth)) ? ui.attendanceMonth : last3Months()[0];
   const [y,m] = monthKey.split('-').map(Number);
   const daysInMonth = new Date(y,m,0).getDate();
   const admin = isAdmin();
@@ -4136,6 +4140,98 @@ function processAttendanceImport(workbook){
   return { dateISO, markedPresent, flaggedLate, flaggedForReview, unmatchedCodes };
 }
 
+/* ---------- Bulk import of past attendance (monthly grid workbook) ----------
+   Layout: one sheet per month named like "Jun-2026" / "October-2026"; row 1 =
+   "Employee ID", "Employee Name", 1, 2, 3 … (days); one row per employee, a status
+   code in each day cell. Blank = weekly off / nothing recorded, so nothing is stored.
+   Nothing is saved until the admin confirms the preview. Existing entries are never
+   overwritten, and dates in the future are skipped. */
+const ATT_GRID_MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+function parseAttendanceGrid(workbook){
+  const today = todayISO();
+  const res = { sheets:[], entries:[], unmatched:{}, skippedSheets:[], existingSame:0, existingDiff:0, future:0, badCodes:{}, notes:[], balanceAffecting:0 };
+  let isGrid = false;
+  workbook.SheetNames.forEach(name=>{
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header:1, raw:true, defval:'' });
+    const head = rows[0] || [];
+    if(String(head[0]||'').trim().toLowerCase() !== 'employee id') { res.skippedSheets.push(`${name} (not an attendance grid)`); return; }
+    isGrid = true;
+    const m = String(name).trim().match(/^([A-Za-z]+)[\s\-_.]*(\d{4})$/);
+    const mon = m && ATT_GRID_MONTHS[m[1].slice(0,3).toLowerCase()];
+    if(!m || !mon){ res.skippedSheets.push(`${name} (sheet name should look like "Jun-2026")`); return; }
+    const year = Number(m[2]);
+    const dim = new Date(year, mon, 0).getDate();
+    const sheet = { name, month:`${year}-${String(mon).padStart(2,'0')}`, count:0 };
+    rows.slice(1).forEach(row=>{
+      const id = String(row[0]||'').trim();
+      if(!id) return;
+      const user = state.users.find(u=> u.employeeId && u.employeeId.trim().toUpperCase() === id.toUpperCase());
+      if(!user){ res.unmatched[id] = (res.unmatched[id]||0) + 1; return; }
+      for(let c=2; c<head.length; c++){
+        const day = Number(head[c]);
+        if(!Number.isInteger(day) || day<1 || day>dim) continue;
+        let v = String(row[c]==null?'':row[c]).trim();
+        if(!v) continue;
+        const date = `${year}-${String(mon).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        if(date > today){ res.future++; continue; }
+        let code = v.toUpperCase();
+        if(v==='½') code='½';
+        if(code==='½SL' || code==='1/2SL' || code==='½ SL'){
+          code='½'; res.notes.push(`${user.name}, ${fmtDate(date)}: "${v}" imported as a half day (½) — there is no half sick-leave code`);
+        }
+        if(!ATT_STATUS[code]){ res.badCodes[v] = (res.badCodes[v]||0) + 1; continue; }
+        const key = attendanceKey(user.id, date);
+        const cur = state.attendance[key];
+        if(cur){ if(cur===code) res.existingSame++; else res.existingDiff++; continue; }
+        res.entries.push({ userId:user.id, date, code });
+        sheet.count++;
+        const asOf = user.leaveBalances && user.leaveBalances.asOf;
+        if(asOf && date > asOf && ['L','½','SL','C'].includes(code)) res.balanceAffecting++;
+      }
+    });
+    res.sheets.push(sheet);
+  });
+  return isGrid ? res : null;
+}
+
+function openAttendanceGridPreview(res, onDone){
+  const tally = {};
+  res.entries.forEach(e=>{ tally[e.code] = (tally[e.code]||0)+1; });
+  const tallyHtml = Object.keys(tally).map(c=>`${c}: <b>${tally[c]}</b>`).join(' &nbsp;·&nbsp; ') || 'nothing new';
+  const unm = Object.keys(res.unmatched);
+  const line = (txt, red)=>`<div class="hint" style="margin:4px 0;${red?'color:var(--red);':''}">${txt}</div>`;
+  const body = [
+    res.sheets.map(s=>`<div class="hint" style="margin:2px 0;"><b>${escAttr(s.name)}</b> → ${monthLabelLong(s.month)}: ${s.count} entries to add</div>`).join(''),
+    `<div style="margin:10px 0;font-size:13px;">${tallyHtml}</div>`,
+    res.existingSame||res.existingDiff ? line(`${res.existingSame+res.existingDiff} days already have an entry and will be left as they are (${res.existingDiff} differ from the file).`) : '',
+    res.future ? line(`${res.future} future-dated entries skipped.`) : '',
+    res.balanceAffecting ? line(`${res.balanceAffecting} leave days fall after someone's "balance as of" date, so those people's EL / SL / CO will adjust automatically.`) : line(`No leave balances will change (all these days are on or before each person's "balance as of" date).`),
+    unm.length ? line(`${unm.length} employee ID${unm.length===1?'':'s'} in the file don't match anyone here and will be skipped: ${unm.map(escAttr).join(', ')}.`, true) : '',
+    Object.keys(res.badCodes).length ? line(`Unrecognised codes skipped: ${Object.entries(res.badCodes).map(([k,n])=>`${escAttr(k)} ×${n}`).join(', ')}.`, true) : '',
+    res.skippedSheets.length ? line(`Sheets skipped: ${res.skippedSheets.map(escAttr).join('; ')}.`, true) : '',
+    res.notes.length ? line(`Please check: ${res.notes.map(escAttr).join('; ')}.`) : ''
+  ].join('');
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>Import past attendance</h3>
+        <div class="modal-sub">Review what will be added. Nothing is saved until you click Import.</div>
+        ${body}
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" id="attGridOk" class="btn btn-primary" ${res.entries.length?'':'disabled'}>Import ${res.entries.length} entries</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  const ok = document.getElementById('attGridOk');
+  if(ok) ok.addEventListener('click', ()=>{
+    res.entries.forEach(e=> setAttendanceValue(e.userId, e.date, e.code));
+    persist(); closeModal();
+    onDone(res);
+  });
+}
+
 function bindAttendanceSheet(){
   const sel = document.getElementById('attMonthSelect');
   if(sel) sel.addEventListener('change', ()=>{ ui.attendanceMonth = sel.value; render(); });
@@ -4152,6 +4248,19 @@ function bindAttendanceSheet(){
       if(typeof XLSX === 'undefined') throw new Error('The spreadsheet reader failed to load — check your connection and try again.');
       const buf = await file.arrayBuffer();
       const workbook = XLSX.read(buf, { type: 'array', cellDates: false });
+      const grid = parseAttendanceGrid(workbook);
+      if(grid){
+        if(statusEl) statusEl.innerHTML = '';
+        openAttendanceGridPreview(grid, r=>{
+          const last = r.sheets.length ? r.sheets[r.sheets.length-1].month : null;
+          if(last) ui.attendanceMonth = last;
+          render();
+          const st = document.getElementById('attImportStatus');
+          if(st) st.innerHTML = `<div class="hint" style="color:var(--green);margin-bottom:10px;">Imported ${r.entries.length} past attendance entries.</div>`;
+        });
+        importFile.value = '';
+        return;
+      }
       const result = processAttendanceImport(workbook);
       if(result.error){
         if(statusEl) statusEl.innerHTML = `<div class="hint" style="color:var(--red);margin-bottom:10px;">${result.error}</div>`;

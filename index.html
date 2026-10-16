@@ -3844,7 +3844,8 @@ const ATT_STATUS = { P:{label:'Present',color:'#1F8A47'}, L:{label:'Leave',color
 // accrues automatically. From Jan 2027 each 1st-of-month adds 1 EL and 0.5 SL.
 // EL and Comp off carry forward into the next year; unused SL does not — it
 // resets to zero on 1 Jan each year (from 2027), before that month's credit.
-const LEAVE_ACCRUAL = { startMonth:'2027-01', el:1, sl:0.5 };
+// On each 1 Jan, all CO carries forward, EL carries forward up to 45, SL is zeroed.
+const LEAVE_ACCRUAL = { startMonth:'2027-01', el:1, sl:0.5, elCarryMax:45 };
 function leaveBalanceFor(u){
   const lb = u && u.leaveBalances;
   if(!lb) return null;
@@ -3872,7 +3873,7 @@ function leaveBalanceFor(u){
     const first = `${ay}-${String(am).padStart(2,'0')}-01`;
     if(first > today) break;
     if(first > asOf){
-      if(am===1) ev.push([first,0,'slreset',0]);
+      if(am===1) ev.push([first,0,'slreset',0]); // also applies the EL carry-forward cap
       ev.push([first,0,'el',LEAVE_ACCRUAL.el]);
       ev.push([first,0,'sl',LEAVE_ACCRUAL.sl]);
     }
@@ -3881,7 +3882,7 @@ function leaveBalanceFor(u){
   // Same day: reset first, then credits, then attendance (stable by order flag).
   ev.sort((x,y)=> x[0]<y[0]?-1 : x[0]>y[0]?1 : x[1]-y[1]);
   ev.forEach(([d,o,type,amt])=>{
-    if(type==='el') el+=amt; else if(type==='sl') sl+=amt; else if(type==='co') co+=amt; else if(type==='slreset') sl=0;
+    if(type==='el') el+=amt; else if(type==='sl') sl+=amt; else if(type==='co') co+=amt; else if(type==='slreset'){ sl=0; if(el>LEAVE_ACCRUAL.elCarryMax) el=LEAVE_ACCRUAL.elCarryMax; }
   });
   return { el, sl, co, asOf: lb.asOf };
 }
@@ -4009,7 +4010,11 @@ function renderAttendanceSheet(node){
       const v = bal[key];
       return `<td class="att-bal"${clickable} ${tip}><b style="${v<0?'color:var(--red);':''}">${fmtBal(v)}</b></td>`;
     };
-    return `<tr><td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${balCell('el','Earned Leave')}${balCell('sl','Sick Leave')}${balCell('co','Comp off')}${cells}</tr>`;
+    const tlTotal = bal ? bal.el + bal.sl + bal.co : null;
+    const tlCell = bal
+      ? `<td class="att-bal" data-tooltip="Total balance (EL + SL + CO)"><b style="${tlTotal<0?'color:var(--red);':''}">${fmtBal(tlTotal)}</b></td>`
+      : `<td class="att-bal"><span class="muted">—</span></td>`;
+    return `<tr><td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td><td class="att-name">${u.name}</td>${balCell('el','Earned Leave')}${balCell('sl','Sick Leave')}${balCell('co','Comp off')}${tlCell}${cells}</tr>`;
   }).join('');
 
   const legend = Object.entries(ATT_STATUS).map(([code,v])=>
@@ -4036,12 +4041,12 @@ function renderAttendanceSheet(node){
     <div id="attImportStatus"></div>
 
     <div style="margin-bottom:6px;">${legend}</div>
-    <div class="hint" style="margin-bottom:14px;">EL / SL / CO = balances available today. L uses 1 EL (½ uses 0.5 EL), SL uses 1 SL, C on a working day uses 1 CO, and C on a weekly off adds 1 CO. From Jan 2027, 1 EL and 0.5 SL are added on the 1st of each month; EL and CO carry forward, SL resets each 1 Jan.${admin?' Click a balance to update it.':''}</div>
+    <div class="hint" style="margin-bottom:14px;">EL / SL / CO = balances available today; TL = EL + SL + CO. L uses 1 EL (½ uses 0.5 EL), SL uses 1 SL, C on a working day uses 1 CO, and C on a weekly off adds 1 CO. From Jan 2027, 1 EL and 0.5 SL are added on the 1st of each month; on each 1 Jan all CO and up to 45 EL carry forward, and SL resets to 0.${admin?' Click a balance to update it.':''}</div>
 
     <div class="att-wrap">
       <table class="att-table">
-        <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th><th data-tooltip="Earned Leave balance">EL</th><th data-tooltip="Sick Leave balance">SL</th><th data-tooltip="Comp off balance">CO</th>${dayHeaders}</tr></thead>
-        <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+5}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
+        <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th><th data-tooltip="Earned Leave balance">EL</th><th data-tooltip="Sick Leave balance">SL</th><th data-tooltip="Comp off balance">CO</th><th data-tooltip="Total balance (EL + SL + CO)">TL</th>${dayHeaders}</tr></thead>
+        <tbody>${bodyRows || `<tr><td colspan="${daysInMonth+6}" class="empty-state">No one to show yet.</td></tr>`}</tbody>
       </table>
     </div>
     ${!admin ? '<div class="footnote">Only admins can enter attendance.</div>' : ''}

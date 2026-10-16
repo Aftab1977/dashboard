@@ -640,12 +640,14 @@ const DEFAULT_DASHBOARD_WIDGET_ORDER = ['wg_active','wg_ontrack','wg_overdue','w
 // USER_ASSIGNABLE_ROLES below — it's a protected role, never handed out through
 // the normal create/edit-user flow.
 const ROLE_INFO = [
+  { id:'ceo', name:'CEO', short:'sees everything, can only create and manage their own workstreams', desc:"Can view everything — every workstream, attendance, appraisal, assignments and reports — but can't change anything, except workstreams: the CEO can create workstreams, add tasks, and edit or delete only the workstreams (and their tasks) they created." },
   { id:'admin', name:'Admin', short:'full access to everything', desc:'Full access to everything — every workstream, all settings, user/team/role management, Appraisal, the employee directory, and Copilot Analytics.' },
   { id:'hod', name:'HOD', short:"monitors a team's work, not usually assigned tasks directly", desc:"Monitors a team's work rather than being assigned tasks directly — sees the full Active Assignments view (not just their own row), and can still be assigned a task if needed. Excluded from the Team Capacity widget's occupied/free count, since counting them would misrepresent who actually has spare capacity." },
   { id:'member', name:'Member', short:'assigned to a team, works on tasks', desc:"Assigned to a team, works on tasks directly. Sees only their own row on Active Assignments, and only the workstreams they (or their team) actually have a task in." },
   { id:'viewer', name:'Viewer', short:'read-only, no task assignments', desc:'Read-only — never assigned tasks. Sees specific workstreams (or all of them) exactly as an admin has granted, and can optionally be given visibility into Active Assignments.' },
 ];
 const USER_ASSIGNABLE_ROLES = ROLE_INFO.filter(r=>r.id!=='admin');
+// Admin is not offered when creating users, and the cards on the Roles page keep Admin first.
 const DASHBOARD_WIDGET_META = {
   wg_active: { label:'Active Workstreams', module:'Workstreams', moduleId:'feat_workstream',
     description:'Shows how many of your visible, active workstreams there are right now, plus the average time it takes a workstream to go from open to closed, and whether that average is trending up or down compared to last quarter.' },
@@ -733,7 +735,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', portfolioTitle:'', portfolioGroup:'', portfolioSearch:'', openGroups:{}, reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null, hasSupabaseSession:false };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', portfolioTitle:'', portfolioGroup:'', portfolioSearch:'', openGroups:{}, company:'all', companyUserId:null, reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null, hasSupabaseSession:false };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
 let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
@@ -1378,6 +1380,21 @@ function normalizeState(s){
       if(s.attendance[key]==='R' || s.attendance[key]==='REVIEW') delete s.attendance[key];
     });
   }
+  // Companies: keep the list clean, tag every workstream with a company (the first
+  // one if it has none yet), and drop stale company references on users.
+  if(!Array.isArray(s.companies)) s.companies = [];
+  s.companies = s.companies.filter(c=>c && c.id && c.name);
+  {
+    const cids = s.companies.map(c=>c.id);
+    if(Array.isArray(s.projects)) s.projects.forEach(p=>{
+      if(p.companyId && !cids.includes(p.companyId)) delete p.companyId;
+      if(!p.companyId && cids.length) p.companyId = cids[0];
+    });
+    if(Array.isArray(s.users)) s.users.forEach(u=>{
+      if(Array.isArray(u.companyIds)) u.companyIds = u.companyIds.filter(id=>cids.includes(id));
+      if(u.defaultCompanyId && !cids.includes(u.defaultCompanyId)) delete u.defaultCompanyId;
+    });
+  }
   if(!Array.isArray(s.settings.dashboardWidgetOrder)) s.settings.dashboardWidgetOrder = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
   else {
     // Keep this in sync if the widget set itself ever changes — add any new
@@ -1612,15 +1629,97 @@ async function persistSession(){
 
 function currentUser(){ return state.users.find(u=>u.id===session.userId) || null; }
 function isAdmin(){ const u = currentUser(); return u && u.role==='admin'; }
+// Widgets some roles aren't meant to see: Spend is admin-only; Team Capacity and
+// Today's Attendance are for HOD, Admin and CEO only.
+function widgetAllowed(id){
+  const u = currentUser();
+  if(id==='wg_spend') return isAdmin();
+  if(id==='wg_capacity' || id==='wg_attendance') return !!u && ['admin','ceo','hod'].includes(u.role);
+  return true;
+}
+function isCEO(){ const u = currentUser(); return !!u && u.role==='ceo'; }
+// Who may create a workstream: admins, and the CEO.
+function canCreateProject(){ return isAdmin() || isCEO(); }
+// Who may edit/delete a workstream and manage its tasks: admins always; the CEO only
+// for workstreams they created themselves. Accepts a project object or a project id.
+function canManageProject(p){
+  if(isAdmin()) return true;
+  const cu = currentUser();
+  if(!cu || cu.role!=='ceo') return false;
+  const proj = (p && typeof p==='object') ? p : state.projects.find(x=>x.id===p);
+  return !!proj && proj.createdById===cu.id;
+}
 
 // null = unrestricted (sees everything). Otherwise an array of project ids the
 // current user is allowed to see: admins see everything, viewers see whatever
 // the admin assigned them ('all' or a specific list), and regular members only
 // see projects where they (or their team) actually have a task assigned.
+/* ---------- Companies ----------
+   Two or more companies can live in one workspace. With fewer than two, none of this
+   is visible. Each workstream belongs to one company; each user has a set of
+   accessible companies and a default one. The company filter is ONE shared choice
+   across Workstreams, Active Assignments, Summary and Reports (and everything that
+   builds on the visible-workstreams list), starting at the user's default company. */
+function companiesList(){ return Array.isArray(state.companies) ? state.companies : []; }
+function multiCompany(){ return companiesList().length >= 2; }
+function companyName(id){ const c = companiesList().find(x=>x.id===id); return c ? c.name : ''; }
+// Companies this user may see. Admins always see all; anyone without an explicit list sees all.
+function userCompanyIds(u){
+  const all = companiesList().map(c=>c.id);
+  if(!u || u.role==='admin' || !Array.isArray(u.companyIds)) return all;
+  const ids = u.companyIds.filter(id=>all.includes(id));
+  return ids.length ? ids : all;
+}
+// Choices in the filter: the user's default company first, then the rest, "All" is added last.
+function orderedCompanyChoices(u){
+  const ids = userCompanyIds(u);
+  const list = companiesList().filter(c=>ids.includes(c.id));
+  const def = list.find(c=>c.id===u.defaultCompanyId);
+  return def ? [def, ...list.filter(c=>c.id!==def.id)] : list;
+}
+function companyFilterVisible(){ return multiCompany() && userCompanyIds(currentUser()).length > 1; }
+// The selected company id, or 'all'. Resets to the user's default each time a different person signs in.
+function activeCompany(){
+  const u = currentUser();
+  if(!u || !multiCompany()) return 'all';
+  const ids = userCompanyIds(u);
+  if(ui.companyUserId !== u.id){
+    ui.companyUserId = u.id;
+    ui.company = (u.defaultCompanyId && ids.includes(u.defaultCompanyId)) ? u.defaultCompanyId : 'all';
+  }
+  if(ids.length === 1) return ids[0];
+  if(ui.company !== 'all' && !ids.includes(ui.company)) ui.company = 'all';
+  return ui.company || 'all';
+}
+// Company ids currently in scope for this user, or null when companies don't apply.
+function companyScopeIds(){
+  if(!multiCompany()) return null;
+  const u = currentUser();
+  if(!u) return null;
+  const ids = userCompanyIds(u);
+  const sel = activeCompany();
+  return sel==='all' ? ids : [sel];
+}
+function companyFilterHTML(){
+  if(!companyFilterVisible()) return '';
+  const u = currentUser(), sel = activeCompany();
+  return `<select id="companyFilter" aria-label="Filter by company">${orderedCompanyChoices(u).map(c=>`<option value="${escAttr(c.id)}" ${sel===c.id?'selected':''}>${escAttr(c.name)}</option>`).join('')}<option value="all" ${sel==='all'?'selected':''}>All</option></select>`;
+}
+function bindCompanyFilter(){
+  const cf = document.getElementById('companyFilter');
+  if(cf) cf.addEventListener('change', ()=>{ ui.company = cf.value; render(); });
+}
 function accessibleProjectIds(){
+  const base = baseAccessibleProjectIds();
+  const scope = companyScopeIds();
+  if(scope === null) return base;
+  const pool = base===null ? state.projects : state.projects.filter(p=>base.includes(p.id));
+  return pool.filter(p=>scope.includes(p.companyId)).map(p=>p.id);
+}
+function baseAccessibleProjectIds(){
   const u = currentUser();
   if(!u) return [];
-  if(u.role==='admin') return null;
+  if(u.role==='admin' || u.role==='ceo') return null;
   if(u.role==='viewer'){
     if(u.viewerProjectIds==='all') return null;
     return Array.isArray(u.viewerProjectIds) ? u.viewerProjectIds : [];
@@ -2028,7 +2127,7 @@ function renderWorkstreamWidgets(m){
   };
   const order = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
   const enabled = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
-  const orderedHtml = order.filter(id=>enabled.has(id) && (id!=='wg_spend' || isAdmin())).map(id=>widgetsById[id]).filter(Boolean);
+  const orderedHtml = order.filter(id=>enabled.has(id) && widgetAllowed(id)).map(id=>widgetsById[id]).filter(Boolean);
   if(!orderedHtml.length){
     return `<div class="muted" style="font-size:13px;padding:20px;text-align:center;">All widgets are turned off. Turn some back on from My Account &gt; Widgets.</div>`;
   }
@@ -2055,7 +2154,7 @@ function isTaggedToProject(projectId){
 function canSeeAssignmentsPage(){
   const u = currentUser();
   if(!u) return false;
-  if(u.role==='admin' || u.role==='member' || u.role==='hod') return true;
+  if(u.role==='admin' || u.role==='ceo' || u.role==='member' || u.role==='hod') return true;
   if(u.role==='viewer') return !!u.viewerCanSeeAssignments;
   return false;
 }
@@ -2064,6 +2163,7 @@ function canSeeAssignmentsPage(){
 function canEditTask(t){
   const cu = currentUser();
   if(isAdmin()) return true;
+  if(cu && cu.role==='ceo') return canManageProject(t.projectId);
   if(!cu || cu.role==='viewer') return false;
   const isAssignedToMe = (t.assignedType==='user' && t.assignedId===cu.id) || (t.assignedType==='team' && t.assignedId===cu.teamId);
   return isAssignedToMe && t.status!=='closed';
@@ -2280,6 +2380,7 @@ function render(){
   `;
   bindGlobalNav();
   bindView();
+  bindCompanyFilter();
   if(isNavigation) window.scrollTo(0, 0);
   renderAiAgentWidget();
 }
@@ -3469,6 +3570,15 @@ function wsTitles(){ return [...new Set(state.projects.map(p=>(p.title||'').trim
 function wsGroupsOf(title){ return [...new Set(state.projects.filter(p=>(p.title||'').trim()===title).map(p=>(p.group||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b)); }
 function canonTitle(raw){ const v=(raw||'').trim(); if(!v) return ''; return wsTitles().find(t=>t.toLowerCase()===v.toLowerCase()) || v; }
 function canonGroup(title, raw){ const v=(raw||'').trim(); if(!title||!v) return ''; return wsGroupsOf(title).find(g=>g.toLowerCase()===v.toLowerCase()) || v; }
+// Company picker for create/edit workstream — only shown once there are 2+ companies.
+function companyFieldHTML(pf, selectedId){
+  if(!multiCompany()) return '';
+  const ids = userCompanyIds(currentUser());
+  const opts = companiesList().filter(c=>ids.includes(c.id) || c.id===selectedId);
+  return `<div class="field"><label>Company</label>
+    <select id="${pf}Company"><option value="">Select company…</option>${opts.map(c=>`<option value="${escAttr(c.id)}" ${c.id===selectedId?'selected':''}>${escAttr(c.name)}</option>`).join('')}</select>
+    <div class="hint">Which company this workstream belongs to — required.</div></div>`;
+}
 function titleGroupFieldsHTML(pf, p){
   const t=(p&&p.title)||'', g=(p&&p.group)||'';
   return `
@@ -3549,6 +3659,7 @@ function renderPortfolio(){
       <div class="ws-name">
         <div class="pname" title="${String(s.p.name).replace(/"/g,'&quot;')}">${s.p.name}</div>
         <div class="eyebrow">${s.tasks.length} task${s.tasks.length===1?'':'s'}</div>
+        ${multiCompany() && s.p.companyId ? `<div class="ws-path"><b>${escAttr(companyName(s.p.companyId))}</b></div>` : ''}
         ${(s.p.title||'').trim() ? `<div class="ws-path" title="${escAttr((s.p.title||'')+((s.p.group||'').trim()?' › '+s.p.group:''))}"><b>${escAttr(s.p.title)}</b>${(s.p.group||'').trim()?' › '+escAttr(s.p.group):''}</div>` : ''}
       </div>
       <div class="ws-tags">${pill(s.isClosedProject?'green':'amber', s.isClosedProject?'Closed':(s.isFutureProject?'Future':'Open'))}${priorityBadge(s.p)}</div>
@@ -3604,6 +3715,7 @@ function renderPortfolio(){
     </div>
 
     <div class="filters ws-filters">
+      ${companyFilterHTML()}
       <select id="portfolioFilter">
         <option value="open" ${filter==='open'?'selected':''}>Open workstreams</option>
         <option value="closed" ${filter==='closed'?'selected':''}>Closed workstreams</option>
@@ -3624,7 +3736,7 @@ function renderPortfolio(){
     <div class="ws-list">
       ${cards || `<div class="empty-state"><div class="et">No workstreams to show</div>${allProjects.length ? 'Try a different filter.' : 'Create one from Admin.'}</div>`}
     </div>
-    ${isAdmin() ? `<div style="margin-top:22px;"><button class="btn btn-primary" data-nav="admin">+ New workstream</button></div>` : ''}
+    ${isAdmin() ? `<div style="margin-top:22px;"><button class="btn btn-primary" data-nav="admin">+ New workstream</button></div>` : (isCEO() ? `<div style="margin-top:22px;"><button class="btn btn-primary" id="ceoNewWsBtn">+ New workstream</button></div>` : '')}
   `;
 }
 
@@ -3636,6 +3748,8 @@ function bindPortfolio(){
     c.addEventListener('click', ()=>{ ui.projectId = c.dataset.openProjectRow; ui.view='project'; render(); });
   });
   document.querySelectorAll('[data-nav="admin"]').forEach(b=>b.addEventListener('click', ()=>{ ui.view='admin'; render(); }));
+  const ceoNew = document.getElementById('ceoNewWsBtn');
+  if(ceoNew) ceoNew.addEventListener('click', openAddProjectModal);
   const filterSel = document.getElementById('portfolioFilter');
   if(filterSel) filterSel.addEventListener('change', ()=>{ ui.portfolioFilter = filterSel.value; render(); });
   const titleSel = document.getElementById('portfolioTitle');
@@ -3683,6 +3797,9 @@ function hasNodeAccessOrDescendant(userId, nodeId){
 // The single check to use anywhere a node's visibility matters — admins always pass.
 function canSeeNode(nodeId){
   if(isAdmin()) return true;
+  // Appraisal (salary details) is for Admin and CEO only — hidden from everyone else.
+  const apNode = featureNode(nodeId);
+  if(apNode && apNode.specialView==='appraisal' && !isCEO()) return false;
   const cu = currentUser();
   if(!cu) return false;
   // Summary module is granted at the module level only — Year and Month nodes
@@ -3856,7 +3973,7 @@ function renderAttendanceSheet(node){
   const admin = isAdmin();
   const cu = currentUser();
   // Admins see the whole team; anyone else only ever sees their own attendance row.
-  const rows = admin ? state.users.filter(u=>u.role!=='viewer') : (cu ? [cu] : []);
+  const rows = (admin || isCEO()) ? state.users.filter(u=>u.role!=='viewer') : (cu ? [cu] : []);
 
   const dayHeaders = Array.from({length:daysInMonth},(_,i)=>{
     const day=i+1;
@@ -4217,12 +4334,13 @@ function fmtMoney(n){
 
 function renderAppraisalSheet(node){
   const admin = isAdmin();
-  if(!admin){
+  const apHint = admin ? "Click a row to fill in or update that person's appraisal details." : "Read-only view — only an admin can change appraisal details.";
+  if(!admin && !isCEO()){
     return `
       ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Heading', node.name, headingColorForNode(node)) : `
       <div class="eyebrow">Heading</div>
       <h1 class="page-title" style="margin-bottom:16px;">${node.name}</h1>`}
-      <div class="empty-state"><div class="et">Admins only</div>Appraisal and salary details are restricted to admins.</div>
+      <div class="empty-state"><div class="et">Admins only</div>Appraisal and salary details are restricted to the admin and the CEO.</div>
     `;
   }
   const rows = state.users.filter(u=>u.role!=='viewer');
@@ -4235,7 +4353,7 @@ function renderAppraisalSheet(node){
       ? `${fmtDate(rec.lastAppraisalDate)}${overdue ? ' <span class="pill pill-red" style="margin-left:4px;">Review due</span>' : ''}`
       : '';
     return `
-      <tr data-appraisal-row="${u.id}" style="cursor:pointer;">
+      <tr data-appraisal-row="${u.id}" style="cursor:${admin?'pointer':'default'};">
         <td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td>
         <td class="att-name">${u.name}</td>
         <td class="appraisal-cell">${rec.designation||''}</td>
@@ -4254,8 +4372,8 @@ function renderAppraisalSheet(node){
     ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Heading', node.name, headingColorForNode(node)) : `
     <div class="eyebrow">Heading</div>
     <h1 class="page-title" style="margin-bottom:6px;">${node.name}</h1>
-    <div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>`}
-    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<div class="muted" style="font-size:12px;margin-bottom:16px;">Click a row to fill in or update that person's appraisal details. <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>` : ''}
+    <div class="muted" style="font-size:12px;margin-bottom:16px;">${apHint} <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>`}
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<div class="muted" style="font-size:12px;margin-bottom:16px;">${apHint} <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>` : ''}
     <div class="att-wrap">
       <table class="att-table" style="font-size:12px;">
         <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
@@ -4266,6 +4384,7 @@ function renderAppraisalSheet(node){
 }
 
 function bindAppraisalSheet(){
+  if(!isAdmin()) return;
   document.querySelectorAll('[data-appraisal-row]').forEach(el=>{
     el.addEventListener('click', ()=> openAppraisalEditModal(el.dataset.appraisalRow));
   });
@@ -4547,11 +4666,13 @@ function renderSummaryCalendar(node){
     const dateISO = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dow = new Date(dateISO+'T00:00:00').getDay();
     let hasSummary = false;
+    const accessibleNow = accessibleProjectIds();
+    const hasVisible = sm => !!sm && sm.workstreams.some(w=> accessibleNow===null || accessibleNow.includes(w.projectId));
     if(dow===1){
       const priorMonday = mondayOf(addDays(dateISO, -3));
-      hasSummary = !!state.weeklySummaries[priorMonday];
+      hasSummary = hasVisible(state.weeklySummaries[priorMonday]);
     } else if(dow>=2 && dow<=6){
-      hasSummary = !!state.dailySummaries[addDays(dateISO, -1)];
+      hasSummary = hasVisible(state.dailySummaries[addDays(dateISO, -1)]);
     }
     cells.push(`<div class="sumcal-cell${hasSummary?' sumcal-has-summary':''}"${hasSummary?` data-summary-date="${dateISO}"`:''}>${d}</div>`);
   }
@@ -4560,6 +4681,7 @@ function renderSummaryCalendar(node){
     ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<button class="btn btn-sm" data-go-back style="margin-bottom:14px;">← Go Back</button>` : ''}
     <div class="eyebrow">Summary Calendar</div>
     <h1 class="page-title" style="display:inline-block;margin-bottom:20px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:24px;box-shadow:0 2px 8px var(--amber-glow);">${node.name}</h1>
+    ${companyFilterVisible() ? `<div class="filters ws-filters">${companyFilterHTML()}</div>` : ''}
     <div class="hint" style="margin-bottom:14px;">Click a highlighted date to see the summary that appeared that day.</div>
     <div class="sumcal-grid">
       ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="sumcal-dow">${d}</div>`).join('')}
@@ -5728,7 +5850,7 @@ function openProjectContentPreviewModal(projectId, itemId){
 // content and task attachments, plus a Text option since a workstream note doesn't
 // always need to be a file.
 function openAddProjectContentModal(projectId){
-  if(!isAdmin()) return;
+  if(!canManageProject(projectId)) return;
   const maxMB = (state.settings && state.settings.maxUploadMB) || 250;
   const ACCEPT = { image:'image/*', document:'.pdf,.doc,.docx,.xls,.xlsx', video:'video/*' };
   const div = document.createElement('div');
@@ -6045,7 +6167,7 @@ function renderProject(){
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           ${pill(status, status==='red' ? `Delayed ${tl.delay}d${delayNames.length ? ' by '+delayNames.join(', ') : ''}` : 'On agreed timeline')}
           ${blockingTeams.length ? `<span class="pill pill-blocker pill-blink" data-tooltip="${blockedDetailForProject(p.id).replace(/"/g,'&quot;')}"><span class="dot"></span>Blocked by ${blockingTeams.join(', ')}</span>` : ''}
-          ${isAdmin()
+          ${canManageProject(p)
             ? `<select id="projPrioritySelect" data-tooltip="Change priority" style="background:${priorityMeta(p).color};color:#fff;border:none;border-radius:20px;padding:5px 12px;font-size:12.5px;font-weight:700;cursor:pointer;">
                 <option value="high" ${p.priority==='high'?'selected':''}>High Priority</option>
                 <option value="medium" ${(!p.priority||p.priority==='medium')?'selected':''}>Medium Priority</option>
@@ -6102,7 +6224,8 @@ function renderProject(){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div class="section-title" style="margin-bottom:0;">Tasks</div>
         <div style="display:flex;gap:8px;">
-          ${(isAdmin() || isTaggedToProject(p.id)) ? `<button class="btn btn-sm" data-add-task>+ Add blank task</button>` : ''}
+          ${(isAdmin() || canManageProject(p) || isTaggedToProject(p.id)) ? `<button class="btn btn-sm" data-add-task>+ Add blank task</button>` : ''}
+          ${(!isAdmin() && canManageProject(p)) ? `<button class="btn btn-sm" data-ceo-edit-ws="${p.id}">Edit workstream</button><button class="btn btn-sm btn-danger" data-ceo-del-ws="${p.id}">Delete workstream</button>` : ''}
           <button class="btn btn-sm btn-ghost" data-view-report>Open in reports</button>
         </div>
       </div>
@@ -6122,6 +6245,11 @@ function bindProject(){
     const p = state.projects.find(x=>x.id===ui.projectId);
     if(p){ p.priority = prioritySelect.value; persist(); render(); }
   });
+  document.querySelectorAll('[data-ceo-edit-ws]').forEach(b=>b.addEventListener('click', ()=> openEditProjectModal(b.dataset.ceoEditWs)));
+  document.querySelectorAll('[data-ceo-del-ws]').forEach(b=>b.addEventListener('click', ()=>{
+    const pr = state.projects.find(x=>x.id===b.dataset.ceoDelWs);
+    if(pr) openDeleteProjectModal(pr.id, pr.name, projectTasks(pr.id).length);
+  }));
   const wsInfo = document.querySelector('[data-open-workstream-info]');
   if(wsInfo) wsInfo.addEventListener('click', ()=> openWorkstreamInfoModal(wsInfo.dataset.openWorkstreamInfo));
   document.querySelectorAll('[data-edit-task]').forEach(el=>{
@@ -6210,7 +6338,7 @@ function predecessorOptions(projectId, excludeId, selected){
 function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
 function openBlankTaskModal(projectId){
-  const admin = isAdmin();
+  const admin = isAdmin() || canManageProject(projectId);
   const cu = currentUser();
   if(!admin && !isTaggedToProject(projectId)) return;
   document.getElementById('modalRoot').innerHTML = `
@@ -6412,7 +6540,7 @@ function openTaskModal(taskId){
   const t = state.tasks.find(x=>x.id===taskId);
   if(!t) return;
   if(!canEditTask(t)) return; // closed tasks are admin-only from here on
-  const admin = isAdmin();
+  const admin = isAdmin() || canManageProject(t.projectId);
   const canEdit = true; // guaranteed by the check above — kept as a named constant for clarity in the template
   const firstTimeSave = !t.datesLocked; // dates are only part of THIS form before they're ever locked
   document.getElementById('modalRoot').innerHTML = `
@@ -7001,6 +7129,7 @@ function renderReports(){
       <div class="card">
         <div class="section-title">Filter</div>
         <div class="filters">
+          ${companyFilterHTML()}
           <select id="fProject"><option value="">All workstreams</option>${scopedProjects.map(p=>`<option value="${p.id}" ${f.project===p.id?'selected':''}>${p.name}</option>`).join('')}</select>
           <select id="fTeam"><option value="">All teams</option>${state.teams.map(t=>`<option value="${t.id}" ${f.team===t.id?'selected':''}>${t.name}</option>`).join('')}</select>
           <select id="fUser"><option value="">All individuals</option>${state.users.filter(u=>u.role!=='admin').map(u=>`<option value="${u.id}" ${f.user===u.id?'selected':''}>${u.name}</option>`).join('')}</select>
@@ -7591,6 +7720,7 @@ function renderAssignments(){
     </div>
 
     <div class="filters">
+      ${companyFilterHTML()}
       ${!isMemberSelf ? `<select id="asgViewBy">
         <option value="individual" ${viewBy==='individual'?'selected':''}>View by individual</option>
         <option value="team" ${viewBy==='team'?'selected':''}>View by team</option>
@@ -7712,7 +7842,7 @@ function renderMyAccount(){
     {id:'maroon', name:'Maroon', desc:'A deep, formal maroon.', swatch:'#7A1F2B'},
     {id:'brown', name:'Dark Brown', desc:'A warm, understated brown.', swatch:'#4A3728'}
   ];
-  const widgetOrder = ((cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER).filter(id=> id!=='wg_spend' || isAdmin());
+  const widgetOrder = ((cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER).filter(id=> widgetAllowed(id));
   const enabledSet = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
   const widgetCards = widgetOrder.map(id=>{
     const meta = DASHBOARD_WIDGET_META[id] || {};
@@ -7908,41 +8038,43 @@ function renderAdmin(){
       <button class="tab ${ui.adminTab==='users'?'active':''}" data-tab="users">Users</button>
       <button class="tab ${ui.adminTab==='permRoles'?'active':''}" data-tab="permRoles">Roles</button>
       <button class="tab ${ui.adminTab==='teams'?'active':''}" data-tab="teams">Teams</button>
+      <button class="tab ${ui.adminTab==='companies'?'active':''}" data-tab="companies">Companies</button>
       <button class="tab ${ui.adminTab==='projects'?'active':''}" data-tab="projects">Workstreams</button>
       <button class="tab ${ui.adminTab==='settings'?'active':''}" data-tab="settings">Admin</button>
       <button class="tab ${ui.adminTab==='copilotAnalytics'?'active':''}" data-tab="copilotAnalytics">Copilot Analytics</button>
     </div>
-    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='permRoles' ? renderAdminPermRoles() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='settings' ? renderAdminSettings() : ui.adminTab==='copilotAnalytics' ? renderCopilotAnalytics() : renderAdminProjects()}
+    ${ui.adminTab==='users' ? renderAdminUsers() : ui.adminTab==='permRoles' ? renderAdminPermRoles() : ui.adminTab==='teams' ? renderAdminTeams() : ui.adminTab==='companies' ? renderAdminCompanies() : ui.adminTab==='settings' ? renderAdminSettings() : ui.adminTab==='copilotAnalytics' ? renderCopilotAnalytics() : renderAdminProjects()}
   `;
 }
 
 function renderAdminUsers(){
   const admin = currentUser();
-  const rows = state.users.filter(u=>u.role!=='admin').map(u=>{
+  const rows = [...state.users.filter(u=>u.role==='admin'), ...state.users.filter(u=>u.role!=='admin')].map(u=>{
     const isViewer = u.role==='viewer';
+    const isAdminRow = u.role==='admin';
     const accessLabel = isViewer ? (u.viewerProjectIds==='all' ? 'All workstreams' : `${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length} workstream${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length===1?'':'s'}`) : '—';
     return `<tr>
       <td><div class="userchip"><div class="initials">${initials(u.name)}</div>${u.name}</div></td>
       <td class="mono" style="font-size:12px;">${u.username}</td>
-      <td>${isViewer ? pill('amber','Viewer') : `
+      <td>${isAdminRow ? pill('amber','Admin') : isViewer ? pill('amber','Viewer') : `
         <select data-user-role="${u.id}">
           ${USER_ASSIGNABLE_ROLES.filter(r=>r.id!=='viewer').map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${r.name}</option>`).join('')}
         </select>`}</td>
       <td>
-        ${isViewer ? `<span class="mono" style="font-size:12px;">${accessLabel}</span>` : `
+        ${isAdminRow ? `<span class="mono" style="font-size:12px;">—</span>` : isViewer ? `<span class="mono" style="font-size:12px;">${accessLabel}</span>` : `
         <select data-user-team="${u.id}">
           <option value="">Unassigned</option>
           ${state.teams.map(t=>`<option value="${t.id}" ${u.teamId===t.id?'selected':''}>${t.name}</option>`).join('')}
         </select>`}
       </td>
-      <td><button class="btn btn-sm" data-manage-node-access="${u.id}">Access</button></td>
+      <td>${isAdminRow ? `<span class="mono" style="font-size:12px;">Full access</span>` : `<button class="btn btn-sm" data-manage-node-access="${u.id}">Access</button>`}</td>
       <td><div class="row-actions">
         <button class="btn btn-sm" data-edit-user="${u.id}">Edit</button>
         ${isViewer ? `<button class="btn btn-sm" data-edit-access="${u.id}">Edit access</button>` : ''}
         ${u.phone ? `<a class="btn btn-sm" href="${waLink(u.phone, `Hi ${u.name.split(' ')[0]},`)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
         <button class="btn btn-sm" data-view-creds="${u.id}">Credentials</button>
         <button class="btn btn-sm" data-change-password="${u.id}">Change password</button>
-        <button class="btn btn-sm btn-danger" data-del-user="${u.id}">Remove</button>
+        ${isAdminRow ? '' : `<button class="btn btn-sm btn-danger" data-del-user="${u.id}">Remove</button>`}
       </div></td>
     </tr>`;
   }).join('');
@@ -8152,7 +8284,7 @@ function renderCopilotAnalytics(){
 // not built yet — this page is deliberately honest about that rather than
 // offering controls that wouldn't actually do anything.
 function renderAdminPermRoles(){
-  const cards = ROLE_INFO.map((r,ri)=>{
+  const cards = [ROLE_INFO.find(x=>x.id==='admin'), ...ROLE_INFO.filter(x=>x.id!=='admin')].map((r,ri)=>{
     const rc = isBoardroomTheme() ? boardroomColor(ri) : 'var(--amber)';
     const rglow = isBoardroomTheme() ? '0 2px 8px rgba(0,0,0,.2)' : '0 2px 8px var(--amber-glow)';
     const count = state.users.filter(u=>u.role===r.id).length;
@@ -8195,11 +8327,31 @@ function renderAdminTeams(){
     </div>`;
 }
 
+function renderAdminCompanies(){
+  const err = ui.companyAdminError ? `<div class="form-error" style="margin-bottom:12px;">${escAttr(ui.companyAdminError)}</div>` : '';
+  const rows = companiesList().map(c=>{
+    const wsCount = state.projects.filter(p=>p.companyId===c.id).length;
+    const userCount = state.users.filter(u=>u.role!=='admin' && userCompanyIds(u).includes(c.id)).length;
+    return `<tr><td>${escAttr(c.name)}</td><td class="mono" style="font-size:12px;">${wsCount} workstream${wsCount===1?'':'s'}</td><td class="mono" style="font-size:12px;">${multiCompany()?userCount+' user'+(userCount===1?'':'s'):'—'}</td><td><div class="row-actions"><button class="btn btn-sm" data-rename-company="${escAttr(c.id)}">Rename</button><button class="btn btn-sm btn-danger" data-del-company="${escAttr(c.id)}">Remove</button></div></td></tr>`;
+  }).join('');
+  const n = companiesList().length;
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Companies</div>
+        <button class="btn btn-primary btn-sm" data-add-company>+ Add company</button>
+      </div>
+      ${err}
+      <table><thead><tr><th>Company</th><th>Workstreams</th><th>Users with access</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="4" class="empty-state">No companies yet.</td></tr>`}</tbody></table>
+      <div class="footnote">${n<2 ? 'With one company nothing changes anywhere. Once you add a second company, creating a workstream asks which company it belongs to, a Company filter appears on Workstreams, Active Assignments, Summary and Reports, and each user gets a default company and accessible companies.' : 'Each workstream belongs to one company. Set each user\'s default and accessible companies under Users → Edit. A company can only be removed once it has no workstreams.'}</div>
+    </div>`;
+}
+
 function renderAdminProjects(){
   const rows = state.projects.map(p=>{
     const tl = projectTimeline(p.id);
     return `<tr>
-      <td>${p.name}</td>
+      <td>${p.name}${multiCompany() && p.companyId ? ` <span class="muted" style="font-size:11px;">· ${escAttr(companyName(p.companyId))}</span>` : ''}</td>
       <td class="mono" style="font-size:12px;">${fmtDate(p.startDate)}</td>
       <td class="mono" style="font-size:12px;">${projectTasks(p.id).length} tasks</td>
       <td>${pill(tl.isRed?'red':'green', tl.isRed?'Delayed':'On track')}</td>
@@ -8225,6 +8377,29 @@ function bindAdmin(){
     if(ui.adminTab==='copilotAnalytics' && !copilotAnalyticsData) loadCopilotAnalyticsData();
   }));
   document.querySelectorAll('[data-open-project]').forEach(b=>b.addEventListener('click', ()=>{ ui.projectId=b.dataset.openProject; ui.view='project'; render(); }));
+
+  const addCo = document.querySelector('[data-add-company]');
+  if(addCo) addCo.addEventListener('click', ()=>{ ui.companyAdminError=null; openCompanyModal(null); });
+  document.querySelectorAll('[data-rename-company]').forEach(b=>b.addEventListener('click', ()=>{ ui.companyAdminError=null; openCompanyModal(b.dataset.renameCompany); }));
+  document.querySelectorAll('[data-del-company]').forEach(b=>b.addEventListener('click', ()=>{
+    const c = companiesList().find(x=>x.id===b.dataset.delCompany);
+    if(!c) return;
+    const n = state.projects.filter(p=>p.companyId===c.id).length;
+    if(n){
+      ui.companyAdminError = `"${c.name}" can't be removed yet — it still has ${n} workstream${n===1?'':'s'}. Move ${n===1?'it':'them'} to another company first (Admin → Workstreams → Edit → Company).`;
+      render(); return;
+    }
+    ui.companyAdminError = null;
+    openConfirmDelete('Remove this company?', `This will remove "${c.name}". Users' access to it is removed too. This can't be undone.`, ()=>{
+      state.companies = state.companies.filter(x=>x.id!==c.id);
+      state.users.forEach(u=>{
+        if(Array.isArray(u.companyIds)) u.companyIds = u.companyIds.filter(id=>id!==c.id);
+        if(u.defaultCompanyId===c.id) delete u.defaultCompanyId;
+      });
+      if(ui.company===c.id) ui.company = 'all';
+      persist(); render();
+    }, 'Remove');
+  }));
 
   const addUser = document.querySelector('[data-add-user]');
   if(addUser) addUser.addEventListener('click', openAddUserModal);
@@ -8415,15 +8590,15 @@ function getMultiSelectValues(idPrefix){
 }
 
 function openEditProjectModal(projectId){
-  if(!isAdmin()) return;
   const p = state.projects.find(x=>x.id===projectId);
-  if(!p) return;
+  if(!p || !canManageProject(p)) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal" style="border-left:4px solid var(--amber);">
         <div style="display:inline-block;background:var(--amber);color:#fff;padding:6px 16px;border-radius:8px;font-size:16px;font-weight:700;box-shadow:0 2px 8px var(--amber-glow);margin-bottom:6px;">Edit workstream</div>
         <form id="editProjForm">
           <div class="field"><label>Workstream name</label><input id="epName" value="${p.name.replace(/"/g,'&quot;')}" required></div>
+          ${companyFieldHTML('ep', p.companyId)}
           ${titleGroupFieldsHTML('ep', p)}
           <div class="field"><label>Description</label><textarea id="epDescription" placeholder="Why this workstream exists, what it's for...">${(p.description||'').replace(/</g,'&lt;')}</textarea></div>
           <div class="field"><label>Tag users</label>
@@ -8472,6 +8647,9 @@ function openEditProjectModal(projectId){
     if(!nameEl.value.trim()){ formError(nameEl, 'Enter a workstream name to continue.'); return; }
     p.name = nameEl.value.trim();
     p.description = document.getElementById('epDescription').value.trim();
+    const epCo = document.getElementById('epCompany');
+    if(epCo && !epCo.value){ formError(epCo, 'Select a company for this workstream.'); return; }
+    if(epCo) p.companyId = epCo.value;
     p.taggedUserIds = getMultiSelectValues('epTag');
     const tg = readTitleGroupFields('ep');
     if(tg.title) p.title = tg.title; else delete p.title;
@@ -8481,7 +8659,7 @@ function openEditProjectModal(projectId){
 }
 
 function openDeleteProjectModal(projectId, projectName, taskCount){
-  if(!isAdmin()) return;
+  if(!canManageProject(projectId)) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
@@ -8509,6 +8687,35 @@ function openDeleteProjectModal(projectId, projectName, taskCount){
 function randomPassword(){
   const words = ['orbit','delta','ridge','maple','coral','ember','quartz','vapor','tundra','pixel'];
   return words[Math.floor(Math.random()*words.length)] + Math.floor(100+Math.random()*900);
+}
+
+// Company options for a user: default company + accessible companies. Only shown with 2+ companies.
+function userCompanyFieldsHTML(pf, u){
+  if(!multiCompany()) return '';
+  const isAdminUser = !!u && u.role==='admin';
+  const accessible = u ? userCompanyIds(u) : companiesList().map(c=>c.id);
+  const def = (u && u.defaultCompanyId) || '';
+  return `
+    <div class="field"><label>Default company</label>
+      <select id="${pf}DefaultCompany"><option value="">No default (show All)</option>${companiesList().map(c=>`<option value="${escAttr(c.id)}" ${c.id===def?'selected':''}>${escAttr(c.name)}</option>`).join('')}</select>
+      <div class="hint">The company selected in the filter whenever this person signs in.</div>
+    </div>
+    ${isAdminUser ? '' : `<div class="field" id="${pf}CoAccessField"><label>Accessible companies</label>
+      <div style="display:flex;flex-direction:column;gap:6px;">${companiesList().map(c=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;"><input type="checkbox" class="${pf}CoCheck" value="${escAttr(c.id)}" ${accessible.includes(c.id)?'checked':''}> ${escAttr(c.name)}</label>`).join('')}</div>
+      <div class="hint">Tick every company this person may see. With only one ticked they see just that company and no filter.</div>
+    </div>`}`;
+}
+// Reads and validates those fields; returns {companyIds, defaultCompanyId} or null (after showing an error).
+function readUserCompanyFields(pf, isAdminUser){
+  if(!multiCompany()) return {};
+  const defEl = document.getElementById(pf+'DefaultCompany');
+  const def = defEl.value;
+  if(isAdminUser) return { defaultCompanyId: def || undefined };
+  const ids = Array.from(document.querySelectorAll('.'+pf+'CoCheck:checked')).map(c=>c.value);
+  const anchor = document.getElementById(pf+'CoAccessField');
+  if(!ids.length){ formError(anchor ? anchor.querySelector('input') : null, 'Tick at least one company this person can access.'); return null; }
+  if(def && !ids.includes(def)){ formError(defEl, 'The default company must be one of the accessible companies — tick it below or choose another default.'); return null; }
+  return { companyIds: ids, defaultCompanyId: def || (ids.length===1 ? ids[0] : undefined) };
 }
 
 function openAddUserModal(){
@@ -8543,6 +8750,7 @@ function openAddUserModal(){
             </select>
           </div>
           <div class="field" id="uTeamField"><label>Team</label><select id="uTeam"><option value="">Unassigned</option>${state.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div>
+          ${userCompanyFieldsHTML('u', null)}
           <div class="field" id="uAccessField" style="display:none;">
             <label>Workstream access</label>
             <select id="uAccessMode">
@@ -8586,6 +8794,10 @@ function openAddUserModal(){
     const responsibilitiesRaw = document.getElementById('uResponsibilities').value.trim();
     const responsibilities = responsibilitiesRaw ? responsibilitiesRaw.split(';').map(s=>s.trim()).filter(Boolean) : [];
     const u = { id: uid('u'), name: nameEl.value.trim(), email: document.getElementById('uEmail').value.trim().toLowerCase(), employeeId: document.getElementById('uEmployeeId').value.trim(), phone: document.getElementById('uPhone').value.trim(), username: userEl.value.trim(), password: randomPassword(), role: roleSel.value, teamId: isViewer ? null : (document.getElementById('uTeam').value || null), jobTitle: document.getElementById('uJobTitle').value.trim(), responsibilities };
+    const coVals = readUserCompanyFields('u', false);
+    if(coVals===null) return;
+    if(coVals.companyIds) u.companyIds = coVals.companyIds;
+    if(coVals.defaultCompanyId) u.defaultCompanyId = coVals.defaultCompanyId;
     const balVals = ['uBalEl','uBalSl','uBalCo'].map(id=>document.getElementById(id).value);
     if(!isViewer && balVals.some(v=>v!=='')){
       u.leaveBalances = { el: parseFloat(balVals[0])||0, sl: parseFloat(balVals[1])||0, co: parseFloat(balVals[2])||0, asOf: todayISO() };
@@ -8823,6 +9035,7 @@ function openEditUserModal(userId){
             <input id="euResponsibilities" value="${(u.responsibilities||[]).join('; ').replace(/"/g,'&quot;')}" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
             <div class="hint">Separate each one with a semicolon (;). Workspace CoPilot can answer "who's responsible for X" from this.</div>
           </div>
+          ${userCompanyFieldsHTML('eu', u)}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="editUserSubmitBtn" class="btn btn-primary">Save</button>
@@ -8842,7 +9055,48 @@ function openEditUserModal(userId){
     u.employeeId = document.getElementById('euEmployeeId').value.trim();
     u.phone = document.getElementById('euPhone').value.trim();
     u.jobTitle = document.getElementById('euJobTitle').value.trim();
+    const euCo = readUserCompanyFields('eu', u.role==='admin');
+    if(euCo===null) return;
+    if(multiCompany()){
+      if(euCo.companyIds) u.companyIds = euCo.companyIds;
+      if(euCo.defaultCompanyId) u.defaultCompanyId = euCo.defaultCompanyId; else delete u.defaultCompanyId;
+      ui.companyUserId = null; // re-apply their default next time it is read
+    }
     u.responsibilities = raw ? raw.split(';').map(s=>s.trim()).filter(Boolean) : [];
+    persist(); closeModal(); render();
+  });
+}
+
+// Add or rename a company. Names must be unique.
+function openCompanyModal(companyId){
+  if(!isAdmin()) return;
+  const existing = companyId ? companiesList().find(c=>c.id===companyId) : null;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>${existing ? 'Rename company' : 'Add company'}</h3>
+        <form id="companyForm">
+          <div class="field"><label>Company name</label><input id="coName" value="${existing?escAttr(existing.name):''}" required></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+            <button type="button" id="companySubmitBtn" class="btn btn-primary">${existing ? 'Save' : 'Add'}</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  bindModalClose();
+  runOnClickAndEnter('companyForm', 'companySubmitBtn', ()=>{
+    const el = document.getElementById('coName');
+    const name = el.value.trim();
+    if(!name){ formError(el, 'Enter the company name to continue.'); return; }
+    if(companiesList().some(c=>c.id!==companyId && c.name.toLowerCase()===name.toLowerCase())){ formError(el, 'A company with this name already exists.'); return; }
+    if(existing){ existing.name = name; }
+    else {
+      if(!Array.isArray(state.companies)) state.companies = [];
+      state.companies.push({ id: uid('co'), name });
+      // Anything not yet tagged (older workstreams) goes under the first company.
+      state.projects.forEach(p=>{ if(!p.companyId) p.companyId = state.companies[0].id; });
+    }
     persist(); closeModal(); render();
   });
 }
@@ -8928,13 +9182,14 @@ function openManageChecklistModal(teamId){
 }
 
 function openAddProjectModal(){
-  if(!isAdmin()) return;
+  if(!canCreateProject()) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
       <div class="modal">
         <h3>Create workstream</h3>
         <form id="projForm">
           <div class="field"><label>Workstream name</label><input id="pName" required></div>
+          ${companyFieldHTML('p', '')}
           ${titleGroupFieldsHTML('p', null)}
           <div class="field"><label>Start date</label><input type="date" id="pStart" value="${todayISO()}" required></div>
           <div class="field"><label>Description (optional)</label><textarea id="pDescription" placeholder="Why this workstream exists, what it's for..."></textarea></div>
@@ -8988,6 +9243,8 @@ function openAddProjectModal(){
     const nameEl = document.getElementById('pName');
     const startEl = document.getElementById('pStart');
     if(!nameEl.value.trim()){ formError(nameEl, 'Enter a workstream name to continue.'); return; }
+    const coEl = document.getElementById('pCompany');
+    if(coEl && !coEl.value){ formError(coEl, 'Select a company to create this workstream.'); return; }
     if(!startEl.value){ formError(startEl, 'Pick a start date to create this workstream.'); return; }
     const errEl = document.getElementById('pContentError');
     errEl.textContent = '';
@@ -9015,7 +9272,7 @@ function openAddProjectModal(){
       }
     }
     const taggedUserIds = getMultiSelectValues('pTag');
-    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, contentItems: contentItem ? [contentItem] : [], priority: 'medium', ...(()=>{ const tg=readTitleGroupFields('p'); const o={}; if(tg.title) o.title=tg.title; if(tg.group) o.group=tg.group; return o; })() };
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, createdById: (currentUser()||{}).id || null, companyId: (document.getElementById('pCompany') ? document.getElementById('pCompany').value : (companiesList()[0] ? companiesList()[0].id : undefined)), contentItems: contentItem ? [contentItem] : [], priority: 'medium', ...(()=>{ const tg=readTitleGroupFields('p'); const o={}; if(tg.title) o.title=tg.title; if(tg.group) o.group=tg.group; return o; })() };
     state.projects.push(p); persist(); closeModal();
     ui.projectId = p.id; ui.view='project'; render();
   });

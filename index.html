@@ -3981,12 +3981,12 @@ function renderAttendanceSheet(node){
   const admin = isAdmin();
   const cu = currentUser();
   // Admins see the whole team; anyone else only ever sees their own attendance row.
-  const rows = (admin || isCEO()) ? state.users.filter(u=>u.role!=='viewer') : (cu ? [cu] : []);
+  const rows = (admin || isCEO()) ? state.users.filter(u=>u.role!=='viewer' && !u.attendanceExcluded) : (cu && !cu.attendanceExcluded ? [cu] : []);
 
   const dayHeaders = Array.from({length:daysInMonth},(_,i)=>{
     const day=i+1;
     const dateISO = `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    return `<th class="att-daycol${isWeekendISO(dateISO)?' att-weekend-col':''}">${day}</th>`;
+    return `<th class="att-daycol${isWeekendISO(dateISO)?' att-weekend-col':''}"${admin?` data-att-day="${dateISO}" data-tooltip="Click to mark ${fmtDate(dateISO)} as a holiday for everyone" style="cursor:pointer;"`:''}>${day}</th>`;
   }).join('');
 
   const bodyRows = rows.map(u=>{
@@ -4037,7 +4037,7 @@ function renderAttendanceSheet(node){
 
     <div class="filters" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
       <select id="attMonthSelect">
-        ${months.map(mk=>`<option value="${mk}" ${mk===monthKey?'selected':''}>${monthLabelLong(mk)}</option>`).join('')}
+        ${[...new Set(months.map(mk=>mk.slice(0,4)))].map(yr=>`<optgroup label="${yr}">${months.filter(mk=>mk.startsWith(yr)).map(mk=>`<option value="${mk}" ${mk===monthKey?'selected':''}>${monthLabelLong(mk)}</option>`).join('')}</optgroup>`).join('')}
       </select>
       ${admin ? `<button type="button" class="btn btn-sm" id="attImportBtn">Import Attendance</button>
       <input type="file" id="attImportFile" accept=".xls,.xlsx" style="display:none;">
@@ -4117,6 +4117,7 @@ function processAttendanceImport(workbook){
     const inTime = String(row[col.intime]||'').trim();
     const user = state.users.find(u => u.employeeId && u.employeeId.trim() === code);
     if(!user){ unmatchedCodes.push(code); return; }
+    if(user.attendanceExcluded) return; // hidden from Attendance — not marked
     matchedUserIds.add(user.id);
     const key = attendanceKey(user.id, dateISO);
     // Never overwrite an existing manual entry, of any kind — the import
@@ -4134,7 +4135,7 @@ function processAttendanceImport(workbook){
   // Anyone not in the file and not already marked anything is simply left
   // blank for a person to fill in — never auto-marked absent.
   let flaggedForReview = 0;
-  state.users.filter(u=>u.role!=='viewer').forEach(u=>{
+  state.users.filter(u=>u.role!=='viewer' && !u.attendanceExcluded).forEach(u=>{
     if(matchedUserIds.has(u.id)) return;
     if(!state.attendance[attendanceKey(u.id, dateISO)]) flaggedForReview++;
   });
@@ -4170,6 +4171,7 @@ function parseAttendanceGrid(workbook){
       if(!id) return;
       const user = state.users.find(u=> u.employeeId && u.employeeId.trim().toUpperCase() === id.toUpperCase());
       if(!user){ res.unmatched[id] = (res.unmatched[id]||0) + 1; return; }
+      if(user.attendanceExcluded) return; // hidden from Attendance
       for(let c=2; c<head.length; c++){
         const day = Number(head[c]);
         if(!Number.isInteger(day) || day<1 || day>dim) continue;
@@ -4317,6 +4319,10 @@ function bindAttendanceSheet(){
     });
   });
 
+  document.querySelectorAll('[data-att-day]').forEach(el=>{
+    el.addEventListener('click', ()=> openHolidayDayModal(el.dataset.attDay));
+  });
+
   document.querySelectorAll('[data-att-balance]').forEach(el=>{
     el.addEventListener('click', ()=> openLeaveBalanceModal(el.dataset.attBalance));
   });
@@ -4332,6 +4338,40 @@ function bindAttendanceSheet(){
         keepAttScroll(); persist(); render();
       }
     });
+  });
+}
+
+// Click on a date in the header row: mark that day as a Holiday (H) for everyone shown
+// on the sheet, or take the holiday off again. Existing entries are kept unless the
+// admin chooses to replace them.
+function openHolidayDayModal(dateISO){
+  if(!isAdmin()) return;
+  const people = state.users.filter(u=>u.role!=='viewer' && !u.attendanceExcluded);
+  const withH = people.filter(u=>getAttendance(u.id,dateISO)==='H').length;
+  const others = people.filter(u=>{ const v=getAttendance(u.id,dateISO); return v && v!=='H'; }).length;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" data-backdrop>
+      <div class="modal">
+        <h3>${fmtDate(dateISO)} — Holiday</h3>
+        <div class="modal-sub">Mark this date as a Holiday (H) for all ${people.length} people on the sheet.</div>
+        ${others ? `<div class="field"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="holReplace" style="width:auto;"> Also replace the ${others} entr${others===1?'y':'ies'} already marked that day (Present, Leave, etc.)</label><div class="hint">Left unticked, anyone already marked is left as they are.</div></div>` : ''}
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          ${withH ? `<button type="button" class="btn" id="holClear">Remove holiday (${withH})</button>` : ''}
+          <button type="button" class="btn btn-primary" id="holApply">Mark as holiday</button>
+        </div>
+      </div>
+    </div>`;
+  bindModalClose();
+  document.getElementById('holApply').addEventListener('click', ()=>{
+    const rep = !!(document.getElementById('holReplace') && document.getElementById('holReplace').checked);
+    people.forEach(u=>{ if(rep || !getAttendance(u.id,dateISO)) setAttendanceValue(u.id,dateISO,'H'); });
+    keepAttScroll(); persist(); closeModal(); render();
+  });
+  const clr = document.getElementById('holClear');
+  if(clr) clr.addEventListener('click', ()=>{
+    people.forEach(u=>{ if(getAttendance(u.id,dateISO)==='H') setAttendanceValue(u.id,dateISO,null); });
+    keepAttScroll(); persist(); closeModal(); render();
   });
 }
 
@@ -8888,6 +8928,7 @@ function openAddUserModal(){
             </select>
           </div>
           <div class="field" id="uTeamField"><label>Team</label><select id="uTeam"><option value="">Unassigned</option>${state.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div>
+          <div class="field" id="uAttField"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="uInAttendance" checked style="width:auto;"> Include in the Attendance sheet</label><div class="hint">Untick to hide this person from Attendance (past entries are kept and nothing else changes).</div></div>
           ${userCompanyFieldsHTML('u', null)}
           <div class="field" id="uAccessField" style="display:none;">
             <label>Workstream access</label>
@@ -8936,6 +8977,7 @@ function openAddUserModal(){
     if(coVals===null) return;
     if(coVals.companyIds) u.companyIds = coVals.companyIds;
     if(coVals.defaultCompanyId) u.defaultCompanyId = coVals.defaultCompanyId;
+    if(!document.getElementById('uInAttendance').checked) u.attendanceExcluded = true;
     const balVals = ['uBalEl','uBalSl','uBalCo'].map(id=>document.getElementById(id).value);
     if(!isViewer && balVals.some(v=>v!=='')){
       u.leaveBalances = { el: parseFloat(balVals[0])||0, sl: parseFloat(balVals[1])||0, co: parseFloat(balVals[2])||0, asOf: todayISO() };
@@ -9173,6 +9215,7 @@ function openEditUserModal(userId){
             <input id="euResponsibilities" value="${(u.responsibilities||[]).join('; ').replace(/"/g,'&quot;')}" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
             <div class="hint">Separate each one with a semicolon (;). Workspace CoPilot can answer "who's responsible for X" from this.</div>
           </div>
+          <div class="field" id="euAttField"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="euInAttendance" ${u.attendanceExcluded?'':'checked'} style="width:auto;"> Include in the Attendance sheet</label><div class="hint">Untick to hide this person from Attendance (past entries are kept and nothing else changes).</div></div>
           ${userCompanyFieldsHTML('eu', u)}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
@@ -9200,6 +9243,7 @@ function openEditUserModal(userId){
       if(euCo.defaultCompanyId) u.defaultCompanyId = euCo.defaultCompanyId; else delete u.defaultCompanyId;
       ui.companyUserId = null; // re-apply their default next time it is read
     }
+    if(document.getElementById('euInAttendance').checked) delete u.attendanceExcluded; else u.attendanceExcluded = true;
     u.responsibilities = raw ? raw.split(';').map(s=>s.trim()).filter(Boolean) : [];
     persist(); closeModal(); render();
   });

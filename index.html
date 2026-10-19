@@ -567,6 +567,9 @@
      readability at a glance. Reused by both Attendance and Appraisal so both
      get this treatment consistently from one shared set of rules. */
   .att-wrap{overflow-x:auto;padding:2px;}
+  .att-wrap.att-sized{overflow:auto;}
+  .att-wrap.att-sized .att-table thead th{position:sticky;top:0;z-index:3;}
+  .att-wrap.att-sized .att-table thead th.att-name-col{z-index:5;}
   .att-table{border-collapse:separate;border-spacing:4px 6px;font-family:var(--f-mono);font-size:11px;width:100%;table-layout:auto;}
   .att-table th{background:var(--amber);color:#fff;font-weight:700;padding:10px 14px;border-radius:8px;white-space:nowrap;}
   .att-table td{padding:9px 14px;text-align:center;background:var(--panel-raised);color:var(--paper);font-family:var(--f-mono);font-size:11px;border-radius:8px;}
@@ -3857,7 +3860,7 @@ function leaveBalanceFor(u){
   Object.keys(state.attendance||{}).forEach(k=>{
     if(!k.startsWith(prefix)) return;
     const date = k.slice(prefix.length);
-    if(date <= asOf || date > today) return;
+    if(date <= asOf) return; // future-dated marks count too, so planned leave shows straight away
     const v = state.attendance[k];
     if(v==='L') ev.push([date,1,'el',-1]);
     else if(v==='½') ev.push([date,1,'el',-0.5]);
@@ -4232,8 +4235,29 @@ function openAttendanceGridPreview(res, onDone){
   });
 }
 
+// Keeps the attendance grid where the person was after a re-render (clicking a cell
+// re-draws the page): remembers the grid's own scroll and the page scroll.
+const attScrollPos = { key:null, l:0, t:0, y:null };
+function keepAttScroll(){ attScrollPos.y = window.scrollY; }
+function sizeAttWrap(){
+  const w = document.querySelector('.att-wrap');
+  if(!w) return;
+  w.classList.add('att-sized');
+  const top = w.getBoundingClientRect().top + window.scrollY;
+  w.style.maxHeight = Math.max(320, window.innerHeight - top - 14) + 'px';
+}
+if(!window.__attResizeBound){ window.__attResizeBound = true; window.addEventListener('resize', ()=>{ try{ sizeAttWrap(); }catch(e){} }); }
 function bindAttendanceSheet(){
   const sel = document.getElementById('attMonthSelect');
+  const wrap = document.querySelector('.att-wrap');
+  if(wrap){
+    sizeAttWrap();
+    const key = sel ? sel.value : '';
+    if(attScrollPos.key !== key){ attScrollPos.key = key; attScrollPos.l = 0; attScrollPos.t = 0; }
+    wrap.scrollLeft = attScrollPos.l; wrap.scrollTop = attScrollPos.t;
+    wrap.addEventListener('scroll', ()=>{ attScrollPos.l = wrap.scrollLeft; attScrollPos.t = wrap.scrollTop; });
+    if(attScrollPos.y != null){ window.scrollTo(0, attScrollPos.y); attScrollPos.y = null; }
+  }
   if(sel) sel.addEventListener('change', ()=>{ ui.attendanceMonth = sel.value; render(); });
 
   const importBtn = document.getElementById('attImportBtn');
@@ -4289,7 +4313,7 @@ function bindAttendanceSheet(){
       const cycle = ['','P','L','W','SL','½','N','H','C'];
       const next = cycle[(cycle.indexOf(cur||'')+1) % cycle.length];
       setAttendanceValue(userId,date, next || null);
-      persist(); render();
+      keepAttScroll(); persist(); render();
     });
   });
 
@@ -4302,10 +4326,10 @@ function bindAttendanceSheet(){
       const [userId,date] = el.dataset.attWeekend.split('|');
       const cur = getAttendance(userId,date);
       if(cur){
-        openRevertAttendanceConfirm(date, ()=>{ setAttendanceValue(userId,date,null); persist(); render(); }, ATT_STATUS[cur]?ATT_STATUS[cur].label:cur);
+        openRevertAttendanceConfirm(date, ()=>{ setAttendanceValue(userId,date,null); keepAttScroll(); persist(); render(); }, ATT_STATUS[cur]?ATT_STATUS[cur].label:cur);
       } else {
         setAttendanceValue(userId,date,'P');
-        persist(); render();
+        keepAttScroll(); persist(); render();
       }
     });
   });
@@ -4349,7 +4373,7 @@ function openLeaveBalanceModal(userId){
       co: parseFloat(document.getElementById('lbCo').value)||0,
       asOf: document.getElementById('lbAsOf').value
     };
-    persist(); closeModal(); render();
+    keepAttScroll(); persist(); closeModal(); render();
   });
 }
 

@@ -584,6 +584,7 @@
   .att-cell.att-clickable{cursor:pointer;}
   .att-cell.att-clickable:hover{outline:1.5px solid var(--amber);outline-offset:-1.5px;}
   .appraisal-cell{text-align:center;font-family:var(--f-mono);font-size:11px;}
+  .appraisal-cell.ap-nowrap{white-space:nowrap;}
   .appraisal-overdue{color:var(--red) !important;font-weight:600;}
   tr[data-appraisal-row]:hover .att-name{background:var(--amber) !important;filter:brightness(1.1);}
   tr[data-appraisal-row]:hover .appraisal-cell{background:var(--amber-soft) !important;}
@@ -1350,6 +1351,12 @@ function normalizeState(s){
   }
   if(!s.attendance || typeof s.attendance !== 'object' || Array.isArray(s.attendance)) s.attendance = {};
   if(!s.appraisal || typeof s.appraisal !== 'object' || Array.isArray(s.appraisal)) s.appraisal = {};
+  // Appraisal's "Designation" is now the person's Job Title from their user details. Keep
+  // anything already typed there by copying it across where the user has no job title yet.
+  if(Array.isArray(s.users)) s.users.forEach(u=>{
+    const rec = s.appraisal[u.id];
+    if(rec && rec.designation && !u.jobTitle) u.jobTitle = String(rec.designation).trim();
+  });
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
   if(typeof s.settings.aiCopilotEnabled !== 'boolean') s.settings.aiCopilotEnabled = true;
@@ -4572,6 +4579,8 @@ function fmtMoney(n){
   return Number(n).toLocaleString('en-US');
 }
 
+function fmtINR(n){ const m = fmtMoney(n); return m==='' ? '' : 'INR ' + m; }
+
 function renderAppraisalSheet(node){
   const admin = isAdmin();
   const apHint = admin ? "Click a row to fill in or update that person's appraisal details." : "Read-only view — only an admin can change appraisal details.";
@@ -4583,8 +4592,8 @@ function renderAppraisalSheet(node){
       <div class="empty-state"><div class="et">Admins only</div>Appraisal and salary details are restricted to the admin and the CEO.</div>
     `;
   }
-  const rows = state.users.filter(u=>u.role!=='viewer');
-  const cols = ['Designation','DOJ','Tenure','Current Salary','Last Appraisal Date','Last Increase %','Current Recommendations','New Salary','Comments'];
+  const rows = state.users.filter(u=>u.role!=='viewer' && !u.appraisalExcluded);
+  const cols = ['Job Title','DOJ','Tenure','Latest Salary','Latest Appraisal Date','Latest Increase %','Current Recommendations','New Salary','Comments'];
 
   const bodyRows = rows.map(u=>{
     const rec = state.appraisal[u.id] || {};
@@ -4596,14 +4605,14 @@ function renderAppraisalSheet(node){
       <tr data-appraisal-row="${u.id}" style="cursor:${admin?'pointer':'default'};">
         <td style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">${u.employeeId||''}</td>
         <td class="att-name">${u.name}</td>
-        <td class="appraisal-cell">${rec.designation||''}</td>
-        <td class="appraisal-cell mono">${rec.doj?fmtDate(rec.doj):''}</td>
-        <td class="appraisal-cell mono">${tenureLabel(rec.doj)}</td>
-        <td class="appraisal-cell mono">${rec.currentSalary!=null?fmtMoney(rec.currentSalary):''}</td>
-        <td class="appraisal-cell mono${overdue?' appraisal-overdue':''}">${lastDateCell}</td>
-        <td class="appraisal-cell mono">${rec.lastIncreasePct!=null?rec.lastIncreasePct+'%':''}</td>
+        <td class="appraisal-cell">${escAttr(u.jobTitle||'')}</td>
+        <td class="appraisal-cell mono ap-nowrap" style="min-width:112px;">${rec.doj?fmtDate(rec.doj):''}</td>
+        <td class="appraisal-cell mono ap-nowrap">${tenureLabel(rec.doj)}</td>
+        <td class="appraisal-cell mono ap-nowrap">${rec.currentSalary!=null?fmtINR(rec.currentSalary):''}</td>
+        <td class="appraisal-cell mono ap-nowrap${overdue?' appraisal-overdue':''}">${lastDateCell}</td>
+        <td class="appraisal-cell mono ap-nowrap">${rec.lastIncreasePct!=null?rec.lastIncreasePct+'%':''}</td>
         <td class="appraisal-cell">${rec.recommendations||''}</td>
-        <td class="appraisal-cell mono">${rec.newSalary!=null?fmtMoney(rec.newSalary):''}</td>
+        <td class="appraisal-cell mono ap-nowrap">${rec.newSalary!=null?fmtINR(rec.newSalary):''}</td>
         <td class="appraisal-cell">${rec.comments||''}</td>
       </tr>`;
   }).join('');
@@ -4612,8 +4621,8 @@ function renderAppraisalSheet(node){
     ${((currentUser() && currentUser().themePreference)==='boardroom') ? renderPageHero('Heading', node.name, headingColorForNode(node)) : `
     <div class="eyebrow">Heading</div>
     <h1 class="page-title" style="margin-bottom:6px;">${node.name}</h1>
-    <div class="muted" style="font-size:12px;margin-bottom:16px;">${apHint} <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>`}
-    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<div class="muted" style="font-size:12px;margin-bottom:16px;">${apHint} <span style="color:var(--red);">Review due</span> means the last appraisal date is more than a year ago.</div>` : ''}
+    <div class="muted" style="font-size:12px;margin-bottom:16px;">${apHint} <span style="color:var(--red);">Review due</span> means the latest appraisal date is more than a year ago.</div>`}
+    ${((currentUser() && currentUser().themePreference)==='boardroom') ? `<div class="muted" style="font-size:12px;margin-bottom:16px;">${apHint} <span style="color:var(--red);">Review due</span> means the latest appraisal date is more than a year ago.</div>` : ''}
     <div class="att-wrap">
       <table class="att-table" style="font-size:12px;">
         <thead><tr><th style="width:70px;font-family:var(--f-mono);font-size:11px;white-space:nowrap;">Employee ID</th><th class="att-name-col">Name</th>${cols.map(c=>`<th class="appraisal-cell" style="font-weight:600;">${c}</th>`).join('')}</tr></thead>
@@ -4624,6 +4633,14 @@ function renderAppraisalSheet(node){
 }
 
 function bindAppraisalSheet(){
+  const wrap = document.querySelector('.att-wrap');
+  if(wrap){
+    sizeAttWrap();
+    if(attScrollPos.key !== 'appraisal'){ attScrollPos.key = 'appraisal'; attScrollPos.l = 0; attScrollPos.t = 0; }
+    wrap.scrollLeft = attScrollPos.l; wrap.scrollTop = attScrollPos.t;
+    wrap.addEventListener('scroll', ()=>{ attScrollPos.l = wrap.scrollLeft; attScrollPos.t = wrap.scrollTop; });
+    if(attScrollPos.y != null){ window.scrollTo(0, attScrollPos.y); attScrollPos.y = null; }
+  }
   if(!isAdmin()) return;
   document.querySelectorAll('[data-appraisal-row]').forEach(el=>{
     el.addEventListener('click', ()=> openAppraisalEditModal(el.dataset.appraisalRow));
@@ -4635,22 +4652,42 @@ function openAppraisalEditModal(userId){
   const u = state.users.find(x=>x.id===userId);
   if(!u) return;
   const rec = state.appraisal[userId] || {};
+  const q = v => String(v==null?'':v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  // Past entries, newest appraisal date first (undated ones last).
+  const sortPast = list => list.map((h,i)=>({h,i})).sort((x,y)=>{
+    const dx = x.h.date||'', dy = y.h.date||'';
+    if(dx===dy) return x.i-y.i;
+    if(!dx) return 1; if(!dy) return -1;
+    return dx<dy ? 1 : -1;
+  }).map(o=>o.h);
+  const pastRow = h => `
+    <div class="ap-past-row" style="display:grid;grid-template-columns:repeat(3,1fr) auto;gap:12px;align-items:end;margin-top:10px;">
+      <div class="field" style="margin:0;"><label>Past Salary (INR)</label><input type="number" class="ap-p-salary" value="${q(h.salary)}"></div>
+      <div class="field" style="margin:0;"><label>Past appraisal date</label><input type="date" class="ap-p-date" value="${q(h.date)}"></div>
+      <div class="field" style="margin:0;"><label>Past increase %</label><input type="number" step="0.1" class="ap-p-pct" value="${q(h.pct)}"></div>
+      <button type="button" class="btn btn-sm btn-ghost ap-p-remove" data-tooltip="Remove this past entry" style="margin-bottom:2px;">✕</button>
+    </div>`;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" data-backdrop>
-      <div class="modal">
-        <h3>${u.name} — Appraisal details</h3>
+      <div class="modal" style="max-width:760px;width:92vw;">
+        <h3>${escAttr(u.name)} — Appraisal details</h3>
         <form id="appraisalForm">
-          <div class="field-row">
-            <div class="field"><label>Designation</label><input id="apDesignation" value="${(rec.designation||'').replace(/"/g,'&quot;')}"></div>
-            <div class="field"><label>Date of Joining</label><input type="date" id="apDoj" value="${rec.doj||''}"></div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+            <div class="field"><label>Job Title</label><input value="${q(u.jobTitle)}" disabled></div>
+            <div class="field"><label>Employee Code</label><input value="${q(u.employeeId)}" disabled></div>
+            <div class="field"><label>Date of Joining</label><input type="date" id="apDoj" value="${q(rec.doj)}"></div>
           </div>
-          <div class="field-row">
-            <div class="field"><label>Current Salary</label><input type="number" id="apCurrentSalary" value="${rec.currentSalary??''}"></div>
-            <div class="field"><label>New Salary</label><input type="number" id="apNewSalary" value="${rec.newSalary??''}"></div>
+          <div class="hint" style="margin:-6px 0 12px;">Job Title and Employee Code come from the user's details (Admin → Users → Edit).</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr) auto;gap:12px;align-items:end;">
+            <div class="field" style="margin:0;"><label>Latest Salary (INR)</label><input type="number" id="apCurrentSalary" value="${q(rec.currentSalary)}"></div>
+            <div class="field" style="margin:0;"><label>Latest appraisal date</label><input type="date" id="apLastDate" value="${q(rec.lastAppraisalDate)}"></div>
+            <div class="field" style="margin:0;"><label>Latest increase %</label><input type="number" step="0.1" id="apLastIncrease" value="${q(rec.lastIncreasePct)}"></div>
+            <button type="button" class="btn btn-sm" id="apAddPast" data-tooltip="Add a past salary / appraisal" style="margin-bottom:2px;">+</button>
           </div>
-          <div class="field-row">
-            <div class="field"><label>Last Appraisal Date</label><input type="date" id="apLastDate" value="${rec.lastAppraisalDate||''}"></div>
-            <div class="field"><label>Last Increase %</label><input type="number" step="0.1" id="apLastIncrease" value="${rec.lastIncreasePct??''}"></div>
+          <div id="apPastList">${sortPast(Array.isArray(rec.history)?rec.history:[]).map(pastRow).join('')}</div>
+          <div class="hint" id="apPastHint" style="margin-top:6px;">Past entries are listed with the most recent appraisal date first.</div>
+          <div class="field-row" style="margin-top:14px;">
+            <div class="field"><label>New Salary (INR)</label><input type="number" id="apNewSalary" value="${q(rec.newSalary)}"></div>
           </div>
           <div class="field"><label>Comments</label><textarea id="apComments">${(rec.comments||'').replace(/</g,'&lt;')}</textarea></div>
           <div class="field"><label>Current Recommendations</label><textarea id="apRecommendations">${(rec.recommendations||'').replace(/</g,'&lt;')}</textarea></div>
@@ -4662,19 +4699,34 @@ function openAppraisalEditModal(userId){
       </div>
     </div>`;
   bindModalClose();
+  const list = document.getElementById('apPastList');
+  const wirePast = ()=> list.querySelectorAll('.ap-p-remove').forEach(btn=>{ btn.onclick = ()=> btn.closest('.ap-past-row').remove(); });
+  wirePast();
+  document.getElementById('apAddPast').addEventListener('click', ()=>{
+    list.insertAdjacentHTML('beforeend', pastRow({}));
+    wirePast();
+    const rows = list.querySelectorAll('.ap-past-row');
+    const first = rows[rows.length-1].querySelector('input');
+    if(first) first.focus();
+  });
   runOnClickAndEnter('appraisalForm','apSubmitBtn', ()=>{
     const val = id => document.getElementById(id).value;
+    const history = sortPast(Array.from(list.querySelectorAll('.ap-past-row')).map(r=>{
+      const sal = r.querySelector('.ap-p-salary').value, dt = r.querySelector('.ap-p-date').value, pct = r.querySelector('.ap-p-pct').value;
+      if(sal==='' && !dt && pct==='') return null;
+      return { salary: sal!=='' ? Number(sal) : null, date: dt || null, pct: pct!=='' ? Number(pct) : null };
+    }).filter(Boolean));
     state.appraisal[userId] = {
-      designation: val('apDesignation').trim(),
       doj: val('apDoj') || null,
       currentSalary: val('apCurrentSalary') ? Number(val('apCurrentSalary')) : null,
       newSalary: val('apNewSalary') ? Number(val('apNewSalary')) : null,
       lastAppraisalDate: val('apLastDate') || null,
       lastIncreasePct: val('apLastIncrease') ? Number(val('apLastIncrease')) : null,
+      history,
       comments: val('apComments').trim(),
       recommendations: val('apRecommendations').trim(),
     };
-    persist(); closeModal(); render();
+    keepAttScroll(); persist(); closeModal(); render();
   });
 }
 
@@ -9026,6 +9078,7 @@ function openAddUserModal(){
             </select>
           </div>
           <div class="field" id="uTeamField"><label>Team</label><select id="uTeam"><option value="">Unassigned</option>${state.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div>
+          <div class="field" id="uAppField"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="uInAppraisal" checked style="width:auto;"> Include in the Appraisal sheet</label><div class="hint">Untick to hide this person from Appraisal (any details already entered are kept).</div></div>
           <div class="field" id="uAttField"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="uInAttendance" checked style="width:auto;"> Include in the Attendance sheet</label><div class="hint">Untick to hide this person from Attendance (past entries are kept and nothing else changes).</div></div>
           ${userCompanyFieldsHTML('u', null)}
           <div class="field" id="uAccessField" style="display:none;">
@@ -9076,6 +9129,7 @@ function openAddUserModal(){
     if(coVals.companyIds) u.companyIds = coVals.companyIds;
     if(coVals.defaultCompanyId) u.defaultCompanyId = coVals.defaultCompanyId;
     if(!document.getElementById('uInAttendance').checked) u.attendanceExcluded = true;
+    if(!document.getElementById('uInAppraisal').checked) u.appraisalExcluded = true;
     const balVals = ['uBalEl','uBalSl','uBalCo'].map(id=>document.getElementById(id).value);
     if(!isViewer && balVals.some(v=>v!=='')){
       u.leaveBalances = { el: parseFloat(balVals[0])||0, sl: parseFloat(balVals[1])||0, co: parseFloat(balVals[2])||0, asOf: todayISO() };
@@ -9313,6 +9367,7 @@ function openEditUserModal(userId){
             <input id="euResponsibilities" value="${(u.responsibilities||[]).join('; ').replace(/"/g,'&quot;')}" placeholder="e.g. Veridos mobile app renewal; Client onboarding">
             <div class="hint">Separate each one with a semicolon (;). Workspace CoPilot can answer "who's responsible for X" from this.</div>
           </div>
+          <div class="field" id="euAppField"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="euInAppraisal" ${u.appraisalExcluded?'':'checked'} style="width:auto;"> Include in the Appraisal sheet</label><div class="hint">Untick to hide this person from Appraisal (any details already entered are kept).</div></div>
           <div class="field" id="euAttField"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="euInAttendance" ${u.attendanceExcluded?'':'checked'} style="width:auto;"> Include in the Attendance sheet</label><div class="hint">Untick to hide this person from Attendance (past entries are kept and nothing else changes).</div></div>
           ${userCompanyFieldsHTML('eu', u)}
           <div class="modal-actions">
@@ -9342,6 +9397,7 @@ function openEditUserModal(userId){
       ui.companyUserId = null; // re-apply their default next time it is read
     }
     if(document.getElementById('euInAttendance').checked) delete u.attendanceExcluded; else u.attendanceExcluded = true;
+    if(document.getElementById('euInAppraisal').checked) delete u.appraisalExcluded; else u.appraisalExcluded = true;
     u.responsibilities = raw ? raw.split(';').map(s=>s.trim()).filter(Boolean) : [];
     persist(); closeModal(); render();
   });

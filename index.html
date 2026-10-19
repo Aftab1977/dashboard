@@ -738,7 +738,7 @@ const BACKEND_LABEL = supaClient ? 'Supabase (shared)' : HAS_CLAUDE_STORAGE ? 'C
 
 let state = null;
 let session = { userId: null };
-let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', portfolioTitle:'', portfolioGroup:'', portfolioSearch:'', openGroups:{}, company:'all', companyUserId:null, reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null, hasSupabaseSession:false };
+let ui = { view:'login', projectId:null, featureNodeId:null, adminTab:'users', portfolioFilter:'open', portfolioTitle:'', portfolioGroup:'', portfolioSearch:'', adminUserSearch:'', openGroups:{}, company:'all', companyUserId:null, reportFilters:{project:'',team:'',user:'',status:'',reason:''}, assignmentsFilters:{viewBy:'individual',user:'',team:'',status:'current',month:'',personFilter:''}, loginError:'', saveError:null, migrationError:null, attendanceMonth:null, navHistory:[], expandNodeIds:[], aiAgentOpen:false, aiAgentMinimized:false, aiAgentHeightVh:50, navRailCollapsed:true, spendCompanyId:null, spendMonthKey:null, loginMethod:'password', loginStep:'email', loginEmail:'', loginBusy:false, loginAccountChoices:null, loginResendAt:0, pendingLoginMatch:null, loginTotpFactorId:null, hasSupabaseSession:false };
 let aiAgentMessages = []; // kept in memory only for now — real persisted history is a later step
 let aiAgentThinking = false;
 let aiAgentDraftText = ''; // whatever's typed but not yet sent — kept outside the DOM so it survives re-renders (e.g. navigating to a different page while mid-sentence)
@@ -2854,7 +2854,7 @@ function renderPageHero(eyebrowText, titleText, accentColor, titleFontSize, show
           ${showWorkspaceBtn ? `<button class="btn btn-sm" style="background:#fff;color:${c==='var(--amber)'?'var(--amber)':c};border:none;font-weight:800;padding:9px 20px;border-radius:20px;cursor:default;">WORKSPACE</button>` : ''}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0;margin-top:21px;">
-          <div class="who" style="color:rgba(255,255,255,.9);"><span style="font-family:var(--f-display);font-size:38px;font-weight:600;line-height:1.05;">${cu ? 'Hello, '+cu.name : ''}</span><div class="avatar" style="background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);">${cu ? initials(cu.name) : ''}</div></div>
+          <div class="who" style="color:rgba(255,255,255,.9);"><span style="font-family:var(--f-display);font-size:38px;font-weight:600;line-height:1.05;">${cu ? 'Hello, '+(String(cu.name||'').trim().split(/\s+/)[0]||cu.name) : ''}</span><div class="avatar" style="background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.35);">${cu ? initials(cu.name) : ''}</div></div>
           <div class="section-title" style="white-space:nowrap;display:inline-block;background:${c};color:#fff;padding:8px 18px;border-radius:8px;font-size:18px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px rgba(0,0,0,.25);">
             ${fmtDate(todayISO())} · ${nowTimeIST()} IST
           </div>
@@ -8227,7 +8227,9 @@ function renderAdmin(){
 
 function renderAdminUsers(){
   const admin = currentUser();
-  const rows = [...state.users.filter(u=>u.role==='admin'), ...state.users.filter(u=>u.role!=='admin')].map(u=>{
+  const uq = (ui.adminUserSearch||'').trim().toLowerCase();
+  const matchesUQ = u => !uq || [u.name,u.username,u.employeeId].some(v=>String(v||'').toLowerCase().includes(uq));
+  const rows = [...state.users.filter(u=>u.role==='admin'), ...state.users.filter(u=>u.role!=='admin')].filter(matchesUQ).map(u=>{
     const isViewer = u.role==='viewer';
     const isAdminRow = u.role==='admin';
     const accessLabel = isViewer ? (u.viewerProjectIds==='all' ? 'All workstreams' : `${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length} workstream${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length===1?'':'s'}`) : '—';
@@ -8259,12 +8261,15 @@ function renderAdminUsers(){
   return `
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-        <div class="section-title" style="margin-bottom:0;">Users</div>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <div class="section-title" style="margin-bottom:0;">Users</div>
+          <div class="filters ws-filters" style="margin:0;"><input id="adminUserSearch" type="search" placeholder="Search employees…" value="${escAttr(ui.adminUserSearch||'')}" aria-label="Search employees" autocomplete="off"></div>
+        </div>
         <button class="btn btn-primary btn-sm" data-add-user>+ Create user</button>
       </div>
       <table>
         <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team</th><th>Access</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty-state">No users yet.</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="6" class="empty-state">${uq ? 'No one matches your search.' : 'No users yet.'}</td></tr>`}</tbody>
       </table>
     </div>`;
 }
@@ -8579,6 +8584,14 @@ function bindAdmin(){
     }, 'Remove');
   }));
 
+  const userSearch = document.getElementById('adminUserSearch');
+  if(userSearch) userSearch.addEventListener('input', ()=>{
+    ui.adminUserSearch = userSearch.value;
+    const pos = userSearch.selectionStart;
+    render();
+    const again = document.getElementById('adminUserSearch');
+    if(again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(e){} }
+  });
   const addUser = document.querySelector('[data-add-user]');
   if(addUser) addUser.addEventListener('click', openAddUserModal);
   document.querySelectorAll('[data-user-team]').forEach(sel=>{

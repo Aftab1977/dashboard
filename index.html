@@ -1393,6 +1393,22 @@ function normalizeState(s){
       if(p.companyId && !cids.includes(p.companyId)) delete p.companyId;
       if(!p.companyId && cids.length) p.companyId = cids[0];
     });
+    // Repository: tag every heading, sub heading and content item with a company too.
+    if(Array.isArray(s.featureNodes)){
+      const byId = {}; s.featureNodes.forEach(n=>{ byId[n.id]=n; });
+      const underRepo = n=>{ let c=n, g=0; while(c && g++<50){ if(c.id==='feat_kr') return true; c = c.parentId ? byId[c.parentId] : null; } return false; };
+      s.featureNodes.forEach(n=>{
+        if(!underRepo(n)) return;
+        if(n.id!=='feat_kr' && (n.nodeType==='heading'||n.nodeType==='subheading')){
+          if(n.companyId && !cids.includes(n.companyId)) delete n.companyId;
+          if(!n.companyId && cids.length) n.companyId = cids[0];
+        }
+        (n.contentItems||[]).forEach(it=>{
+          if(it.companyId && !cids.includes(it.companyId)) delete it.companyId;
+          if(!it.companyId && cids.length) it.companyId = cids[0];
+        });
+      });
+    }
     if(Array.isArray(s.users)) s.users.forEach(u=>{
       if(Array.isArray(u.companyIds)) u.companyIds = u.companyIds.filter(id=>cids.includes(id));
       if(u.defaultCompanyId && !cids.includes(u.defaultCompanyId)) delete u.defaultCompanyId;
@@ -3427,7 +3443,7 @@ function searchWorkspace(query){
   // everything nested underneath it (its own content and every descendant), so
   // whatever the person was looking for is immediately visible.
   state.featureNodes.forEach(node=>{
-    if(!canSeeNode(node.id)) return;
+    if(!canSeeNode(node.id) || !repoNodeVisible(node)) return;
     if(!matchesAllTerms(node.name, terms)) return;
     const typeLabel = node.nodeType==='feature' ? 'Module' : node.nodeType==='heading' ? 'Heading' : 'Sub Heading';
     const pathStr = featureNodePath(node.id).map(n=>n.name).join('>');
@@ -3455,6 +3471,7 @@ function searchWorkspace(query){
     if(!canSeeNode(node.id)) return;
     const pathStr = featureNodePath(node.id).map(n=>n.name).join('>');
     (node.contentItems||[]).forEach(item=>{
+      if(!repoItemVisible(item, node)) return;
       const haystack = [pathStr, item.title, item.fileName, item.type==='text'?item.text:'', item.type==='link'?item.url:''].filter(Boolean).join(' ');
       if(matchesAllTerms(haystack, terms)){
         const fullLabel = item.title ? `${pathStr}>${item.title}` : pathStr;
@@ -3574,13 +3591,58 @@ function wsGroupsOf(title){ return [...new Set(state.projects.filter(p=>(p.title
 function canonTitle(raw){ const v=(raw||'').trim(); if(!v) return ''; return wsTitles().find(t=>t.toLowerCase()===v.toLowerCase()) || v; }
 function canonGroup(title, raw){ const v=(raw||'').trim(); if(!title||!v) return ''; return wsGroupsOf(title).find(g=>g.toLowerCase()===v.toLowerCase()) || v; }
 // Company picker for create/edit workstream — only shown once there are 2+ companies.
-function companyFieldHTML(pf, selectedId){
+function companyFieldHTML(pf, selectedId, what){
   if(!multiCompany()) return '';
   const ids = userCompanyIds(currentUser());
   const opts = companiesList().filter(c=>ids.includes(c.id) || c.id===selectedId);
   return `<div class="field"><label>Company</label>
     <select id="${pf}Company"><option value="">Select company…</option>${opts.map(c=>`<option value="${escAttr(c.id)}" ${c.id===selectedId?'selected':''}>${escAttr(c.name)}</option>`).join('')}</select>
-    <div class="hint">Which company this workstream belongs to — required.</div></div>`;
+    <div class="hint">Which company this ${what||'workstream'} belongs to — required.</div></div>`;
+}
+/* ---------- Repository by company ----------
+   Headings / Sub Headings under the Repository module, and every content item in them,
+   belong to a company. Sub Headings and items default to their parent's company. The
+   shared company filter (same one as Workstreams) decides what is shown. */
+function isRepoNodeId(id){ return featureNodePath(id).some(n=>n.id==='feat_kr'); }
+function repoNodeCompany(n){
+  if(!n || !multiCompany()) return null;
+  const ids = companiesList().map(c=>c.id);
+  if(n.companyId && ids.includes(n.companyId)) return n.companyId;
+  const parent = n.parentId ? featureNode(n.parentId) : null;
+  if(parent && parent.id!=='feat_kr') return repoNodeCompany(parent);
+  return ids[0] || null;
+}
+function repoItemCompany(it, node){
+  const ids = companiesList().map(c=>c.id);
+  return (it && it.companyId && ids.includes(it.companyId)) ? it.companyId : repoNodeCompany(node);
+}
+function repoItemVisible(it, node){
+  const scope = companyScopeIds();
+  if(scope===null || !node || !isRepoNodeId(node.id)) return true;
+  return scope.includes(repoItemCompany(it, node));
+}
+function repoNodeVisible(n){
+  const scope = companyScopeIds();
+  if(scope===null || !n || !isRepoNodeId(n.id)) return true;
+  if(scope.includes(repoNodeCompany(n))) return true;
+  if((n.contentItems||[]).some(it=>repoItemVisible(it,n))) return true;
+  return featureChildren(n.id).some(c=>repoNodeVisible(c));
+}
+function repoCompanyTag(companyId){
+  return (multiCompany() && companyId && activeCompany()==='all') ? ` <span class="muted" style="font-size:11px;font-weight:400;">· ${escAttr(companyName(companyId))}</span>` : '';
+}
+function repoCompanyFilterHTML(){
+  return companyFilterVisible() ? `<div class="filters ws-filters" style="margin-bottom:14px;">${companyFilterHTML()}</div>` : '';
+}
+// How many Repository headings / items still use a company (blocks removing it).
+function repoCompanyUsage(companyId){
+  let n = 0;
+  (state.featureNodes||[]).forEach(node=>{
+    if(!isRepoNodeId(node.id)) return;
+    if(node.id!=='feat_kr' && node.companyId===companyId) n++;
+    (node.contentItems||[]).forEach(it=>{ if(it.companyId===companyId) n++; });
+  });
+  return n;
 }
 function titleGroupFieldsHTML(pf, p){
   const t=(p&&p.title)||'', g=(p&&p.group)||'';
@@ -4910,10 +4972,12 @@ function searchAllSummaries(query){
 }
 
 function renderContentItem(it, headingId){
-  if(it.type==='link') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">🔗 ${it.title||it.url}</a></div>`;
+  const hn = featureNode(headingId);
+  const tag = (hn && isRepoNodeId(headingId)) ? repoCompanyTag(repoItemCompany(it, hn)) : '';
+  if(it.type==='link') return `<div class="content-item"><a href="${it.url}" target="_blank" rel="noopener" class="ci-link">🔗 ${it.title||it.url}</a>${tag}</div>`;
   const icon = it.type==='text' ? '📝' : it.type==='image' ? '🖼️' : it.type==='video' ? '🎬' : '📄';
   const name = it.title || it.fileName || (it.type==='text' ? 'Text note' : 'Untitled');
-  return `<div class="content-item"><span class="ci-link" data-open-content-item="${headingId}|${it.id}" style="cursor:pointer;">${icon} ${name}</span></div>`;
+  return `<div class="content-item"><span class="ci-link" data-open-content-item="${headingId}|${it.id}" style="cursor:pointer;">${icon} ${name}</span>${tag}</div>`;
 }
 
 // Renders a Heading (or Sub Heading) and everything nested inside it — its own content
@@ -4923,7 +4987,7 @@ function renderContentItem(it, headingId){
 // one). Never expands inline here.
 function renderHeadingBox(h, showHandle, index){
   const label = h.specialView==='attendance' ? 'Attendance sheet — click to open' : h.specialView==='appraisal' ? 'Appraisal sheet — click to open' : null;
-  const cnt = (h.contentItems||[]).length + featureChildren(h.id).length;
+  const cnt = (h.contentItems||[]).filter(it=>repoItemVisible(it,h)).length + featureChildren(h.id).filter(c=>repoNodeVisible(c)).length;
   const subtitle = h.description ? h.description : (label || (cnt ? cnt+' item'+(cnt===1?'':'s') : 'No description yet'));
   const handle = (showHandle && isAdmin()) ? `<span class="drag-handle" data-tooltip="Drag to reorder">⠿</span>` : '';
   const isBoardroom = isBoardroomTheme();
@@ -4935,7 +4999,7 @@ function renderHeadingBox(h, showHandle, index){
         <div data-open-feature="${h.id}" style="cursor:pointer;flex:1;display:flex;align-items:center;gap:8px;">
           ${handle}
           <div>
-            <div class="heading-name" style="display:inline-block;background:${c};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${glow};">${h.name}</div>
+            <div class="heading-name" style="display:inline-block;background:${c};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;box-shadow:${glow};">${h.name}</div>${repoCompanyTag(isRepoNodeId(h.id)?repoNodeCompany(h):null)}
             <div class="muted" style="font-size:12px;margin-top:6px;">${subtitle}</div>
           </div>
         </div>
@@ -4964,8 +5028,8 @@ function renderSubHeadingCollapsible(h, depth){
       </div>
     </div>`;
   }
-  const items = h.contentItems || [];
-  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading' && canSeeNode(c.id));
+  const items = (h.contentItems || []).filter(it=>repoItemVisible(it,h));
+  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading' && canSeeNode(c.id) && repoNodeVisible(c));
   const itemsHtml = items.map(it=>`
     <div style="position:relative;">
       ${renderContentItem(it, h.id)}
@@ -4979,7 +5043,7 @@ function renderSubHeadingCollapsible(h, depth){
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <div data-toggle-heading="${h.id}" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
           <span id="harrow-${h.id}" class="collapse-arrow">${forceOpen?'▾':'▸'}</span>
-          <div class="heading-name" style="display:inline-block;background:${chc};color:#fff;padding:5px 13px;border-radius:7px;font-size:13px;font-weight:700;box-shadow:${chglow};">${h.name}</div>
+          <div class="heading-name" style="display:inline-block;background:${chc};color:#fff;padding:5px 13px;border-radius:7px;font-size:13px;font-weight:700;box-shadow:${chglow};">${h.name}</div>${repoCompanyTag(isRepoNodeId(h.id)?repoNodeCompany(h):null)}
         </div>
         ${isAdmin() ? `<div class="row-actions">
           <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
@@ -4998,14 +5062,15 @@ function renderSubHeadingCollapsible(h, depth){
 // The body of a Heading's own dedicated page — its own direct content is collapsible
 // too (consistent with Sub Headings), followed by each Sub Heading, also collapsible.
 function renderHeadingPageBody(h){
-  const items = h.contentItems || [];
-  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading' && canSeeNode(c.id));
+  const items = (h.contentItems || []).filter(it=>repoItemVisible(it,h));
+  const subHeadings = featureChildren(h.id).filter(c=>c.nodeType==='subheading' && canSeeNode(c.id) && repoNodeVisible(c));
   const itemsHtml = items.map(it=>`
     <div style="position:relative;">
       ${renderContentItem(it, h.id)}
       ${isAdmin() ? `<button class="icon-btn" data-delete-content="${h.id}|${it.id}" data-tooltip="Remove" style="position:absolute;top:6px;right:6px;">✕</button>` : ''}
     </div>`).join('');
   return `
+    ${isRepoNodeId(h.id) ? repoCompanyFilterHTML() : ''}
     ${isAdmin() ? `<div class="row-actions" style="margin-bottom:16px;">
       <button class="btn btn-sm" data-add-content="${h.id}">+ Add content</button>
       <button class="btn btn-sm btn-ghost" data-add-subheading="${h.id}">+ Add sub heading</button>
@@ -5062,7 +5127,7 @@ function renderFeatureNode(){
 
   const children = featureChildren(node.id);
   const subFeatures = children.filter(c=>(c.nodeType==='feature'||c.nodeType==='subfeature') && canSeeNode(c.id));
-  const headings = children.filter(c=>c.nodeType==='heading' && canSeeNode(c.id));
+  const headings = children.filter(c=>c.nodeType==='heading' && canSeeNode(c.id) && repoNodeVisible(c));
 
   const subFeatureBoxes = subFeatures.map((sf,sfi)=>{
     const cnt = featureChildren(sf.id).length;
@@ -5100,6 +5165,7 @@ function renderFeatureNode(){
       <div id="summarySearchResults" style="margin-top:10px;"></div>
     ` : ''}
     ${(isAdmin() && ['feat_kr','feat_fai','feat_hr'].includes(node.id)) ? `<button class="btn btn-primary btn-sm" style="margin-bottom:20px;" data-add-heading-only="${node.id}">+ Add Heading</button>` : ''}
+    ${node.id==='feat_kr' ? repoCompanyFilterHTML() : ''}
     ${subFeatureBoxes}
     ${headingCards}
     ${(!subFeatures.length && !headings.length) ? `<div class="empty-state"><div class="et">Nothing here yet</div></div>` : ''}
@@ -5303,6 +5369,7 @@ function openEditNodeModal(nodeId){
           <div class="field"><label>Name</label><input id="editNodeName" value="${(f.name||'').replace(/"/g,'&quot;')}" required></div>
           <div class="field"><label>Description</label><textarea id="editNodeDesc" placeholder="What is this for?">${(f.description||'').replace(/</g,'&lt;')}</textarea></div>
           ${f.parentId===null ? '<div class="hint">Shown on the Focus Area page under this module\'s name.</div>' : ''}
+          ${(isRepoNodeId(f.id) && f.id!=='feat_kr' && (f.nodeType==='heading'||f.nodeType==='subheading')) ? companyFieldHTML('en', repoNodeCompany(f)||'', 'heading') : ''}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="editNodeSubmitBtn" class="btn btn-primary">Save</button>
@@ -5314,8 +5381,11 @@ function openEditNodeModal(nodeId){
   runOnClickAndEnter('editNodeForm','editNodeSubmitBtn', ()=>{
     const nameEl = document.getElementById('editNodeName');
     if(!nameEl.value.trim()){ formError(nameEl, 'Enter a name to continue.'); return; }
+    const enCo = document.getElementById('enCompany');
+    if(enCo && !enCo.value){ formError(enCo, 'Select the company this heading is for.'); return; }
     f.name = nameEl.value.trim();
     f.description = document.getElementById('editNodeDesc').value.trim();
+    if(enCo) f.companyId = enCo.value;
     if(f.nodeType==='heading' && f.name.toLowerCase()==='attendance' && !f.specialView) f.specialView = 'attendance';
     persist(); closeModal(); render();
   });
@@ -5351,6 +5421,7 @@ function openNameNodeModal(parentId, nodeType){
         <form id="nodeNameForm">
           <div class="field"><label>Name</label><input id="nodeNameInput" required></div>
           <div class="field"><label>Description (optional)</label><textarea id="nodeDescInput" placeholder="What is this for?"></textarea></div>
+          ${(isRepoNodeId(parentId) && (nodeType==='heading'||nodeType==='subheading')) ? companyFieldHTML('nn', (()=>{ const par=featureNode(parentId); if(par && par.id!=='feat_kr') return repoNodeCompany(par)||''; const a=activeCompany(); return a!=='all'?a:''; })(), 'heading') : ''}
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="nodeNameSubmitBtn" class="btn btn-primary">Create</button>
@@ -5363,8 +5434,12 @@ function openNameNodeModal(parentId, nodeType){
     const nameEl = document.getElementById('nodeNameInput');
     if(!nameEl.value.trim()){ formError(nameEl, 'Enter a name to continue.'); return; }
     const trimmedName = nameEl.value.trim();
+    const nnCo = document.getElementById('nnCompany');
+    if(nnCo && !nnCo.value){ formError(nnCo, 'Select the company this heading is for.'); return; }
     const node = { id: uid('node'), name: trimmedName, nodeType, parentId, order: nextOrderFor(parentId), contentItems: [], description: document.getElementById('nodeDescInput').value.trim(),
       specialView: (nodeType==='heading' && trimmedName.toLowerCase()==='attendance') ? 'attendance' : null };
+    if(nnCo) node.companyId = nnCo.value;
+    else if(isRepoNodeId(parentId) && (nodeType==='heading'||nodeType==='subheading') && companiesList()[0]) node.companyId = companiesList()[0].id;
     state.featureNodes.push(node);
     persist(); closeModal(); render();
   });
@@ -5859,6 +5934,7 @@ function openAddContentModal(headingId){
               <option value="video">Video (upload)</option>
             </select>
           </div>
+          ${isRepoNodeId(headingId) ? companyFieldHTML('ci', repoNodeCompany(featureNode(headingId))||'', 'content') : ''}
           <div class="field"><label>Title (optional)</label><input id="ciTitle" placeholder="A short label for this item"></div>
           <div class="field" id="ciTextField"><label>Text</label><textarea id="ciText" placeholder="Write it here..."></textarea></div>
           <div class="field" id="ciUrlField" style="display:none;"><label>URL</label><input id="ciUrl" placeholder="https://..."></div>
@@ -5900,19 +5976,23 @@ function openAddContentModal(headingId){
     const errEl = document.getElementById('ciError');
     errEl.textContent = '';
     if(!h) return;
+    const ciCoEl = document.getElementById('ciCompany');
+    if(ciCoEl && !ciCoEl.value){ errEl.textContent = 'Select the company this content is for.'; return; }
+    const ciCo = ciCoEl ? ciCoEl.value : ((isRepoNodeId(headingId) && companiesList()[0]) ? companiesList()[0].id : null);
+    const coProp = ciCo ? {companyId: ciCo} : {};
     if(!Array.isArray(h.contentItems)) h.contentItems = [];
 
     if(type==='text'){
       const text = document.getElementById('ciText').value.trim();
       if(!text){ errEl.textContent = 'Add some text first.'; return; }
-      h.contentItems.push({id:uid('ci'), type, title, text});
+      h.contentItems.push({id:uid('ci'), type, title, text, ...coProp});
       persist(); closeModal(); render();
       return;
     }
     if(type==='link'){
       const url = document.getElementById('ciUrl').value.trim();
       if(!url){ errEl.textContent = 'Add a URL first.'; return; }
-      h.contentItems.push({id:uid('ci'), type, title, url});
+      h.contentItems.push({id:uid('ci'), type, title, url, ...coProp});
       persist(); closeModal(); render();
       return;
     }
@@ -5929,7 +6009,7 @@ function openAddContentModal(headingId){
     submitBtn.textContent = 'Uploading…';
     try{
       const uploaded = await uploadFileToStorage(file);
-      h.contentItems.push({id:uid('ci'), type, title, ...uploaded});
+      h.contentItems.push({id:uid('ci'), type, title, ...uploaded, ...coProp});
       persist(); closeModal(); render();
     }catch(e){
       submitBtn.disabled = false;
@@ -8568,6 +8648,11 @@ function bindAdmin(){
     const c = companiesList().find(x=>x.id===b.dataset.delCompany);
     if(!c) return;
     const n = state.projects.filter(p=>p.companyId===c.id).length;
+    const rn = repoCompanyUsage(c.id);
+    if(!n && rn){
+      ui.companyAdminError = `"${c.name}" can't be removed yet — it still has ${rn} Repository heading${rn===1?'':'s'} / item${rn===1?'':'s'}. Move ${rn===1?'it':'them'} to another company first (Repository → ✎ on a heading to change its company; remove content you no longer need).`;
+      render(); return;
+    }
     if(n){
       ui.companyAdminError = `"${c.name}" can't be removed yet — it still has ${n} workstream${n===1?'':'s'}. Move ${n===1?'it':'them'} to another company first (Admin → Workstreams → Edit → Company).`;
       render(); return;
@@ -9291,6 +9376,11 @@ function openCompanyModal(companyId){
       state.companies.push({ id: uid('co'), name });
       // Anything not yet tagged (older workstreams) goes under the first company.
       state.projects.forEach(p=>{ if(!p.companyId) p.companyId = state.companies[0].id; });
+      state.featureNodes.forEach(n=>{
+        if(!isRepoNodeId(n.id)) return;
+        if(n.id!=='feat_kr' && (n.nodeType==='heading'||n.nodeType==='subheading') && !n.companyId) n.companyId = state.companies[0].id;
+        (n.contentItems||[]).forEach(it=>{ if(!it.companyId) it.companyId = state.companies[0].id; });
+      });
     }
     persist(); closeModal(); render();
   });

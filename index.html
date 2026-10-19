@@ -4593,7 +4593,7 @@ function renderAppraisalSheet(node){
     `;
   }
   const rows = state.users.filter(u=>u.role!=='viewer' && !u.appraisalExcluded);
-  const cols = ['Job Title','DOJ','Tenure','Latest Salary','Latest Appraisal Date','Latest Increase %','Current Recommendations','New Salary','Comments'];
+  const cols = ['Job Title','DOJ','Tenure','Latest Salary','Latest Appraisal Date','Latest Increase %'];
 
   const bodyRows = rows.map(u=>{
     const rec = state.appraisal[u.id] || {};
@@ -4611,9 +4611,6 @@ function renderAppraisalSheet(node){
         <td class="appraisal-cell mono ap-nowrap">${rec.currentSalary!=null?fmtINR(rec.currentSalary):''}</td>
         <td class="appraisal-cell mono ap-nowrap${overdue?' appraisal-overdue':''}">${lastDateCell}</td>
         <td class="appraisal-cell mono ap-nowrap">${rec.lastIncreasePct!=null?rec.lastIncreasePct+'%':''}</td>
-        <td class="appraisal-cell">${rec.recommendations||''}</td>
-        <td class="appraisal-cell mono ap-nowrap">${rec.newSalary!=null?fmtINR(rec.newSalary):''}</td>
-        <td class="appraisal-cell">${rec.comments||''}</td>
       </tr>`;
   }).join('');
 
@@ -4686,11 +4683,6 @@ function openAppraisalEditModal(userId){
           </div>
           <div id="apPastList">${sortPast(Array.isArray(rec.history)?rec.history:[]).map(pastRow).join('')}</div>
           <div class="hint" id="apPastHint" style="margin-top:6px;">Past entries are listed with the most recent appraisal date first.</div>
-          <div class="field-row" style="margin-top:14px;">
-            <div class="field"><label>New Salary (INR)</label><input type="number" id="apNewSalary" value="${q(rec.newSalary)}"></div>
-          </div>
-          <div class="field"><label>Comments</label><textarea id="apComments">${(rec.comments||'').replace(/</g,'&lt;')}</textarea></div>
-          <div class="field"><label>Current Recommendations</label><textarea id="apRecommendations">${(rec.recommendations||'').replace(/</g,'&lt;')}</textarea></div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancel</button>
             <button type="button" id="apSubmitBtn" class="btn btn-primary">Save</button>
@@ -4717,14 +4709,12 @@ function openAppraisalEditModal(userId){
       return { salary: sal!=='' ? Number(sal) : null, date: dt || null, pct: pct!=='' ? Number(pct) : null };
     }).filter(Boolean));
     state.appraisal[userId] = {
+      ...rec, // anything saved earlier in fields no longer shown (New Salary, Comments, Recommendations) is kept, not wiped
       doj: val('apDoj') || null,
       currentSalary: val('apCurrentSalary') ? Number(val('apCurrentSalary')) : null,
-      newSalary: val('apNewSalary') ? Number(val('apNewSalary')) : null,
       lastAppraisalDate: val('apLastDate') || null,
       lastIncreasePct: val('apLastIncrease') ? Number(val('apLastIncrease')) : null,
       history,
-      comments: val('apComments').trim(),
-      recommendations: val('apRecommendations').trim(),
     };
     keepAttScroll(); persist(); closeModal(); render();
   });

@@ -1664,14 +1664,14 @@ function widgetAllowed(id){
   return true;
 }
 function isCEO(){ const u = currentUser(); return !!u && u.role==='ceo'; }
-// Who may create a workstream: admins, and the CEO.
-function canCreateProject(){ return isAdmin() || isCEO(); }
-// Who may edit/delete a workstream and manage its tasks: admins always; the CEO only
-// for workstreams they created themselves. Accepts a project object or a project id.
+// Who may create a workstream: admins, the CEO and HODs.
+function canCreateProject(){ const u = currentUser(); return !!u && ['admin','ceo','hod'].includes(u.role); }
+// Who may edit/delete a workstream and manage its tasks: admins always; the CEO and
+// HODs only for workstreams they created themselves. Accepts a project object or a project id.
 function canManageProject(p){
   if(isAdmin()) return true;
   const cu = currentUser();
-  if(!cu || cu.role!=='ceo') return false;
+  if(!cu || !['ceo','hod'].includes(cu.role)) return false;
   const proj = (p && typeof p==='object') ? p : state.projects.find(x=>x.id===p);
   return !!proj && proj.createdById===cu.id;
 }
@@ -2190,6 +2190,7 @@ function canEditTask(t){
   const cu = currentUser();
   if(isAdmin()) return true;
   if(cu && cu.role==='ceo') return canManageProject(t.projectId);
+  if(cu && cu.role==='hod' && canManageProject(t.projectId)) return true; // a HOD's own workstream
   if(!cu || cu.role==='viewer') return false;
   const isAssignedToMe = (t.assignedType==='user' && t.assignedId===cu.id) || (t.assignedType==='team' && t.assignedId===cu.teamId);
   return isAssignedToMe && t.status!=='closed';
@@ -3806,9 +3807,11 @@ function renderPortfolio(){
     </div>
 
     <div class="ws-list">
-      ${cards || `<div class="empty-state"><div class="et">No workstreams to show</div>${allProjects.length ? 'Try a different filter.' : 'Create one from Admin.'}</div>`}
+      ${cards || (canCreateProject()
+        ? `<div class="empty-state"><div class="et">${allProjects.length ? 'No workstreams to show' : 'No workstreams yet'}</div>${allProjects.length ? 'Try a different filter, or create a new one.' : 'Get started by creating your first workstream.'}<div style="margin-top:14px;"><button class="btn btn-primary" data-new-ws>+ New workstream</button></div></div>`
+        : `<div class="empty-state"><div class="et">No workstreams to show</div>${allProjects.length ? 'Try a different filter.' : 'Nothing has been shared with you yet.'}</div>`)}
     </div>
-    ${isAdmin() ? `<div style="margin-top:22px;"><button class="btn btn-primary" data-nav="admin">+ New workstream</button></div>` : (isCEO() ? `<div style="margin-top:22px;"><button class="btn btn-primary" id="ceoNewWsBtn">+ New workstream</button></div>` : '')}
+    ${isAdmin() ? `<div style="margin-top:22px;"><button class="btn btn-primary" data-nav="admin">+ New workstream</button></div>` : (canCreateProject() && cards ? `<div style="margin-top:22px;"><button class="btn btn-primary" id="ceoNewWsBtn" data-new-ws>+ New workstream</button></div>` : '')}
   `;
 }
 
@@ -3820,8 +3823,7 @@ function bindPortfolio(){
     c.addEventListener('click', ()=>{ ui.projectId = c.dataset.openProjectRow; ui.view='project'; render(); });
   });
   document.querySelectorAll('[data-nav="admin"]').forEach(b=>b.addEventListener('click', ()=>{ ui.view='admin'; render(); }));
-  const ceoNew = document.getElementById('ceoNewWsBtn');
-  if(ceoNew) ceoNew.addEventListener('click', openAddProjectModal);
+  document.querySelectorAll('[data-new-ws]').forEach(b=>b.addEventListener('click', openAddProjectModal));
   const filterSel = document.getElementById('portfolioFilter');
   if(filterSel) filterSel.addEventListener('change', ()=>{ ui.portfolioFilter = filterSel.value; render(); });
   const titleSel = document.getElementById('portfolioTitle');
@@ -4579,7 +4581,7 @@ function fmtMoney(n){
   return Number(n).toLocaleString('en-US');
 }
 
-function fmtINR(n){ const m = fmtMoney(n); return m==='' ? '' : 'INR ' + m; }
+function fmtINR(n){ const m = fmtMoney(n); return m==='' ? '' : 'INR ' + m + ' PA'; } // PA = per annum
 
 function renderAppraisalSheet(node){
   const admin = isAdmin();
@@ -4659,7 +4661,7 @@ function openAppraisalEditModal(userId){
   }).map(o=>o.h);
   const pastRow = h => `
     <div class="ap-past-row" style="display:grid;grid-template-columns:repeat(3,1fr) auto;gap:12px;align-items:end;margin-top:10px;">
-      <div class="field" style="margin:0;"><label>Past Salary (INR)</label><input type="number" class="ap-p-salary" value="${q(h.salary)}"></div>
+      <div class="field" style="margin:0;"><label>Past Salary (INR PA)</label><input type="number" class="ap-p-salary" value="${q(h.salary)}"></div>
       <div class="field" style="margin:0;"><label>Past appraisal date</label><input type="date" class="ap-p-date" value="${q(h.date)}"></div>
       <div class="field" style="margin:0;"><label>Past increase %</label><input type="number" step="0.1" class="ap-p-pct" value="${q(h.pct)}"></div>
       <button type="button" class="btn btn-sm btn-ghost ap-p-remove" data-tooltip="Remove this past entry" style="margin-bottom:2px;">✕</button>
@@ -4676,7 +4678,7 @@ function openAppraisalEditModal(userId){
           </div>
           <div class="hint" style="margin:-6px 0 12px;">Job Title and Employee Code come from the user's details (Admin → Users → Edit).</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr) auto;gap:12px;align-items:end;">
-            <div class="field" style="margin:0;"><label>Latest Salary (INR)</label><input type="number" id="apCurrentSalary" value="${q(rec.currentSalary)}"></div>
+            <div class="field" style="margin:0;"><label>Latest Salary (INR PA)</label><input type="number" id="apCurrentSalary" value="${q(rec.currentSalary)}"></div>
             <div class="field" style="margin:0;"><label>Latest appraisal date</label><input type="date" id="apLastDate" value="${q(rec.lastAppraisalDate)}"></div>
             <div class="field" style="margin:0;"><label>Latest increase %</label><input type="number" step="0.1" id="apLastIncrease" value="${q(rec.lastIncreasePct)}"></div>
             <button type="button" class="btn btn-sm" id="apAddPast" data-tooltip="Add a past salary / appraisal" style="margin-bottom:2px;">+</button>

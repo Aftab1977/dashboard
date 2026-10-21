@@ -1360,6 +1360,17 @@ function normalizeState(s){
   if(!s.settings || typeof s.settings !== 'object') s.settings = {};
   if(typeof s.settings.maxUploadMB !== 'number') s.settings.maxUploadMB = 250;
   if(typeof s.settings.aiCopilotEnabled !== 'boolean') s.settings.aiCopilotEnabled = true;
+  if(!Array.isArray(s.settings.disabledWidgets)) s.settings.disabledWidgets = [];
+  // One time: the widgets the admin had already switched off for themselves become off for everyone.
+  if(!s.settings.widgetsGlobalMigrated){
+    const adm = Array.isArray(s.users) ? s.users.find(u=>u.role==='admin') : null;
+    if(adm && Array.isArray(adm.dashboardWidgetsEnabled)){
+      DEFAULT_DASHBOARD_WIDGET_ORDER.forEach(id=>{
+        if(!/^wg_empty/.test(id) && id!=='wg_spend' && !adm.dashboardWidgetsEnabled.includes(id) && !s.settings.disabledWidgets.includes(id)) s.settings.disabledWidgets.push(id);
+      });
+    }
+    s.settings.widgetsGlobalMigrated = true;
+  }
   if(typeof s.settings.totpEnabled !== 'boolean') s.settings.totpEnabled = false;
   if(typeof s.settings.attendanceLateCutoff !== 'string') s.settings.attendanceLateCutoff = '10:00';
   if(typeof s.attendanceLate !== 'object' || s.attendanceLate===null || Array.isArray(s.attendanceLate)) s.attendanceLate = {};
@@ -1657,12 +1668,16 @@ function currentUser(){ return state.users.find(u=>u.id===session.userId) || nul
 function isAdmin(){ const u = currentUser(); return u && u.role==='admin'; }
 // Widgets some roles aren't meant to see: Spend is admin-only; Team Capacity and
 // Today's Attendance are for HOD, Admin and CEO only.
-function widgetAllowed(id){
+function widgetAllowedByRole(id){
   const u = currentUser();
   if(id==='wg_spend') return isAdmin();
   if(id==='wg_capacity' || id==='wg_attendance') return !!u && ['admin','ceo','hod'].includes(u.role);
   return true;
 }
+// A widget the admin has turned off is off for everyone (the admin's switches in My Account
+// are workspace-wide), so it is also hidden from everyone else's My Account list.
+function widgetGloballyOff(id){ return !!(state.settings && Array.isArray(state.settings.disabledWidgets) && state.settings.disabledWidgets.includes(id)); }
+function widgetAllowed(id){ return widgetAllowedByRole(id) && !widgetGloballyOff(id); }
 function isCEO(){ const u = currentUser(); return !!u && u.role==='ceo'; }
 // Who may create a workstream: admins, the CEO and HODs.
 function canCreateProject(){ const u = currentUser(); return !!u && ['admin','ceo','hod'].includes(u.role); }
@@ -2152,7 +2167,7 @@ function renderWorkstreamWidgets(m){
     wg_empty5: emptyWidgetCard('wg_empty5'), wg_empty6: emptyWidgetCard('wg_empty6'),
   };
   const order = (cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER;
-  const enabled = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
+  const enabled = new Set((cu && cu.role!=='admin' && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER); // admin: only the workspace-wide switches apply
   const orderedHtml = order.filter(id=>enabled.has(id) && widgetAllowed(id)).map(id=>widgetsById[id]).filter(Boolean);
   if(!orderedHtml.length){
     return `<div class="muted" style="font-size:13px;padding:20px;text-align:center;">All widgets are turned off. Turn some back on from My Account &gt; Widgets.</div>`;
@@ -3599,8 +3614,15 @@ function wsGroupsOf(title){ return [...new Set(state.projects.filter(p=>(p.title
 function canonTitle(raw){ const v=(raw||'').trim(); if(!v) return ''; return wsTitles().find(t=>t.toLowerCase()===v.toLowerCase()) || v; }
 function canonGroup(title, raw){ const v=(raw||'').trim(); if(!title||!v) return ''; return wsGroupsOf(title).find(g=>g.toLowerCase()===v.toLowerCase()) || v; }
 // Company picker for create/edit workstream — only shown once there are 2+ companies.
+// Company that new things get when the choice isn't shown: the user's only company, else the first.
+function defaultNewCompanyId(){
+  const ids = userCompanyIds(currentUser());
+  if(multiCompany() && ids.length===1) return ids[0];
+  return companiesList()[0] ? companiesList()[0].id : undefined;
+}
+// The Company choice is only offered when the person can use two or more companies.
 function companyFieldHTML(pf, selectedId, what){
-  if(!multiCompany()) return '';
+  if(!multiCompany() || userCompanyIds(currentUser()).length < 2) return '';
   const ids = userCompanyIds(currentUser());
   const opts = companiesList().filter(c=>ids.includes(c.id) || c.id===selectedId);
   return `<div class="field"><label>Company</label>
@@ -5483,7 +5505,7 @@ function openNameNodeModal(parentId, nodeType){
     const node = { id: uid('node'), name: trimmedName, nodeType, parentId, order: nextOrderFor(parentId), contentItems: [], description: document.getElementById('nodeDescInput').value.trim(),
       specialView: (nodeType==='heading' && trimmedName.toLowerCase()==='attendance') ? 'attendance' : null };
     if(nnCo) node.companyId = nnCo.value;
-    else if(isRepoNodeId(parentId) && (nodeType==='heading'||nodeType==='subheading') && companiesList()[0]) node.companyId = companiesList()[0].id;
+    else if(isRepoNodeId(parentId) && (nodeType==='heading'||nodeType==='subheading') && defaultNewCompanyId()) node.companyId = defaultNewCompanyId();
     state.featureNodes.push(node);
     persist(); closeModal(); render();
   });
@@ -6022,7 +6044,7 @@ function openAddContentModal(headingId){
     if(!h) return;
     const ciCoEl = document.getElementById('ciCompany');
     if(ciCoEl && !ciCoEl.value){ errEl.textContent = 'Select the company this content is for.'; return; }
-    const ciCo = ciCoEl ? ciCoEl.value : ((isRepoNodeId(headingId) && companiesList()[0]) ? companiesList()[0].id : null);
+    const ciCo = ciCoEl ? ciCoEl.value : ((isRepoNodeId(headingId) && defaultNewCompanyId()) ? defaultNewCompanyId() : null);
     const coProp = ciCo ? {companyId: ciCo} : {};
     if(!Array.isArray(h.contentItems)) h.contentItems = [];
 
@@ -8144,8 +8166,12 @@ function renderMyAccount(){
     {id:'maroon', name:'Maroon', desc:'A deep, formal maroon.', swatch:'#7A1F2B'},
     {id:'brown', name:'Dark Brown', desc:'A warm, understated brown.', swatch:'#4A3728'}
   ];
-  const widgetOrder = ((cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER).filter(id=> widgetAllowed(id));
-  const enabledSet = new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
+  const adminView = !!cu && cu.role==='admin';
+  // Admin sees every widget (to switch it on or off for everyone); everyone else only sees the ones still on.
+  const widgetOrder = ((cu && cu.dashboardWidgetOrder) || DEFAULT_DASHBOARD_WIDGET_ORDER).filter(id=> adminView ? widgetAllowedByRole(id) : widgetAllowed(id));
+  const enabledSet = adminView
+    ? new Set(DEFAULT_DASHBOARD_WIDGET_ORDER.filter(id=>!widgetGloballyOff(id)))
+    : new Set((cu && cu.dashboardWidgetsEnabled) || DEFAULT_DASHBOARD_WIDGET_ORDER);
   const widgetCards = widgetOrder.map(id=>{
     const meta = DASHBOARD_WIDGET_META[id] || {};
     const isOn = enabledSet.has(id);
@@ -8194,10 +8220,9 @@ function renderMyAccount(){
     <div class="card">
       <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Widgets</div>
       <div class="muted" style="font-size:12px;margin-bottom:14px;">
-        These appear on your Workspace Dashboard, on the Focus Area page. Turn any of them on or off — this only
-        affects what you see, not anyone else. Drag a row to reorder it; your dashboard will match. Currently 10
-        exist; as more get built, admins will choose which ones are on by default for anyone who hasn't customized
-        their own set yet.
+        ${adminView
+          ? `These appear on the Workspace Dashboard, on the Focus Area page. <b>As admin, turning a widget off here turns it off for everyone</b> — it disappears from every user's dashboard and from their widget list. Turn it back on and it returns for everyone. Drag a card to reorder; your own dashboard will match.`
+          : `These appear on your Workspace Dashboard, on the Focus Area page. Turn any of them on or off — this only affects what you see, not anyone else. Drag a card to reorder it; your dashboard will match. Widgets your admin has switched off are not listed.`}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:14px;">${widgetCards}</div>
     </div>
@@ -8220,6 +8245,14 @@ function bindMyAccount(){
       const cu = currentUser();
       if(!cu) return;
       const id = input.dataset.widgetToggle;
+      if(cu.role==='admin'){
+        if(!Array.isArray(state.settings.disabledWidgets)) state.settings.disabledWidgets = [];
+        const dis = state.settings.disabledWidgets;
+        if(input.checked){ state.settings.disabledWidgets = dis.filter(w=>w!==id); }
+        else if(!dis.includes(id)){ dis.push(id); }
+        persist(); render();
+        return;
+      }
       if(!Array.isArray(cu.dashboardWidgetsEnabled)) cu.dashboardWidgetsEnabled = DEFAULT_DASHBOARD_WIDGET_ORDER.slice();
       if(input.checked){
         if(!cu.dashboardWidgetsEnabled.includes(id)) cu.dashboardWidgetsEnabled.push(id);
@@ -8357,7 +8390,13 @@ function renderAdminUsers(){
     const isViewer = u.role==='viewer';
     const isAdminRow = u.role==='admin';
     const accessLabel = isViewer ? (u.viewerProjectIds==='all' ? 'All workstreams' : `${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length} workstream${(Array.isArray(u.viewerProjectIds)?u.viewerProjectIds:[]).length===1?'':'s'}`) : '—';
+    const nonAdminOrder = state.users.filter(x=>x.role!=='admin');
+    const pos = nonAdminOrder.findIndex(x=>x.id===u.id);
+    const moveCell = (isAdminRow || uq) ? `<td></td>` : `<td style="white-space:nowrap;width:64px;">
+        <button class="btn btn-sm btn-ghost" data-move-user="${u.id}|up" ${pos<=0?'disabled':''} data-tooltip="Move up" aria-label="Move up">▲</button><button class="btn btn-sm btn-ghost" data-move-user="${u.id}|down" ${pos>=nonAdminOrder.length-1?'disabled':''} data-tooltip="Move down" aria-label="Move down">▼</button>
+      </td>`;
     return `<tr>
+      ${moveCell}
       <td><div class="userchip"><div class="initials">${initials(u.name)}</div>${u.name}</div></td>
       <td class="mono" style="font-size:12px;">${u.username}</td>
       <td>${isAdminRow ? pill('amber','Admin') : isViewer ? pill('amber','Viewer') : `
@@ -8391,9 +8430,10 @@ function renderAdminUsers(){
         </div>
         <button class="btn btn-primary btn-sm" data-add-user>+ Create user</button>
       </div>
+      <div class="hint" style="margin:-4px 0 12px;">${uq ? 'Clear the search to reorder people.' : 'Use ▲ ▼ to set the order people appear in — it is the same order used in Attendance and Appraisal.'}</div>
       <table>
-        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team</th><th>Access</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty-state">${uq ? 'No one matches your search.' : 'No users yet.'}</td></tr>`}</tbody>
+        <thead><tr><th data-tooltip="Order used in Attendance and Appraisal"></th><th>Name</th><th>Username</th><th>Role</th><th>Team</th><th>Access</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty-state">${uq ? 'No one matches your search.' : 'No users yet.'}</td></tr>`}</tbody>
       </table>
     </div>`;
 }
@@ -8713,6 +8753,18 @@ function bindAdmin(){
     }, 'Remove');
   }));
 
+  document.querySelectorAll('[data-move-user]').forEach(b=>b.addEventListener('click', ()=>{
+    const [id, dir] = b.dataset.moveUser.split('|');
+    const idxs = [];
+    state.users.forEach((u,i)=>{ if(u.role!=='admin') idxs.push(i); });
+    const k = idxs.findIndex(i=>state.users[i].id===id);
+    const k2 = dir==='up' ? k-1 : k+1;
+    if(k<0 || k2<0 || k2>=idxs.length) return;
+    const a = idxs[k], c = idxs[k2];
+    const tmp = state.users[a]; state.users[a] = state.users[c]; state.users[c] = tmp;
+    const y = window.scrollY;
+    persist(); render(); window.scrollTo(0, y);
+  }));
   const userSearch = document.getElementById('adminUserSearch');
   if(userSearch) userSearch.addEventListener('input', ()=>{
     ui.adminUserSearch = userSearch.value;
@@ -9605,7 +9657,7 @@ function openAddProjectModal(){
       }
     }
     const taggedUserIds = getMultiSelectValues('pTag');
-    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, createdById: (currentUser()||{}).id || null, companyId: (document.getElementById('pCompany') ? document.getElementById('pCompany').value : (companiesList()[0] ? companiesList()[0].id : undefined)), contentItems: contentItem ? [contentItem] : [], priority: 'medium', ...(()=>{ const tg=readTitleGroupFields('p'); const o={}; if(tg.title) o.title=tg.title; if(tg.group) o.group=tg.group; return o; })() };
+    const p = { id: uid('proj'), name: nameEl.value.trim(), startDate: startEl.value, createdAt: todayISO(), requireChecklist: document.getElementById('pRequireChecklist').checked, description: document.getElementById('pDescription').value.trim(), taggedUserIds, createdById: (currentUser()||{}).id || null, companyId: (document.getElementById('pCompany') ? document.getElementById('pCompany').value : defaultNewCompanyId()), contentItems: contentItem ? [contentItem] : [], priority: 'medium', ...(()=>{ const tg=readTitleGroupFields('p'); const o={}; if(tg.title) o.title=tg.title; if(tg.group) o.group=tg.group; return o; })() };
     state.projects.push(p); persist(); closeModal();
     ui.projectId = p.id; ui.view='project'; render();
   });

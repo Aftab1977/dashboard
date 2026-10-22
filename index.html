@@ -1572,7 +1572,9 @@ async function reconcileWithStorage(){
       }catch(e){ /* no legacy data to recover, that's fine */ }
     }
 
-    if(isValidState(parsedState) && stillOnFreshLogin()){
+    if(isValidState(parsedState)){
+      // Real saved data was found and is now what's on screen — from here on it is safe to save.
+      serverStateConfirmed = true;
       try{
         state = normalizeState(parsedState);
       }catch(normErr){
@@ -1586,6 +1588,10 @@ async function reconcileWithStorage(){
         const migrationMsg = 'A data-migration step hit an error and was skipped: ' + describeError(normErr) + '. Your saved data is still intact — this only means the newest features may not show correctly until this is fixed.';
         ui.migrationError = migrationMsg;
         ui.loginError = migrationMsg;
+      }
+      if(session.userId && !state.users.find(u=>u.id===session.userId)){
+        // the person had signed in against starter data while the real data was still loading
+        session = { userId:null }; ui.view = 'login';
       }
       if(parsedSession && typeof parsedSession==='object' && parsedSession.userId && state.users.find(u=>u.id===parsedSession.userId)){
         session = parsedSession;
@@ -1602,11 +1608,36 @@ async function reconcileWithStorage(){
       }
       render();
       persist(); // ensures a migrated legacy state gets written into the shared bucket right away
+    } else if(!isValidState(parsedState) && !stateFetchFailed && stateRes && stateRes.value){
+      // A row EXISTS but couldn't be understood — never write over it.
+      const msg = 'Your saved data was found but could not be read, so saving is switched off to protect it. Nothing was changed. Please contact support before making any changes.';
+      ui.saveError = msg; ui.loginError = msg;
+      render();
     } else if(!isValidState(parsedState) && !stateFetchFailed){
-      // Only safe to treat this as "genuinely nothing saved yet" when the fetch itself
-      // definitely succeeded and found no row — never when the fetch failed, since a
-      // failure tells us nothing about whether real data exists.
-      persist();
+      // The database said "no row". Right after a project wakes from a pause that answer can be
+      // wrong for a moment, so ask again twice before believing it. Only a consistent "nothing
+      // here" (a genuinely brand-new workspace) is allowed to start saving.
+      let found = null, recheckFailed = false;
+      for(let i=0; i<2 && !found && !recheckFailed; i++){
+        await new Promise(r=>setTimeout(r,1500));
+        try{
+          const r2 = await withTimeout(storageAdapter.get(STORAGE_KEY), 4000);
+          if(r2 && r2.value){ const p2 = JSON.parse(r2.value); if(isValidState(p2)) found = p2; else recheckFailed = true; }
+        }catch(e){ recheckFailed = true; }
+      }
+      if(found){
+        serverStateConfirmed = true;
+        state = normalizeState(found);
+        if(session.userId && !state.users.find(u=>u.id===session.userId)){ session = { userId:null }; ui.view = 'login'; }
+        render();
+      } else if(recheckFailed){
+        const msg = 'Could not confirm your saved data this time, so saving is switched off to protect it. Nothing was changed — refresh to try again.';
+        ui.saveError = msg; ui.loginError = msg;
+        render();
+      } else {
+        serverStateConfirmed = true;
+        persist();
+      }
     } else if(stateFetchFailed){
       // The fetch failed — do NOT touch Supabase. Show an error and leave whatever is
       // there completely alone; refreshing (once connectivity is fine) will find it.
@@ -1640,9 +1671,18 @@ function describeError(e){
 // used to be able to finish out of order over the network, letting an earlier, staler
 // write overwrite a later, more complete one. Chaining removes that race entirely.
 let persistChain = Promise.resolve();
+// Saving is allowed only once the page has confirmed what is really stored: either it loaded the
+// saved data, it confirmed (three times) that this is a brand-new empty workspace, or an admin
+// deliberately restored/reset it. Until then a save could overwrite real data with starter data.
+let serverStateConfirmed = false;
 function persist(){
   persistChain = persistChain.then(async ()=>{
     if(!HAS_STORAGE) return;
+    if(!serverStateConfirmed){
+      const msg = 'Saving is paused because your saved data has not finished loading. Nothing was changed. Refresh the page to try again.';
+      if(ui.saveError !== msg){ ui.saveError = msg; try{ render(); }catch(e){} }
+      return;
+    }
     try{
       await storageAdapter.set(STORAGE_KEY, JSON.stringify(state));
       if(ui.saveError){ ui.saveError = null; render(); }
@@ -3135,6 +3175,7 @@ function bindLogin(){
   const resetBtn = document.getElementById('resetDataBtn');
   if(resetBtn){
     resetBtn.addEventListener('click', async ()=>{
+      serverStateConfirmed = true; // deliberate, button-triggered reset
       state = seedState();
       session = { userId:null };
       try{ await persist(); }catch(e){}
@@ -8494,6 +8535,20 @@ function renderAdminSettings(){
         </div>
       </div>
     </div>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac1};">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div class="section-title" style="display:inline-block;margin-bottom:6px;background:${ac1};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Backup &amp; restore</div>
+          <div class="muted" style="font-size:12px;">Download a copy of all your workspace data to your computer, or restore from a copy you downloaded earlier. Keep the file private — it contains names, passwords and salaries.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="file" id="restoreBackupInput" accept=".json,application/json" style="display:none;">
+          <button class="btn btn-sm" id="downloadBackupBtn">Download backup</button>
+          <button class="btn btn-sm btn-danger" id="restoreBackupBtn">Restore from file</button>
+        </div>
+      </div>
+      <div class="login-error" id="backupMsg"></div>
+    </div>
     <div class="card" style="margin-bottom:16px;border-left:4px solid ${ac4};">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div class="section-title" style="display:inline-block;margin-bottom:0;background:${ac4};color:#fff;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:${acGlow};">Workspace Copilot Details</div>
@@ -8810,6 +8865,51 @@ function bindAdmin(){
   }));
   const recoverBtn = document.getElementById('recoverLegacyBtn');
   if(recoverBtn) recoverBtn.addEventListener('click', checkForLegacyData);
+  const backupMsg = (t, ok)=>{ const el = document.getElementById('backupMsg'); if(el){ el.textContent = t; el.style.display = t ? 'block' : 'none'; el.style.color = ok ? 'var(--green, #1a7f37)' : ''; } };
+  const downloadBackupBtn = document.getElementById('downloadBackupBtn');
+  if(downloadBackupBtn) downloadBackupBtn.addEventListener('click', ()=>{
+    if(!serverStateConfirmed){ backupMsg('Your saved data has not finished loading, so a backup would not be reliable. Refresh the page first.', false); return; }
+    try{
+      const blob = new Blob([JSON.stringify(state)], { type:'application/json' });
+      const a = document.createElement('a');
+      const d = new Date(); const pad = n=>String(n).padStart(2,'0');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'workspace-backup-' + d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+      backupMsg('Backup downloaded. Keep the file somewhere safe and private.', true);
+    }catch(e){ backupMsg('Could not create the backup: ' + describeError(e), false); }
+  });
+  const restoreBackupBtn = document.getElementById('restoreBackupBtn');
+  const restoreBackupInput = document.getElementById('restoreBackupInput');
+  if(restoreBackupBtn && restoreBackupInput){
+    restoreBackupBtn.addEventListener('click', ()=>{ restoreBackupInput.value = ''; restoreBackupInput.click(); });
+    restoreBackupInput.addEventListener('change', ()=>{
+      const f = restoreBackupInput.files && restoreBackupInput.files[0];
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        let parsed = null;
+        try{ parsed = JSON.parse(reader.result); }catch(e){}
+        if(!isValidState(parsed)){ backupMsg('That file is not a valid workspace backup, so nothing was changed.', false); return; }
+        openTypeToConfirmModal(
+          'Restore from backup',
+          'This replaces ALL current workspace data with the contents of "' + f.name + '" (' + parsed.users.length + ' users, ' + parsed.projects.length + ' workstreams, ' + parsed.tasks.length + ' tasks). Anything saved since that backup was taken will be lost.',
+          'RESTORE',
+          async ()=>{
+            serverStateConfirmed = true; // deliberate, type-to-confirm restore
+            state = normalizeState(parsed);
+            if(session.userId && !state.users.find(u=>u.id===session.userId)){ session = { userId:null }; ui.view = 'login'; try{ await persistSession(); }catch(e){} }
+            try{ await persist(); }catch(e){}
+            render();
+          }
+        );
+      };
+      reader.onerror = ()=> backupMsg('Could not read that file.', false);
+      reader.readAsText(f);
+    });
+  }
+
   const saveMaxUploadBtn = document.getElementById('saveMaxUploadBtn');
   if(saveMaxUploadBtn) saveMaxUploadBtn.addEventListener('click', ()=>{
     const v = Number(document.getElementById('maxUploadInput').value);
@@ -8868,6 +8968,7 @@ function bindAdmin(){
       'This will permanently erase every workstream, task, user, and record for everyone, and replace it with starter demo data. This cannot be undone.',
       'RESET',
       async ()=>{
+        serverStateConfirmed = true; // deliberate, type-to-confirm reset
         state = seedState();
         session = { userId:null };
         try{ await persist(); }catch(e){}

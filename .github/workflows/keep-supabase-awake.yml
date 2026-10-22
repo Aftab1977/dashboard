@@ -1,0 +1,28 @@
+name: Keep Supabase awake
+
+# Pings the Supabase database every 3 days so the free project is never paused for inactivity.
+on:
+  schedule:
+    - cron: "17 3 */3 * *"   # every 3 days, 03:17 UTC
+  workflow_dispatch: {}        # lets you run it by hand from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query the database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -e
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Missing SUPABASE_URL or SUPABASE_ANON_KEY secret"; exit 1
+          fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/app_storage?select=key&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "Supabase responded: $code"
+          # 200 = ok. 401/403 still counts as activity, but means the key or access rules need a look.
+          if [ "$code" != "200" ] && [ "$code" != "401" ] && [ "$code" != "403" ]; then exit 1; fi

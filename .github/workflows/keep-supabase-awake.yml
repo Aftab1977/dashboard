@@ -1,16 +1,18 @@
-name: Keep Supabase awake
+name: Keep Supabase awake and back it up
 
-# Pings the Supabase database every 3 days so the free project is never paused for inactivity.
+# Every night this (1) pings the database so the free project is never paused, and
+# (2) saves an ENCRYPTED copy of all workspace data as a private download on the Actions run.
+# Copies are kept for 30 days. Nothing is written into the repository itself.
 on:
   schedule:
-    - cron: "17 3 */3 * *"   # every 3 days, 03:17 UTC
-  workflow_dispatch: {}        # lets you run it by hand from the Actions tab
+    - cron: "17 21 * * *"   # every day, 21:17 UTC (02:47 IST)
+  workflow_dispatch: {}      # lets you run it by hand from the Actions tab
 
 jobs:
-  ping:
+  backup:
     runs-on: ubuntu-latest
     steps:
-      - name: Query the database
+      - name: Read the workspace data
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -19,10 +21,30 @@ jobs:
           if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
             echo "Missing SUPABASE_URL or SUPABASE_ANON_KEY secret"; exit 1
           fi
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-            "$SUPABASE_URL/rest/v1/app_storage?select=key&limit=1" \
+          code=$(curl -s -o response.json -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/app_storage?key=eq.controlroom_state_v1&select=value" \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY")
           echo "Supabase responded: $code"
-          # 200 = ok. 401/403 still counts as activity, but means the key or access rules need a look.
-          if [ "$code" != "200" ] && [ "$code" != "401" ] && [ "$code" != "403" ]; then exit 1; fi
+          if [ "$code" != "200" ]; then exit 1; fi
+          jq -r '.[0].value // empty' response.json > workspace-backup.json
+          if [ ! -s workspace-backup.json ]; then echo "No workspace data found - failing so you get an email"; exit 1; fi
+          echo "Users in this backup: $(jq '.users | length' workspace-backup.json)"
+          echo "Workstreams: $(jq '.projects | length' workspace-backup.json), tasks: $(jq '.tasks | length' workspace-backup.json)"
+          rm response.json
+
+      - name: Encrypt the backup
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -e
+          if [ -z "$BACKUP_PASSPHRASE" ]; then echo "Missing BACKUP_PASSPHRASE secret"; exit 1; fi
+          openssl enc -aes-256-cbc -pbkdf2 -salt -in workspace-backup.json -out workspace-backup.json.enc -pass env:BACKUP_PASSPHRASE
+          rm workspace-backup.json
+
+      - name: Keep the encrypted copy for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-backup-${{ github.run_number }}
+          path: workspace-backup.json.enc
+          retention-days: 30

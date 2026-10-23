@@ -652,6 +652,34 @@ const ROLE_INFO = [
 ];
 const USER_ASSIGNABLE_ROLES = ROLE_INFO.filter(r=>r.id!=='admin');
 // Admin is not offered when creating users, and the cards on the Roles page keep Admin first.
+// ---- Module on/off switches (My Account → Modules) ----
+// Admin: switching a module off hides it for everyone (state.settings.disabledModules).
+// Everyone else: switching a module off only hides it for that person (user.hiddenModules).
+// Only top-level modules are switchable; Copilot and Workspace Search have their own controls.
+const MODULE_TOGGLE_EXCLUDED = ['feat_ai_agent','feat_workspace_search'];
+const MODULE_TOGGLE_COLORS = {
+  feat_workstream:'#4C8DFF', feat_assignments:'#E91E8C', feat_summary:'#33A85C', feat_reports:'#CC5500',
+  feat_kr:'#16A085', feat_fai:'#F5A623', feat_hr:'#9B59B6', feat_spend:'#DD5147'
+};
+const MODULE_TOGGLE_DESCRIPTIONS = {
+  feat_summary:'Daily and weekly summaries of what moved across your workstreams.',
+  feat_workstream:'Workstreams, their tasks and progress.',
+  feat_assignments:'Who is working on what across the team.',
+  feat_reports:'Reports on workstreams, tasks and delays.',
+  feat_kr:'Documents, links and knowledge, organised by company.',
+  feat_fai:'Reminders and the World Clock.',
+  feat_hr:'Attendance, Appraisal and Policies.',
+  feat_spend:'Company spend and expenses.'
+};
+function moduleGloballyOff(id){ return !!(state && state.settings && Array.isArray(state.settings.disabledModules) && state.settings.disabledModules.includes(id)); }
+function moduleHiddenByMe(id){ const u = currentUser(); return !!u && u.role!=='admin' && Array.isArray(u.hiddenModules) && u.hiddenModules.includes(id); }
+function rootModuleIdOf(nodeId){ const p = featureNodePath(nodeId); return p.length ? p[0].id : nodeId; }
+// True when the module this node belongs to has been switched off (by the admin for everyone, or by this person for themselves).
+function moduleSwitchedOff(nodeId){
+  const r = rootModuleIdOf(nodeId);
+  if(MODULE_TOGGLE_EXCLUDED.includes(r)) return false;
+  return moduleGloballyOff(r) || moduleHiddenByMe(r);
+}
 const DASHBOARD_WIDGET_META = {
   wg_active: { label:'Active Workstreams', module:'Workstreams', moduleId:'feat_workstream',
     description:'Shows how many of your visible, active workstreams there are right now, plus the average time it takes a workstream to go from open to closed, and whether that average is trending up or down compared to last quarter.' },
@@ -1710,6 +1738,8 @@ function isAdmin(){ const u = currentUser(); return u && u.role==='admin'; }
 // Today's Attendance are for HOD, Admin and CEO only.
 function widgetAllowedByRole(id){
   const u = currentUser();
+  const wm = DASHBOARD_WIDGET_META[id];
+  if(wm && wm.moduleId && moduleSwitchedOff(wm.moduleId)) return false; // its module is switched off
   if(id==='wg_spend') return isAdmin();
   if(id==='wg_capacity' || id==='wg_attendance') return !!u && ['admin','ceo','hod'].includes(u.role);
   return true;
@@ -3933,6 +3963,11 @@ function hasNodeAccessOrDescendant(userId, nodeId){
 }
 // The single check to use anywhere a node's visibility matters — admins always pass.
 function canSeeNode(nodeId){
+  if(moduleSwitchedOff(nodeId)) return false;
+  return canSeeNodeBase(nodeId);
+}
+// Access only (ignores the on/off switches) — used to decide which modules to list in My Account.
+function canSeeNodeBase(nodeId){
   if(isAdmin()) return true;
   // Appraisal (salary details) is for Admin and CEO only — hidden from everyone else.
   const apNode = featureNode(nodeId);
@@ -8233,6 +8268,26 @@ function renderMyAccount(){
       </div>
     </div>`;
   }).join('');
+  const moduleRoots = state.featureNodes.filter(n=>n.parentId===null && !MODULE_TOGGLE_EXCLUDED.includes(n.id)).sort((a,b)=>(a.order||0)-(b.order||0))
+    .filter(n=> adminView ? true : (!moduleGloballyOff(n.id) && canSeeNodeBase(n.id)));
+  const moduleCards = moduleRoots.map(n=>{
+    const isOn = adminView ? !moduleGloballyOff(n.id) : !moduleHiddenByMe(n.id);
+    const color = MODULE_TOGGLE_COLORS[n.id] || 'var(--amber)';
+    return `
+    <div style="flex:0 0 275px;width:275px;min-height:130px;display:flex;flex-direction:column;background:var(--panel);border:1px solid rgba(30,35,60,.16);border-radius:12px;box-shadow:var(--card-shadow);overflow:hidden;">
+      <div style="height:4px;background:${color};flex-shrink:0;"></div>
+      <div style="padding:14px;display:flex;flex-direction:column;flex:1;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">
+          <div style="font-size:14.5px;font-weight:700;color:var(--paper);">${escAttr(n.name)}</div>
+          <label class="toggle-switch" style="flex-shrink:0;">
+            <input type="checkbox" data-module-toggle="${n.id}" ${isOn?'checked':''}>
+            <div class="toggle-track"></div>
+          </label>
+        </div>
+        <div class="muted" style="font-size:12px;line-height:1.55;">${escAttr(MODULE_TOGGLE_DESCRIPTIONS[n.id] || '')}</div>
+      </div>
+    </div>`;
+  }).join('');
   return `
     ${renderPageHero('My Account', cu ? cu.name : '')}
     <div class="card" style="margin-bottom:16px;">
@@ -8258,6 +8313,15 @@ function renderMyAccount(){
         }).join('')}
       </div>
     </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Modules</div>
+      <div class="muted" style="font-size:12px;margin-bottom:14px;">
+        ${adminView
+          ? `These are the modules on the Focus Area page. <b>As admin, turning a module off here turns it off for everyone</b> — it disappears from every user's Focus Area, and so do its dashboard widgets. Turn it back on and it returns for everyone. Nothing inside the module is deleted.`
+          : `These are the modules you have access to. Turn any of them off to hide it from your own Focus Area — this only affects what you see, not anyone else. Modules your admin has switched off are not listed.`}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;">${moduleCards || '<div class="muted" style="font-size:12px;">No modules available.</div>'}</div>
+    </div>
     <div class="card">
       <div class="section-title" style="display:inline-block;margin-bottom:10px;background:var(--amber);color:#fff;padding:8px 18px;border-radius:9px;font-size:16px;font-weight:700;text-transform:none;letter-spacing:normal;box-shadow:0 2px 8px var(--amber-glow);">Widgets</div>
       <div class="muted" style="font-size:12px;margin-bottom:14px;">
@@ -8279,6 +8343,24 @@ function bindMyAccount(){
       try{ localStorage.setItem('lastLoginAccent', input.value); }catch(e){}
       persist();
       render();
+    });
+  });
+  document.querySelectorAll('[data-module-toggle]').forEach(input=>{
+    input.addEventListener('change', ()=>{
+      const cu = currentUser();
+      if(!cu) return;
+      const id = input.dataset.moduleToggle;
+      if(cu.role==='admin'){
+        if(!state.settings) state.settings = {};
+        if(!Array.isArray(state.settings.disabledModules)) state.settings.disabledModules = [];
+        if(input.checked){ state.settings.disabledModules = state.settings.disabledModules.filter(m=>m!==id); }
+        else if(!state.settings.disabledModules.includes(id)){ state.settings.disabledModules.push(id); }
+      } else {
+        if(!Array.isArray(cu.hiddenModules)) cu.hiddenModules = [];
+        if(input.checked){ cu.hiddenModules = cu.hiddenModules.filter(m=>m!==id); }
+        else if(!cu.hiddenModules.includes(id)){ cu.hiddenModules.push(id); }
+      }
+      persist(); render();
     });
   });
   document.querySelectorAll('[data-widget-toggle]').forEach(input=>{
